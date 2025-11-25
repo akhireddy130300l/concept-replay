@@ -21,6 +21,7 @@ export type Database = {
           id: string
           learned_date: string
           next_revision_date: string
+          revision_count: number | null
           title: string
           user_id: string
         }
@@ -30,6 +31,7 @@ export type Database = {
           id?: string
           learned_date?: string
           next_revision_date: string
+          revision_count?: number | null
           title: string
           user_id: string
         }
@@ -39,6 +41,7 @@ export type Database = {
           id?: string
           learned_date?: string
           next_revision_date?: string
+          revision_count?: number | null
           title?: string
           user_id?: string
         }

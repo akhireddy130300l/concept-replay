@@ -85,13 +85,15 @@ const Dashboard = () => {
     try {
       const learnedDate = new Date();
       const nextRevisionDate = new Date();
-      nextRevisionDate.setDate(nextRevisionDate.getDate() + 30); // First revision after 30 days
+      // Psychology-based spaced repetition: start with 1 day
+      nextRevisionDate.setDate(nextRevisionDate.getDate() + 1);
 
       const { error } = await supabase.from("learned_topics").insert({
         title: newTopic,
         description: newDescription,
         learned_date: learnedDate.toISOString(),
         next_revision_date: nextRevisionDate.toISOString(),
+        revision_count: 0,
         user_id: user.id,
       });
 
