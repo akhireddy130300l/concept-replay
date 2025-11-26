@@ -146,19 +146,25 @@ serve(async (req) => {
       `;
 
       // Send email
-      const { error: emailError } = await resend.emails.send({
-        from: "LearnLoop <no-reply-reminder1@outlook.com>",
-        to: [userData.user.email],
-        subject: `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`,
-        html: emailContent,
-      });
+try {
+  const result = await resend.emails.send({
+    from: "LearnLoop <no-reply-reminder1@outlook.com>", // verified sender
+    to: [userData.user.email],
+    subject: `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`,
+    html: emailContent,
+  });
 
-      if (emailError) {
-        console.error("Error sending email:", emailError);
-        continue;
-      }
+  console.log("Resend API response:", result);
 
-      emailsSent++;
+  if (result.id) {
+    emailsSent++;
+  } else {
+    console.error("Email not sent, check Resend dashboard for errors.");
+  }
+} catch (err) {
+  console.error("Resend send failed:", err);
+}
+
 
       // Update next revision dates using psychology-based intervals
       for (const topic of topicsArray) {
