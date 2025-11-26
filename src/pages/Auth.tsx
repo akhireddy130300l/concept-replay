@@ -24,29 +24,20 @@ const Auth = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Check if this is a recovery link
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const type = hashParams.get('type');
-    
-    if (type === 'recovery') {
-      setIsRecoveryMode(true);
-      setIsForgotPassword(false);
-      setIsLogin(false);
-      return;
-    }
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session && !isRecoveryMode) {
-        navigate("/dashboard");
-      }
-    });
-
+    // Set up auth state listener first
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
         setIsRecoveryMode(true);
         setIsForgotPassword(false);
         setIsLogin(false);
-      } else if (session && !isRecoveryMode) {
+      } else if (session && event === 'SIGNED_IN' && !isRecoveryMode) {
+        navigate("/dashboard");
+      }
+    });
+
+    // Check for existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session && !isRecoveryMode) {
         navigate("/dashboard");
       }
     });
