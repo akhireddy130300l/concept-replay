@@ -148,7 +148,7 @@ serve(async (req) => {
       // Send email
 try {
   const result = await resend.emails.send({
-    from: "LearnLoop <no-reply-reminder1@outlook.com>", // verified sender
+    from: "LearnLoop <no-reply@learnloop.com>", // verified sender
     to: [userData.user.email],
     subject: `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`,
     html: emailContent,
