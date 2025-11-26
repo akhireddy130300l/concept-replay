@@ -149,7 +149,7 @@ serve(async (req) => {
 try {
   const result = await resend.emails.send({
     from: "LearnLoop <no-reply@learnloop.com>", // verified sender
-    to: ["no-reply-reminder1@outlook.com"],//to: [userData.user.email],
+    to: [userData.user.email],
     subject: `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`,
     html: emailContent,
   });
