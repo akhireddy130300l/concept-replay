@@ -147,7 +147,7 @@ serve(async (req) => {
 
       // Send email
       const { error: emailError } = await resend.emails.send({
-        from: "LearnLoop <onboarding@resend.dev>",
+        from: "LearnLoop <no-reply-reminder1@outlook.com>",
         to: [userData.user.email],
         subject: `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`,
         html: emailContent,
