@@ -12,10 +12,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Psychology-based spaced repetition intervals (in days)
 const REVISION_INTERVALS = [1, 3, 7, 14, 30, 60];
 
 async function generateTopicDescription(topic: string): Promise<string> {
+  console.log("Generating AI description for topic:", topic);
   try {
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -50,6 +50,7 @@ Keep it concise but informative (around 200-300 words).`,
     }
 
     const data = await response.json();
+    console.log("AI description generated successfully for topic:", topic);
     return data.choices[0].message.content;
   } catch (error) {
     console.error("Error generating description:", error);
@@ -58,15 +59,19 @@ Keep it concise but informative (around 200-300 words).`,
 }
 
 serve(async (req) => {
+  console.log("Request received at:", new Date().toISOString());
+
   if (req.method === "OPTIONS") {
+    console.log("OPTIONS request — returning CORS headers");
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    console.log("Initializing Supabase client...");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get all topics due for revision today
     const today = new Date().toISOString().split("T")[0];
+    console.log("Fetching topics due for revision on:", today);
     const { data: dueTopics, error: fetchError } = await supabase
       .from("learned_topics")
       .select("*")
@@ -77,44 +82,47 @@ serve(async (req) => {
       throw fetchError;
     }
 
+    console.log("Topics fetched:", dueTopics?.length || 0);
+
     if (!dueTopics || dueTopics.length === 0) {
+      console.log("No topics due today. Exiting.");
       return new Response(
         JSON.stringify({ message: "No topics due for revision today" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Group topics by user
     const topicsByUser = dueTopics.reduce((acc: any, topic: any) => {
-      if (!acc[topic.user_id]) {
-        acc[topic.user_id] = [];
-      }
+      if (!acc[topic.user_id]) acc[topic.user_id] = [];
       acc[topic.user_id].push(topic);
       return acc;
     }, {});
 
+    console.log("Topics grouped by user:", Object.keys(topicsByUser));
+
     let emailsSent = 0;
 
-    // Send emails to each user
     for (const [userId, topics] of Object.entries(topicsByUser)) {
+      console.log("Processing user:", userId, "with", topics.length, "topics");
       const topicsArray = topics as any[];
 
-      // Get user email
+      console.log("Fetching user email from Supabase...");
       const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
       if (userError || !userData?.user?.email) {
         console.error("Error fetching user:", userError);
         continue;
       }
+      const userEmail = userData.user.email;
+      console.log("User email:", userEmail);
 
-      // Generate AI descriptions for all topics
       const topicsWithDescriptions = await Promise.all(
-        topicsArray.map(async (topic) => ({
-          ...topic,
-          aiDescription: await generateTopicDescription(topic.title),
-        }))
+        topicsArray.map(async (topic) => {
+          const desc = await generateTopicDescription(topic.title);
+          console.log("Generated description for topic:", topic.title);
+          return { ...topic, aiDescription: desc };
+        })
       );
 
-      // Create email content
       const emailContent = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h1 style="color: #0891b2;">🧠 Time to Review Your Topics!</h1>
@@ -125,54 +133,41 @@ serve(async (req) => {
             <div style="background: #f0f9ff; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #0891b2;">
               <h2 style="color: #0891b2; margin-top: 0;">${topic.title}</h2>
               ${topic.description ? `<p style="color: #64748b; font-style: italic;">${topic.description}</p>` : ""}
-              <div style="margin-top: 15px; line-height: 1.6;">
-                ${topic.aiDescription}
-              </div>
-              <p style="color: #64748b; font-size: 12px; margin-top: 15px;">
-                Originally learned: ${new Date(topic.learned_date).toLocaleDateString()}
-              </p>
+              <div style="margin-top: 15px; line-height: 1.6;">${topic.aiDescription}</div>
+              <p style="color: #64748b; font-size: 12px; margin-top: 15px;">Originally learned: ${new Date(topic.learned_date).toLocaleDateString()}</p>
             </div>
           `
             )
             .join("")}
-          <p style="color: #64748b; margin-top: 30px;">
-            Keep up the great work! Regular reviews help solidify your knowledge.
-          </p>
-          <p style="color: #64748b;">
-            Best regards,<br>
-            LearnLoop Team
-          </p>
+          <p style="color: #64748b; margin-top: 30px;">Keep up the great work! Regular reviews help solidify your knowledge.</p>
+          <p style="color: #64748b;">Best regards,<br>LearnLoop Team</p>
         </div>
       `;
 
-const fromEmail = "no-reply-reminder1@outlook.com";
-const toEmail = "no-reply-reminder1@outlook.com";
+      const fromEmail = "no-reply-reminder1@outlook.com";
+      const toEmail = "no-reply-reminder1@outlook.com";
 
-console.log("Sending email with:");
-console.log("FROM:", fromEmail);
-console.log("TO:", toEmail);
+      console.log("Sending email with:");
+      console.log("FROM:", fromEmail);
+      console.log("TO:", toEmail);
+      console.log("SUBJECT:", `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`);
 
-try {
-  const result = await resend.emails.send({
-    from: fromEmail,
-    to: [toEmail],
-    subject: `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`,
-    html: emailContent,
-  });
+      try {
+        const result = await resend.emails.send({
+          from: fromEmail,
+          to: [toEmail],
+          subject: `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`,
+          html: emailContent,
+        });
+        console.log("Resend API response:", result);
 
-  console.log("Resend API response:", result);
+        if (result.id) emailsSent++;
+        else console.error("Email not sent, check Resend dashboard for errors.");
+      } catch (err) {
+        console.error("Resend send failed:", err);
+      }
 
-  if (result.id) {
-    emailsSent++;
-  } else {
-    console.error("Email not sent, check Resend dashboard for errors.");
-  }
-} catch (err) {
-  console.error("Resend send failed:", err);
-}
-
-
-      // Update next revision dates using psychology-based intervals
+      console.log("Updating next revision dates for topics...");
       for (const topic of topicsArray) {
         const currentCount = topic.revision_count || 0;
         const nextCount = currentCount + 1;
@@ -182,6 +177,7 @@ try {
         const nextRevisionDate = new Date();
         nextRevisionDate.setDate(nextRevisionDate.getDate() + daysUntilNext);
 
+        console.log(`Updating topic ${topic.id} next_revision_date to ${nextRevisionDate.toISOString()}`);
         await supabase
           .from("learned_topics")
           .update({
@@ -192,14 +188,10 @@ try {
       }
     }
 
+    console.log(`All users processed. Emails sent: ${emailsSent}`);
     return new Response(
-      JSON.stringify({
-        message: `Successfully sent ${emailsSent} reminder email(s)`,
-        topicsProcessed: dueTopics.length,
-      }),
-      {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      JSON.stringify({ message: `Successfully sent ${emailsSent} reminder email(s)`, topicsProcessed: dueTopics.length }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {
     console.error("Error in send-revision-reminders:", error);
