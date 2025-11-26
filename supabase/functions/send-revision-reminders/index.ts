@@ -145,14 +145,20 @@ serve(async (req) => {
         </div>
       `;
 
-      // Send email
+const fromEmail = "no-reply-reminder1@outlook.com";
+const toEmail = "no-reply-reminder1@outlook.com";
+
+console.log("Sending email with:");
+console.log("FROM:", fromEmail);
+console.log("TO:", toEmail);
+
 try {
- const result = await resend.emails.send({
-  from: "no-reply-reminder1@outlook.com",
-  to: ["no-reply-reminder1@outlook.com"],
-  subject: `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`,
-  html: emailContent,
-});
+  const result = await resend.emails.send({
+    from: fromEmail,
+    to: [toEmail],
+    subject: `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`,
+    html: emailContent,
+  });
 
   console.log("Resend API response:", result);
 
