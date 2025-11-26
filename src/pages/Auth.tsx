@@ -15,27 +15,44 @@ const passwordSchema = z.string().min(6, "Password must be at least 6 characters
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
+    // Check if this is a recovery link
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const type = hashParams.get('type');
+    
+    if (type === 'recovery') {
+      setIsRecoveryMode(true);
+      setIsForgotPassword(false);
+      setIsLogin(false);
+      return;
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
+      if (session && !isRecoveryMode) {
         navigate("/dashboard");
       }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true);
+        setIsForgotPassword(false);
+        setIsLogin(false);
+      } else if (session && !isRecoveryMode) {
         navigate("/dashboard");
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [navigate]);
+  }, [navigate, isRecoveryMode]);
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,6 +84,59 @@ const Auth = () => {
       
       setIsForgotPassword(false);
       setIsLogin(true);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const passwordValidation = passwordSchema.safeParse(password);
+    
+    if (!passwordValidation.success) {
+      toast({
+        title: "Invalid password",
+        description: passwordValidation.error.errors[0].message,
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (password !== confirmPassword) {
+      toast({
+        title: "Passwords don't match",
+        description: "Please make sure both passwords are the same.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: password,
+      });
+      
+      if (error) throw error;
+      
+      toast({
+        title: "Password updated",
+        description: "Your password has been successfully updated. You can now log in.",
+      });
+      
+      setIsRecoveryMode(false);
+      setIsLogin(true);
+      setPassword("");
+      setConfirmPassword("");
+      navigate("/dashboard");
     } catch (error: any) {
       toast({
         title: "Error",
@@ -173,10 +243,18 @@ const Auth = () => {
             </div>
           </div>
           <CardTitle className="text-2xl font-bold">
-            {isForgotPassword ? "Reset Password" : isLogin ? "Welcome Back" : "Create Account"}
+            {isRecoveryMode 
+              ? "Set New Password" 
+              : isForgotPassword 
+              ? "Reset Password" 
+              : isLogin 
+              ? "Welcome Back" 
+              : "Create Account"}
           </CardTitle>
           <CardDescription>
-            {isForgotPassword
+            {isRecoveryMode
+              ? "Enter your new password below"
+              : isForgotPassword
               ? "Enter your email to receive a password reset link"
               : isLogin
               ? "Sign in to continue your learning journey"
@@ -184,27 +262,42 @@ const Auth = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={isForgotPassword ? handleForgotPassword : handleAuth} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
+          <form onSubmit={isRecoveryMode ? handleResetPassword : isForgotPassword ? handleForgotPassword : handleAuth} className="space-y-4">
+            {!isRecoveryMode && (
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+            )}
             {!isForgotPassword && (
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{isRecoveryMode ? "New Password" : "Password"}</Label>
                 <Input
                   id="password"
                   type="password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+            {isRecoveryMode && (
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirm New Password</Label>
+                <Input
+                  id="confirmPassword"
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
                   required
                 />
               </div>
@@ -225,33 +318,43 @@ const Auth = () => {
               className="w-full bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-opacity"
               disabled={loading}
             >
-              {loading ? "Loading..." : isForgotPassword ? "Send Reset Link" : isLogin ? "Sign In" : "Sign Up"}
+              {loading 
+                ? "Loading..." 
+                : isRecoveryMode 
+                ? "Update Password" 
+                : isForgotPassword 
+                ? "Send Reset Link" 
+                : isLogin 
+                ? "Sign In" 
+                : "Sign Up"}
             </Button>
           </form>
-          <div className="mt-4 text-center text-sm">
-            {isForgotPassword ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setIsForgotPassword(false);
-                  setIsLogin(true);
-                }}
-                className="text-primary hover:underline"
-              >
-                Back to sign in
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setIsLogin(!isLogin)}
-                className="text-primary hover:underline"
-              >
-                {isLogin
-                  ? "Don't have an account? Sign up"
-                  : "Already have an account? Sign in"}
-              </button>
-            )}
-          </div>
+          {!isRecoveryMode && (
+            <div className="mt-4 text-center text-sm">
+              {isForgotPassword ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsForgotPassword(false);
+                    setIsLogin(true);
+                  }}
+                  className="text-primary hover:underline"
+                >
+                  Back to sign in
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsLogin(!isLogin)}
+                  className="text-primary hover:underline"
+                >
+                  {isLogin
+                    ? "Don't have an account? Sign up"
+                    : "Already have an account? Sign in"}
+                </button>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
