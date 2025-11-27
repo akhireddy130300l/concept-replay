@@ -32,30 +32,31 @@ async function generateTopicDescription(topic: string): Promise<string> {
           },
           {
             role: "user",
-            content: `Provide a revision-friendly explanation of: "${topic}".
-Return the FULL output in pure HTML only.
+            content: `Provide the explanation of topic "${topic}" ONLY in pure HTML.
+STRICT RULES:
+- Do NOT use Markdown.
+- Do NOT use **bold**, ## headings, *, -, or backticks.
+- Use only HTML tags like <h2>, <ul>, <li>, <p>, <strong>.
+- Structure sections as:
+  <h2>Definition and Key Concepts</h2>
+  <ul><li>...</li></ul>
 
-Format it using <h2>, <ul>, <li>, <strong>, and <p> tags — NO markdown.
+  <h2>How to Answer Questions About This Topic</h2>
+  <ul><li>...</li></ul>
 
-Structure:
-<h2>Definition & Key Concepts</h2>
-<ul><li>...</li></ul>
+  <h2>Common Interview Questions (with short answers)</h2>
+  <ul><li><strong>Q:</strong> ... <strong>A:</strong> ...</li></ul>
 
-<h2>How to Explain in an Interview</h2>
-<ul><li>...</li></ul>
+  <h2>Practical Applications</h2>
+  <ul><li>...</li></ul>
 
-<h2>Top Interview Questions</h2>
-<ul><li><strong>Q:</strong> ... <br/><strong>A:</strong> ...</li></ul>
+  <h2>Important Points to Remember</h2>
+  <ul><li>...</li></ul>
 
-<h2>Practical Applications & Examples</h2>
-<ul><li>...</li></ul>
+  <h2>Useful YouTube Videos</h2>
+  <ul><li><a href="LINK">Video Title</a></li></ul>
 
-<h2>Cheat Sheet</h2>
-<ul><li>...</li></ul>
-
-<h2>YouTube Videos links</h2>
-<ul><li><a href="...">Video</a></li></ul>
-.`,
+Return ONLY HTML.`,
           },
         ],
       }),
