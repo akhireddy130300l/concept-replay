@@ -70,12 +70,15 @@ serve(async (req) => {
     console.log("Initializing Supabase client...");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const today = new Date().toISOString().split("T")[0];
-    console.log("Fetching topics due for revision on:", today);
+    // Get end of today to catch all topics due today regardless of time
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+    const todayEnd = endOfToday.toISOString();
+    console.log("Fetching topics due for revision up to:", todayEnd);
     const { data: dueTopics, error: fetchError } = await supabase
       .from("learned_topics")
       .select("*")
-      .lte("next_revision_date", today);
+      .lte("next_revision_date", todayEnd);
 
     if (fetchError) {
       console.error("Error fetching topics:", fetchError);
@@ -145,8 +148,8 @@ serve(async (req) => {
       `;
 
       const fromEmail = "onboarding@resend.dev";
-      // Temporarily sending to Resend account owner for testing
-      const toEmail = "no-reply-reminder1@outlook.com";
+      // Send to actual user email (requires verified domain for production)
+      const toEmail = userEmail;
 
       console.log("Sending email with:");
       console.log("FROM:", fromEmail);
