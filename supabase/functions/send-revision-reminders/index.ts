@@ -28,7 +28,12 @@ async function generateTopicDescription(topic: string): Promise<string> {
         messages: [
           {
             role: "system",
-            content: "You are a helpful learning assistant. Provide comprehensive, clear explanations of topics to help with learning and retention.",
+            content: `
+You are an AI that must output ONLY valid HTML. 
+Never use Markdown. Never use **bold**, ##, *, -, backticks, or code fences.
+Your output must be 100% HTML with tags like <h2>, <p>, <ul>, <li>, <strong>, <a>.
+If the user asks anything, ALWAYS respond in pure HTML.
+            `,
           },
           {
             role: "user",
