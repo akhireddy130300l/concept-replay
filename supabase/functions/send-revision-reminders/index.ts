@@ -32,13 +32,32 @@ async function generateTopicDescription(topic: string): Promise<string> {
           },
           {
             role: "user",
-            content: `Provide a comprehensive explanation of: "${topic}". Include:
-1. A clear definition and key concepts
-2. How to answer questions about this topic
-3. Practical applications and examples
-4. Important points to remember
+            content: `Provide a clear revision-friendly explanation of: "${topic}".
 
-Keep it concise but informative (around 200-300 words).`,
+Your answer MUST follow this exact structure with bullet points only — no long paragraphs:
+
+1. **Definition & Key Concepts**
+   - Short, crisp explanation
+   - 3–5 key concepts
+
+2. **How to explain this in an interview**
+   - Give a simple 3–4 step framework
+
+3. **Top Interview Questions (5–7)**
+   - Q&A format
+   - Each answer 1–2 lines only
+
+4. **Practical Applications**
+   - 3–5 real-world use cases
+
+5. **Cheat Sheet**
+   - Quick must-remember points
+
+6. **Useful YouTube Videos**
+   - Provide 2–3 high-quality links
+
+Rules:
+- Keep it concise, clear, and optimized for daily revision`,
           },
         ],
       }),
