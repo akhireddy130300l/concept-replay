@@ -32,32 +32,30 @@ async function generateTopicDescription(topic: string): Promise<string> {
           },
           {
             role: "user",
-            content: `Provide a clear revision-friendly explanation of: "${topic}".
+            content: `Provide a revision-friendly explanation of: "${topic}".
+Return the FULL output in pure HTML only.
 
-Your answer MUST follow this exact structure with bullet points only — no long paragraphs:
+Format it using <h2>, <ul>, <li>, <strong>, and <p> tags — NO markdown.
 
-1. **Definition & Key Concepts**
-   - Short, crisp explanation
-   - 3–5 key concepts
+Structure:
+<h2>Definition & Key Concepts</h2>
+<ul><li>...</li></ul>
 
-2. **How to explain this in an interview**
-   - Give a simple 3–4 step framework
+<h2>How to Explain in an Interview</h2>
+<ul><li>...</li></ul>
 
-3. **Top Interview Questions (5–7)**
-   - Q&A format
-   - Each answer 1–2 lines only
+<h2>Top Interview Questions</h2>
+<ul><li><strong>Q:</strong> ... <br/><strong>A:</strong> ...</li></ul>
 
-4. **Practical Applications**
-   - 3–5 real-world use cases
+<h2>Practical Applications & Examples</h2>
+<ul><li>...</li></ul>
 
-5. **Cheat Sheet**
-   - Quick must-remember points
+<h2>Cheat Sheet</h2>
+<ul><li>...</li></ul>
 
-6. **Useful YouTube Videos**
-   - Provide 2–3 high-quality links
-
-Rules:
-- Keep it concise, clear, and optimized for daily revision`,
+<h2>YouTube Videos links</h2>
+<ul><li><a href="...">Video</a></li></ul>
+.`,
           },
         ],
       }),
