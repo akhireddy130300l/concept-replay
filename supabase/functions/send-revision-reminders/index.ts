@@ -145,7 +145,8 @@ serve(async (req) => {
       `;
 
       const fromEmail = "onboarding@resend.dev";
-      const toEmail = userEmail;
+      // Temporarily sending to Resend account owner for testing
+      const toEmail = "no-reply-reminder1@outlook.com";
 
       console.log("Sending email with:");
       console.log("FROM:", fromEmail);
