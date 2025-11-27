@@ -103,8 +103,8 @@ serve(async (req) => {
     let emailsSent = 0;
 
     for (const [userId, topics] of Object.entries(topicsByUser)) {
-      console.log("Processing user:", userId, "with", topics.length, "topics");
       const topicsArray = topics as any[];
+      console.log("Processing user:", userId, "with", topicsArray.length, "topics");
 
       console.log("Fetching user email from Supabase...");
       const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
@@ -144,8 +144,8 @@ serve(async (req) => {
         </div>
       `;
 
-      const fromEmail = "no-reply-reminder1@outlook.com";
-      const toEmail = "no-reply-reminder1@outlook.com";
+      const fromEmail = "onboarding@resend.dev";
+      const toEmail = userEmail;
 
       console.log("Sending email with:");
       console.log("FROM:", fromEmail);
@@ -161,8 +161,12 @@ serve(async (req) => {
         });
         console.log("Resend API response:", result);
 
-        if (result.id) emailsSent++;
-        else console.error("Email not sent, check Resend dashboard for errors.");
+        if (result.data?.id) {
+          emailsSent++;
+          console.log("Email sent successfully to:", toEmail);
+        } else {
+          console.error("Email not sent, response:", result.error);
+        }
       } catch (err) {
         console.error("Resend send failed:", err);
       }
