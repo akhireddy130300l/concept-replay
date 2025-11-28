@@ -93,15 +93,14 @@ serve(async (req) => {
     console.log("Initializing Supabase client...");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get end of today to catch all topics due today regardless of time
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
-    const todayEnd = endOfToday.toISOString();
-    console.log("Fetching topics due for revision up to:", todayEnd);
+    // Only fetch topics where revision time has actually passed (not future times today)
+    const now = new Date();
+    const currentTime = now.toISOString();
+    console.log("Fetching topics due for revision up to:", currentTime);
     const { data: dueTopics, error: fetchError } = await supabase
       .from("learned_topics")
       .select("*")
-      .lte("next_revision_date", todayEnd);
+      .lte("next_revision_date", currentTime);
 
     if (fetchError) {
       console.error("Error fetching topics:", fetchError);
