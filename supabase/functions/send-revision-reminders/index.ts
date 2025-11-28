@@ -49,14 +49,14 @@ STRICT RULES:
 <h2>Breif overview</h2>
 <ul><li>...</li></ul>
 
-<h2>Explaining this in an interview</h2>
+<h2>Explain this in an interview</h2>
+<ul><li>...</li></ul>
+
+<h2>Practical Applications</h2>
 <ul><li>...</li></ul>
 
 <h2>Common Interview Questions and with short answers</h2>
 <ul><li><strong>Q:</strong> ... <strong>A:</strong> ...</li></ul>
-
-<h2>Practical Applications</h2>
-<ul><li>...</li></ul>
 
 <h2>Important Points to Remember</h2>
 <ul><li>...</li></ul>
