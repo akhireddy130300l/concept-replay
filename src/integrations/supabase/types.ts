@@ -17,6 +17,7 @@ export type Database = {
       learned_topics: {
         Row: {
           created_at: string
+          deleted_at: string | null
           description: string | null
           id: string
           learned_date: string
@@ -27,6 +28,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          deleted_at?: string | null
           description?: string | null
           id?: string
           learned_date?: string
@@ -37,6 +39,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          deleted_at?: string | null
           description?: string | null
           id?: string
           learned_date?: string
