@@ -44,22 +44,22 @@ STRICT RULES:
 - Use only HTML tags like <h2>, <ul>, <li>, <p>, <strong>.
 - Structure sections as:
   <h2>Definition and Key Concepts</h2>
-  <ul><li>...</li></ul>
+<ul><li>...</li></ul>
 
-  <h2>How to Answer Questions About This Topic</h2>
-  <ul><li>...</li></ul>
+<h2>Breif overview</h2>
+<ul><li>...</li></ul>
 
-  <h2>Common Interview Questions (with short answers)</h2>
-  <ul><li><strong>Q:</strong> ... <strong>A:</strong> ...</li></ul>
+<h2>Explaining this in an interview</h2>
+<ul><li>...</li></ul>
 
-  <h2>Practical Applications</h2>
-  <ul><li>...</li></ul>
+<h2>Common Interview Questions and with short answers</h2>
+<ul><li><strong>Q:</strong> ... <strong>A:</strong> ...</li></ul>
 
-  <h2>Important Points to Remember</h2>
-  <ul><li>...</li></ul>
+<h2>Practical Applications</h2>
+<ul><li>...</li></ul>
 
-  <h2>Useful YouTube Videos</h2>
-  <ul><li><a href="LINK">Video Title</a></li></ul>
+<h2>Important Points to Remember</h2>
+<ul><li>...</li></ul>
 
 Return ONLY HTML.`,
           },
