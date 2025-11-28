@@ -149,23 +149,34 @@ serve(async (req) => {
       );
 
       const emailContent = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h1 style="color: #0891b2;">🧠 Time to Review Your Topics!</h1>
-          <p>Hello! Here are the topics due for revision today:</p>
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
+          <h1 style="color: #0891b2; font-size: 28px; margin-bottom: 10px; font-weight: 600;">🧠 Time to Review Your Topics!</h1>
+          <p style="color: #475569; font-size: 16px; line-height: 1.6; margin-bottom: 30px;">Hello! Here are the topics due for revision today:</p>
           ${topicsWithDescriptions
             .map(
               (topic) => `
-            <div style="background: #f0f9ff; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #0891b2;">
-              <h2 style="color: #0891b2; margin-top: 0;">${topic.title}</h2>
-              ${topic.description ? `<p style="color: #64748b; font-style: italic;">${topic.description}</p>` : ""}
-              <div style="margin-top: 15px; line-height: 1.6;">${topic.aiDescription}</div>
-              <p style="color: #64748b; font-size: 12px; margin-top: 15px;">Originally learned: ${new Date(topic.learned_date).toLocaleDateString()}</p>
+            <div style="background: #f8fafc; padding: 24px; margin: 24px 0; border-radius: 12px; border-left: 4px solid #0891b2; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+              <h2 style="color: #0f172a; font-size: 22px; margin: 0 0 12px 0; font-weight: 600;">${topic.title}</h2>
+              ${topic.description ? `<p style="color: #64748b; font-style: italic; font-size: 14px; margin-bottom: 16px; padding: 10px; background: #e0f2fe; border-radius: 6px;">${topic.description}</p>` : ""}
+              <div style="margin-top: 20px; line-height: 1.8; color: #334155; font-size: 15px;">
+                <style>
+                  h2 { color: #0891b2 !important; font-size: 18px !important; margin: 20px 0 10px 0 !important; font-weight: 600 !important; }
+                  h3 { color: #0f172a !important; font-size: 16px !important; margin: 16px 0 8px 0 !important; font-weight: 600 !important; }
+                  ul { margin: 12px 0 !important; padding-left: 24px !important; }
+                  li { margin: 8px 0 !important; line-height: 1.6 !important; }
+                  p { margin: 12px 0 !important; line-height: 1.6 !important; }
+                  strong { color: #0f172a !important; font-weight: 600 !important; }
+                  a { color: #0891b2 !important; text-decoration: none !important; }
+                </style>
+                ${topic.aiDescription}
+              </div>
+              <p style="color: #94a3b8; font-size: 13px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #e2e8f0;">📅 Originally learned: ${new Date(topic.learned_date).toLocaleDateString()}</p>
             </div>
           `
             )
             .join("")}
-          <p style="color: #64748b; margin-top: 30px;">Keep up the great work! Regular reviews help solidify your knowledge.</p>
-          <p style="color: #64748b;">Best regards,<br>LearnLoop Team</p>
+          <p style="color: #64748b; margin-top: 40px; font-size: 15px; line-height: 1.6;">Keep up the great work! Regular reviews help solidify your knowledge. 💪</p>
+          <p style="color: #94a3b8; font-size: 14px; margin-top: 20px;">Best regards,<br><strong style="color: #0891b2;">LearnLoop Team</strong></p>
         </div>
       `;
 
