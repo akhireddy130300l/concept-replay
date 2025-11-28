@@ -100,7 +100,8 @@ serve(async (req) => {
     const { data: dueTopics, error: fetchError } = await supabase
       .from("learned_topics")
       .select("*")
-      .lte("next_revision_date", currentTime);
+      .lte("next_revision_date", currentTime)
+      .is("deleted_at", null);
 
     if (fetchError) {
       console.error("Error fetching topics:", fetchError);

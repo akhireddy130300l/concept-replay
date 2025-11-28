@@ -6,8 +6,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Brain, LogOut, Plus, Calendar, BookOpen } from "lucide-react";
+import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Topic {
   id: string;
@@ -15,15 +25,20 @@ interface Topic {
   description: string;
   learned_date: string;
   next_revision_date: string;
+  deleted_at?: string | null;
 }
 
 const Dashboard = () => {
   const [user, setUser] = useState<any>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [deletedTopics, setDeletedTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
   const [newTopic, setNewTopic] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [adding, setAdding] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [topicToDelete, setTopicToDelete] = useState<string | null>(null);
+  const [showDeleted, setShowDeleted] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -50,13 +65,25 @@ const Dashboard = () => {
 
   const fetchTopics = async () => {
     try {
-      const { data, error } = await supabase
+      // Fetch active topics (not deleted)
+      const { data: activeData, error: activeError } = await supabase
         .from("learned_topics")
         .select("*")
+        .is("deleted_at", null)
         .order("learned_date", { ascending: false });
 
-      if (error) throw error;
-      setTopics(data || []);
+      if (activeError) throw activeError;
+      setTopics(activeData || []);
+
+      // Fetch deleted topics
+      const { data: deletedData, error: deletedError } = await supabase
+        .from("learned_topics")
+        .select("*")
+        .not("deleted_at", "is", null)
+        .order("deleted_at", { ascending: false });
+
+      if (deletedError) throw deletedError;
+      setDeletedTopics(deletedData || []);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -121,6 +148,40 @@ const Dashboard = () => {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate("/");
+  };
+
+  const handleDeleteClick = (topicId: string) => {
+    setTopicToDelete(topicId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!topicToDelete) return;
+
+    try {
+      const { error } = await supabase
+        .from("learned_topics")
+        .update({ deleted_at: new Date().toISOString() })
+        .eq("id", topicToDelete);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Topic deleted and archived",
+      });
+
+      fetchTopics();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteDialogOpen(false);
+      setTopicToDelete(null);
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -229,7 +290,7 @@ const Dashboard = () => {
                           {topic.description}
                         </p>
                       )}
-                      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                       <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
                           Learned: {formatDate(topic.learned_date)}
@@ -240,13 +301,83 @@ const Dashboard = () => {
                         </div>
                       </div>
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteClick(topic.id)}
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
             ))
           )}
         </div>
+
+        {deletedTopics.length > 0 && (
+          <div className="space-y-4 mt-8">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-semibold flex items-center gap-2">
+                <Archive className="w-5 h-5" />
+                Archived Topics ({deletedTopics.length})
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowDeleted(!showDeleted)}
+              >
+                {showDeleted ? "Hide" : "Show"}
+              </Button>
+            </div>
+            
+            {showDeleted && (
+              <div className="space-y-4">
+                {deletedTopics.map((topic) => (
+                  <Card key={topic.id} className="opacity-60 shadow-[var(--shadow-card)]">
+                    <CardContent className="py-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-lg mb-1">{topic.title}</h4>
+                          {topic.description && (
+                            <p className="text-muted-foreground text-sm mb-3">
+                              {topic.description}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                            <div className="flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              Deleted: {formatDate(topic.deleted_at!)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </main>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will archive the topic and stop all reminders. You can view archived topics later, but they won't appear in your active learning list.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
