@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive } from "lucide-react";
+import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive, Pencil } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
@@ -18,6 +18,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface Topic {
   id: string;
@@ -39,6 +47,11 @@ const Dashboard = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [topicToDelete, setTopicToDelete] = useState<string | null>(null);
   const [showDeleted, setShowDeleted] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [updating, setUpdating] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -148,6 +161,54 @@ const Dashboard = () => {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate("/");
+  };
+
+  const handleEditClick = (topic: Topic) => {
+    setEditingTopic(topic);
+    setEditTitle(topic.title);
+    setEditDescription(topic.description || "");
+    setEditDialogOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingTopic || !editTitle.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a topic title",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUpdating(true);
+
+    try {
+      const { error } = await supabase
+        .from("learned_topics")
+        .update({
+          title: editTitle.trim(),
+          description: editDescription.trim() || null,
+        })
+        .eq("id", editingTopic.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Topic updated successfully",
+      });
+
+      fetchTopics();
+      setEditDialogOpen(false);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const handleDeleteClick = (topicId: string) => {
@@ -301,14 +362,24 @@ const Dashboard = () => {
                         </div>
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDeleteClick(topic.id)}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleEditClick(topic)}
+                        className="text-primary hover:text-primary hover:bg-primary/10"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteClick(topic.id)}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -361,6 +432,47 @@ const Dashboard = () => {
           </div>
         )}
       </main>
+
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Topic</DialogTitle>
+            <DialogDescription>
+              Update the title and description of your topic.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-title">Topic Title</Label>
+              <Input
+                id="edit-title"
+                placeholder="e.g., Stacks and Queues, String Builder"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Notes (Optional)</Label>
+              <Textarea
+                id="edit-description"
+                placeholder="Add any notes or key points you want to remember..."
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditSave} disabled={updating}>
+              {updating ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
