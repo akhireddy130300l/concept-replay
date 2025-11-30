@@ -50,21 +50,9 @@ const Index = () => {
                 size="lg"
                 className="bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-all text-lg px-10 py-6 h-auto font-semibold shadow-[var(--shadow-soft)] hover:shadow-[var(--shadow-card)]"
               >
-                Get Started Free
-              </Button>
-              <Button
-                onClick={() => navigate("/auth")}
-                size="lg"
-                variant="outline"
-                className="text-lg px-10 py-6 h-auto font-semibold border-2 hover:bg-muted/50"
-              >
-                Watch Demo
+                Get Started
               </Button>
             </div>
-            
-            <p className="text-sm text-muted-foreground">
-              No credit card required • Free forever plan
-            </p>
           </div>
 
           {/* Stats Section */}
