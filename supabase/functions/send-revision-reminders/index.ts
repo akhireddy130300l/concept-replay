@@ -37,13 +37,16 @@ If the user asks anything, ALWAYS respond in pure HTML.
           },
           {
             role: "user",
-            content: `Provide the explanation of topic "${topic}" ONLY in pure HTML.
+            content: `IF the topic is technical, study-related, or knowledge-based (like Java, Spring Boot, Hibernate, Machine Learning, Networking):
+
+Provide the explanation of topic "${topic}" ONLY in pure HTML.
 STRICT RULES:
 - Do NOT use Markdown.
 - Do NOT use **bold**, ## headings, *, -, or backticks.
 - Use only HTML tags like <h2>, <ul>, <li>, <p>, <strong>.
 - Structure sections as:
-  <h2>Definition and Key Concepts</h2>
+
+<h2>Definition and Key Concepts</h2>
 <ul><li>...</li></ul>
 
 <h2>Breif overview</h2>
@@ -61,7 +64,26 @@ STRICT RULES:
 <h2>Important Points to Remember</h2>
 <ul><li>...</li></ul>
 
-Return ONLY HTML.`,
+---------------------------------------------------------
+
+IF the topic is practical, learning-based, or daily usage (like English speaking, fluency, slang, idioms):
+
+Provide explanation, examples, and tips for "${topic}" ONLY in pure HTML.
+STRICT RULES:
+- Do NOT use Markdown.
+- Do NOT use **bold**, ## headings, *, -, or backticks.
+- Use only HTML tags like <h2>, <ul>, <li>, <p>, <strong>.
+- Structure sections as:
+
+<h2>Overview</h2>
+<ul><li>...</li></ul>
+
+<h2>Practical Examples / Usage</h2>
+<ul><li>...</li></ul>
+
+<h2>Tips to Improve / Remember</h2>
+<ul><li>...</li></ul>
+`,
           },
         ],
       }),
