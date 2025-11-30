@@ -37,7 +37,7 @@ If the user asks anything, ALWAYS respond in pure HTML.
           },
           {
             role: "user",
-            content: `IF the topic is technical, study-related, or knowledge-based (like Java, Spring Boot, Hibernate, Machine Learning, Networking):
+            content: `IF the topic is technical, study-related, course related (like Java, Spring Boot, Hibernate, Machine Learning, Networking):
 
 Provide the explanation of topic "${topic}" ONLY in pure HTML.
 STRICT RULES:
@@ -66,7 +66,7 @@ STRICT RULES:
 
 ---------------------------------------------------------
 
-IF the topic is practical, learning-based, or daily usage (like English speaking, fluency, slang, idioms):
+IF the topic is Communication, learning-based, or daily usage (like English speaking, fluency, slang, idioms):
 
 Provide explanation, examples, and tips for "${topic}" ONLY in pure HTML.
 STRICT RULES:
