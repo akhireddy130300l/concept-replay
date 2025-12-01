@@ -224,16 +224,27 @@ serve(async (req) => {
       // Send to actual user email (requires verified domain for production)
       const toEmail = userEmail;
 
+      // Create subject with topic name(s)
+      const topicNames = topicsArray.map(t => t.title);
+      let emailSubject: string;
+      if (topicNames.length === 1) {
+        emailSubject = `📚 "${topicNames[0]}" - Ready for Review`;
+      } else if (topicNames.length === 2) {
+        emailSubject = `📚 "${topicNames[0]}" & "${topicNames[1]}" - Ready for Review`;
+      } else {
+        emailSubject = `📚 "${topicNames[0]}" & ${topicNames.length - 1} more - Ready for Review`;
+      }
+
       console.log("Sending email with:");
       console.log("FROM:", fromEmail);
       console.log("TO:", toEmail);
-      console.log("SUBJECT:", `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`);
+      console.log("SUBJECT:", emailSubject);
 
       try {
         const result = await resend.emails.send({
           from: fromEmail,
           to: [toEmail],
-          subject: `📚 ${topicsArray.length} Topic${topicsArray.length > 1 ? "s" : ""} Due for Review`,
+          subject: emailSubject,
           html: emailContent,
         });
         console.log("Resend API response:", result);
