@@ -228,11 +228,11 @@ serve(async (req) => {
       const topicNames = topicsArray.map(t => t.title);
       let emailSubject: string;
       if (topicNames.length === 1) {
-        emailSubject = `📚 "${topicNames[0]}" - Ready for Review`;
+        emailSubject = `📚 Hey Buddy "${topicNames[0]}" - Ready for Review`;
       } else if (topicNames.length === 2) {
-        emailSubject = `📚 "${topicNames[0]}" & "${topicNames[1]}" - Ready for Review`;
+        emailSubject = `📚 Hey Buddy "${topicNames[0]}" & "${topicNames[1]}" - Ready for Review`;
       } else {
-        emailSubject = `📚 "${topicNames[0]}" & ${topicNames.length - 1} more - Ready for Review`;
+        emailSubject = `📚 Hey Buddy "${topicNames[0]}" & ${topicNames.length - 1} more - Ready for Review`;
       }
 
       console.log("Sending email with:");
