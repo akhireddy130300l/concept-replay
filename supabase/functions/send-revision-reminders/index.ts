@@ -66,23 +66,40 @@ STRICT RULES:
 
 ---------------------------------------------------------
 
-IF the topic is Communication, learning-based, or daily usage (like English speaking, fluency, slang, idioms):
+IF the topic is Communication, language learning, or daily usage (like English speaking, fluency, slang, idioms, phrases):
 
-Provide explanation, examples, and tips for "${topic}" ONLY in pure HTML.
+Provide practical sentences and examples for "${topic}" ONLY in pure HTML.
 STRICT RULES:
 - Do NOT use Markdown.
 - Do NOT use **bold**, ## headings, *, -, or backticks.
 - Use only HTML tags like <h2>, <ul>, <li>, <p>, <strong>.
+- Focus on PRACTICAL, READY-TO-USE sentences and examples
 - Structure sections as:
 
-<h2>Overview</h2>
-<ul><li>...</li></ul>
+<h2>Quick Meaning</h2>
+<p>One line explanation of "${topic}"</p>
 
-<h2>Practical Examples / Usage</h2>
-<ul><li>...</li></ul>
+<h2>Sentences to Practice</h2>
+<ul>
+<li>Sentence 1 - <em>Context/When to use</em></li>
+<li>Sentence 2 - <em>Context/When to use</em></li>
+<li>Sentence 3 - <em>Context/When to use</em></li>
+<li>Sentence 4 - <em>Context/When to use</em></li>
+<li>Sentence 5 - <em>Context/When to use</em></li>
+</ul>
 
-<h2>Tips to Improve / Remember</h2>
-<ul><li>...</li></ul>
+<h2>Common Conversations</h2>
+<p>A short dialogue example using "${topic}":</p>
+<ul>
+<li><strong>A:</strong> ...</li>
+<li><strong>B:</strong> ...</li>
+</ul>
+
+<h2>Similar Expressions</h2>
+<ul><li>Alternative ways to say the same thing</li></ul>
+
+<h2>Mistakes to Avoid</h2>
+<ul><li>Common errors learners make with this</li></ul>
 `,
           },
         ],
