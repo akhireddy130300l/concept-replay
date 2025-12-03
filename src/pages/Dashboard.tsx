@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive, Pencil } from "lucide-react";
+import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive, Pencil, RefreshCw } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,6 +35,7 @@ interface Topic {
   learned_date: string;
   next_revision_date: string;
   deleted_at?: string | null;
+  is_daily?: boolean;
 }
 
 const Dashboard = () => {
@@ -43,6 +45,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [newTopic, setNewTopic] = useState("");
   const [newDescription, setNewDescription] = useState("");
+  const [newIsDaily, setNewIsDaily] = useState(false);
   const [adding, setAdding] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [topicToDelete, setTopicToDelete] = useState<string | null>(null);
@@ -135,17 +138,19 @@ const Dashboard = () => {
         next_revision_date: nextRevisionDate.toISOString(),
         revision_count: 0,
         user_id: user.id,
+        is_daily: newIsDaily,
       });
 
       if (error) throw error;
 
       toast({
         title: "Success!",
-        description: "Topic added successfully",
+        description: newIsDaily ? "Daily topic added - you'll receive reminders every day!" : "Topic added successfully",
       });
 
       setNewTopic("");
       setNewDescription("");
+      setNewIsDaily(false);
       fetchTopics();
     } catch (error: any) {
       toast({
@@ -245,6 +250,41 @@ const Dashboard = () => {
     }
   };
 
+  const handleToggleDaily = async (topicId: string, isDaily: boolean) => {
+    try {
+      const nextRevisionDate = new Date();
+      if (isDaily) {
+        // If switching to daily, set next revision to tomorrow
+        nextRevisionDate.setDate(nextRevisionDate.getDate() + 1);
+      }
+
+      const { error } = await supabase
+        .from("learned_topics")
+        .update({ 
+          is_daily: isDaily,
+          next_revision_date: nextRevisionDate.toISOString()
+        })
+        .eq("id", topicId);
+
+      if (error) throw error;
+
+      toast({
+        title: isDaily ? "Daily reminders enabled" : "Spaced repetition enabled",
+        description: isDaily 
+          ? "You'll receive this topic every day" 
+          : "Reminders will follow the spaced repetition schedule",
+      });
+
+      fetchTopics();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
       month: "short",
@@ -310,6 +350,20 @@ const Dashboard = () => {
                   rows={3}
                 />
               </div>
+              <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <Label htmlFor="daily-toggle" className="cursor-pointer">Daily Reminder</Label>
+                    <p className="text-xs text-muted-foreground">Send every day instead of spaced repetition</p>
+                  </div>
+                </div>
+                <Switch
+                  id="daily-toggle"
+                  checked={newIsDaily}
+                  onCheckedChange={setNewIsDaily}
+                />
+              </div>
               <Button
                 type="submit"
                 className="w-full bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-opacity"
@@ -360,9 +414,22 @@ const Dashboard = () => {
                           <Calendar className="w-3 h-3" />
                           Next Review: {formatDate(topic.next_revision_date)}
                         </div>
+                        {topic.is_daily && (
+                          <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs font-medium">
+                            Daily
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 mr-2">
+                        <Switch
+                          checked={topic.is_daily || false}
+                          onCheckedChange={(checked) => handleToggleDaily(topic.id, checked)}
+                          className="scale-75"
+                        />
+                        <span className="text-xs text-muted-foreground">Daily</span>
+                      </div>
                       <Button
                         variant="ghost"
                         size="icon"
