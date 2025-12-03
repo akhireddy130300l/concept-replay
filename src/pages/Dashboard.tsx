@@ -293,6 +293,18 @@ const Dashboard = () => {
     });
   };
 
+  const formatDateTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-primary/5">
       <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-10 shadow-[var(--shadow-soft)]">
@@ -412,7 +424,7 @@ const Dashboard = () => {
                         </div>
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
-                          Next Review: {formatDate(topic.next_revision_date)}
+                          Next Review: {formatDateTime(topic.next_revision_date)}
                         </div>
                         {topic.is_daily && (
                           <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs font-medium">
