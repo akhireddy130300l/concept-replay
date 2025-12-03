@@ -20,6 +20,7 @@ export type Database = {
           deleted_at: string | null
           description: string | null
           id: string
+          is_daily: boolean | null
           learned_date: string
           next_revision_date: string
           revision_count: number | null
@@ -31,6 +32,7 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
+          is_daily?: boolean | null
           learned_date?: string
           next_revision_date: string
           revision_count?: number | null
@@ -42,6 +44,7 @@ export type Database = {
           deleted_at?: string | null
           description?: string | null
           id?: string
+          is_daily?: boolean | null
           learned_date?: string
           next_revision_date?: string
           revision_count?: number | null

@@ -261,22 +261,35 @@ serve(async (req) => {
 
       console.log("Updating next revision dates for topics...");
       for (const topic of topicsArray) {
-        const currentCount = topic.revision_count || 0;
-        const nextCount = currentCount + 1;
-        const intervalIndex = Math.min(nextCount, REVISION_INTERVALS.length - 1);
-        const daysUntilNext = REVISION_INTERVALS[intervalIndex];
-
         const nextRevisionDate = new Date();
-        nextRevisionDate.setDate(nextRevisionDate.getDate() + daysUntilNext);
-
-        console.log(`Updating topic ${topic.id} next_revision_date to ${nextRevisionDate.toISOString()}`);
-        await supabase
-          .from("learned_topics")
-          .update({
-            next_revision_date: nextRevisionDate.toISOString(),
-            revision_count: nextCount,
-          })
-          .eq("id", topic.id);
+        
+        // Daily topics always get scheduled for tomorrow
+        if (topic.is_daily) {
+          nextRevisionDate.setDate(nextRevisionDate.getDate() + 1);
+          console.log(`Topic ${topic.id} is daily - scheduling for tomorrow: ${nextRevisionDate.toISOString()}`);
+          await supabase
+            .from("learned_topics")
+            .update({
+              next_revision_date: nextRevisionDate.toISOString(),
+            })
+            .eq("id", topic.id);
+        } else {
+          // Regular spaced repetition for non-daily topics
+          const currentCount = topic.revision_count || 0;
+          const nextCount = currentCount + 1;
+          const intervalIndex = Math.min(nextCount, REVISION_INTERVALS.length - 1);
+          const daysUntilNext = REVISION_INTERVALS[intervalIndex];
+          nextRevisionDate.setDate(nextRevisionDate.getDate() + daysUntilNext);
+          
+          console.log(`Updating topic ${topic.id} next_revision_date to ${nextRevisionDate.toISOString()}`);
+          await supabase
+            .from("learned_topics")
+            .update({
+              next_revision_date: nextRevisionDate.toISOString(),
+              revision_count: nextCount,
+            })
+            .eq("id", topic.id);
+        }
       }
     }
 
