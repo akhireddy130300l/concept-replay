@@ -464,7 +464,7 @@ const Dashboard = () => {
                             <Info className="w-4 h-4" />
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-64" align="end">
+                        <PopoverContent className="w-72" align="end">
                           <div className="space-y-2">
                             <h4 className="font-medium text-sm flex items-center gap-2">
                               <Clock className="w-4 h-4" />
@@ -477,21 +477,31 @@ const Dashboard = () => {
                             ) : (
                               <div className="space-y-1">
                                 <p className="text-xs text-muted-foreground mb-2">
-                                  Spaced repetition intervals (days after learning):
+                                  Revision dates based on learning date:
                                 </p>
-                                <div className="flex flex-wrap gap-1">
-                                  {spacedRepetitionIntervals.map((day, idx) => (
-                                    <span
-                                      key={day}
-                                      className="px-2 py-1 bg-primary/10 text-primary rounded text-xs font-medium"
-                                    >
-                                      Day {day}
-                                    </span>
-                                  ))}
+                                <div className="space-y-1">
+                                  {spacedRepetitionIntervals.map((day) => {
+                                    const revisionDate = new Date(topic.learned_date);
+                                    revisionDate.setDate(revisionDate.getDate() + day);
+                                    const isPast = revisionDate < new Date();
+                                    const isNext = revisionDate.toDateString() === new Date(topic.next_revision_date).toDateString();
+                                    return (
+                                      <div
+                                        key={day}
+                                        className={`flex justify-between items-center px-2 py-1 rounded text-xs ${
+                                          isNext 
+                                            ? 'bg-primary/20 text-primary font-medium' 
+                                            : isPast 
+                                              ? 'text-muted-foreground line-through' 
+                                              : 'text-foreground'
+                                        }`}
+                                      >
+                                        <span>Day {day}</span>
+                                        <span>{formatDate(revisionDate.toISOString())}</span>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
-                                <p className="text-xs text-muted-foreground mt-2">
-                                  Based on psychology research for optimal memory retention.
-                                </p>
                               </div>
                             )}
                           </div>
