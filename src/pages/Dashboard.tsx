@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive, Pencil, RefreshCw } from "lucide-react";
+import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive, Pencil, RefreshCw, Clock, Info } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -54,7 +55,12 @@ const Dashboard = () => {
   const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editNextRevisionDate, setEditNextRevisionDate] = useState("");
+  const [editNextRevisionTime, setEditNextRevisionTime] = useState("");
   const [updating, setUpdating] = useState(false);
+
+  // Spaced repetition intervals in days
+  const spacedRepetitionIntervals = [1, 3, 7, 14, 30, 60];
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -172,6 +178,9 @@ const Dashboard = () => {
     setEditingTopic(topic);
     setEditTitle(topic.title);
     setEditDescription(topic.description || "");
+    const nextRevDate = new Date(topic.next_revision_date);
+    setEditNextRevisionDate(nextRevDate.toISOString().split('T')[0]);
+    setEditNextRevisionTime(nextRevDate.toTimeString().slice(0, 5));
     setEditDialogOpen(true);
   };
 
@@ -188,11 +197,14 @@ const Dashboard = () => {
     setUpdating(true);
 
     try {
+      const nextRevisionDateTime = new Date(`${editNextRevisionDate}T${editNextRevisionTime}`);
+      
       const { error } = await supabase
         .from("learned_topics")
         .update({
           title: editTitle.trim(),
           description: editDescription.trim() || null,
+          next_revision_date: nextRevisionDateTime.toISOString(),
         })
         .eq("id", editingTopic.id);
 
@@ -442,6 +454,49 @@ const Dashboard = () => {
                         />
                         <span className="text-xs text-muted-foreground">Daily</span>
                       </div>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-foreground hover:bg-muted"
+                          >
+                            <Info className="w-4 h-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64" align="end">
+                          <div className="space-y-2">
+                            <h4 className="font-medium text-sm flex items-center gap-2">
+                              <Clock className="w-4 h-4" />
+                              Revision Schedule
+                            </h4>
+                            {topic.is_daily ? (
+                              <p className="text-xs text-muted-foreground">
+                                Daily mode: You'll receive reminders every day.
+                              </p>
+                            ) : (
+                              <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground mb-2">
+                                  Spaced repetition intervals (days after learning):
+                                </p>
+                                <div className="flex flex-wrap gap-1">
+                                  {spacedRepetitionIntervals.map((day, idx) => (
+                                    <span
+                                      key={day}
+                                      className="px-2 py-1 bg-primary/10 text-primary rounded text-xs font-medium"
+                                    >
+                                      Day {day}
+                                    </span>
+                                  ))}
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-2">
+                                  Based on psychology research for optimal memory retention.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -540,6 +595,26 @@ const Dashboard = () => {
                 onChange={(e) => setEditDescription(e.target.value)}
                 rows={3}
               />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-date">Next Revision Date</Label>
+                <Input
+                  id="edit-date"
+                  type="date"
+                  value={editNextRevisionDate}
+                  onChange={(e) => setEditNextRevisionDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-time">Time</Label>
+                <Input
+                  id="edit-time"
+                  type="time"
+                  value={editNextRevisionTime}
+                  onChange={(e) => setEditNextRevisionTime(e.target.value)}
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
