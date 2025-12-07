@@ -2,98 +2,110 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* Glossy iPhone-inspired design system */
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 215 25% 15%;
+    --background: 220 20% 97%;
+    --foreground: 220 25% 10%;
 
     --card: 0 0% 100%;
-    --card-foreground: 215 25% 15%;
+    --card-foreground: 220 25% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 215 25% 15%;
+    --popover-foreground: 220 25% 10%;
 
-    --primary: 195 85% 45%;
+    --primary: 210 100% 50%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 180 70% 55%;
+    --secondary: 200 80% 60%;
     --secondary-foreground: 0 0% 100%;
 
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 220 20% 94%;
+    --muted-foreground: 220 15% 45%;
 
-    --accent: 160 80% 50%;
+    --accent: 175 85% 45%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 214 31% 91%;
-    --input: 214 31% 91%;
-    --ring: 195 85% 45%;
+    --border: 220 20% 90%;
+    --input: 220 20% 92%;
+    --ring: 210 100% 50%;
 
-    --radius: 0.75rem;
+    --radius: 1rem;
     
-    --gradient-learning: linear-gradient(135deg, hsl(195 85% 45%), hsl(180 70% 55%));
-    --gradient-hero: linear-gradient(180deg, hsl(210 20% 98%), hsl(195 95% 95%));
-    --shadow-soft: 0 4px 20px -2px hsl(195 85% 45% / 0.1);
-    --shadow-card: 0 2px 12px -2px hsl(215 25% 15% / 0.08);
+    /* Glossy gradients */
+    --gradient-learning: linear-gradient(135deg, hsl(210 100% 50%), hsl(200 80% 60%));
+    --gradient-hero: linear-gradient(180deg, hsl(220 20% 97%) 0%, hsl(210 40% 96%) 50%, hsl(200 50% 95%) 100%);
+    --gradient-glass: linear-gradient(135deg, hsl(0 0% 100% / 0.9) 0%, hsl(0 0% 100% / 0.7) 100%);
+    --gradient-glossy: linear-gradient(180deg, hsl(0 0% 100% / 0.8) 0%, hsl(0 0% 100% / 0.2) 50%, hsl(0 0% 100% / 0.05) 100%);
+    --gradient-shine: linear-gradient(110deg, transparent 25%, hsl(0 0% 100% / 0.4) 50%, transparent 75%);
+    
+    /* Premium shadows */
+    --shadow-soft: 0 4px 24px -4px hsl(210 100% 50% / 0.12), 0 2px 8px -2px hsl(220 25% 10% / 0.06);
+    --shadow-card: 0 8px 32px -8px hsl(220 25% 10% / 0.1), 0 4px 16px -4px hsl(220 25% 10% / 0.06), inset 0 1px 0 hsl(0 0% 100% / 0.8);
+    --shadow-glow: 0 0 40px -10px hsl(210 100% 50% / 0.3);
+    --shadow-inset: inset 0 2px 4px hsl(220 25% 10% / 0.05);
+    --shadow-button: 0 4px 16px -4px hsl(210 100% 50% / 0.4), 0 2px 8px -2px hsl(210 100% 50% / 0.2);
+    
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 
     --sidebar-background: 0 0% 98%;
-
     --sidebar-foreground: 240 5.3% 26.1%;
-
     --sidebar-primary: 240 5.9% 10%;
-
     --sidebar-primary-foreground: 0 0% 98%;
-
     --sidebar-accent: 240 4.8% 95.9%;
-
     --sidebar-accent-foreground: 240 5.9% 10%;
-
     --sidebar-border: 220 13% 91%;
-
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
 
   .dark {
-    --background: 215 30% 10%;
+    --background: 225 25% 8%;
     --foreground: 210 40% 98%;
 
-    --card: 215 28% 12%;
+    --card: 225 25% 11%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 215 28% 12%;
+    --popover: 225 25% 11%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 195 85% 55%;
-    --primary-foreground: 215 30% 10%;
+    --primary: 210 100% 60%;
+    --primary-foreground: 225 25% 8%;
 
-    --secondary: 180 70% 45%;
+    --secondary: 200 80% 50%;
     --secondary-foreground: 0 0% 100%;
 
-    --muted: 217 32% 17%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 225 20% 15%;
+    --muted-foreground: 220 15% 60%;
 
-    --accent: 160 80% 40%;
+    --accent: 175 85% 50%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 62% 50%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 217 32% 20%;
-    --input: 217 32% 20%;
-    --ring: 195 85% 55%;
+    --border: 225 20% 18%;
+    --input: 225 20% 16%;
+    --ring: 210 100% 60%;
     
-    --gradient-learning: linear-gradient(135deg, hsl(195 85% 55%), hsl(180 70% 45%));
-    --gradient-hero: linear-gradient(180deg, hsl(215 30% 10%), hsl(215 35% 15%));
-    --shadow-soft: 0 4px 20px -2px hsl(195 85% 55% / 0.2);
-    --shadow-card: 0 2px 12px -2px hsl(0 0% 0% / 0.3);
+    /* Dark glossy gradients */
+    --gradient-learning: linear-gradient(135deg, hsl(210 100% 60%), hsl(200 80% 50%));
+    --gradient-hero: linear-gradient(180deg, hsl(225 25% 8%) 0%, hsl(225 30% 12%) 50%, hsl(220 35% 15%) 100%);
+    --gradient-glass: linear-gradient(135deg, hsl(225 25% 15% / 0.9) 0%, hsl(225 25% 12% / 0.7) 100%);
+    --gradient-glossy: linear-gradient(180deg, hsl(0 0% 100% / 0.1) 0%, hsl(0 0% 100% / 0.03) 50%, transparent 100%);
+    --gradient-shine: linear-gradient(110deg, transparent 25%, hsl(0 0% 100% / 0.1) 50%, transparent 75%);
+    
+    /* Dark premium shadows */
+    --shadow-soft: 0 4px 24px -4px hsl(210 100% 60% / 0.2), 0 2px 8px -2px hsl(0 0% 0% / 0.3);
+    --shadow-card: 0 8px 32px -8px hsl(0 0% 0% / 0.4), 0 4px 16px -4px hsl(0 0% 0% / 0.2), inset 0 1px 0 hsl(0 0% 100% / 0.05);
+    --shadow-glow: 0 0 40px -10px hsl(210 100% 60% / 0.4);
+    --shadow-inset: inset 0 2px 4px hsl(0 0% 0% / 0.2);
+    --shadow-button: 0 4px 16px -4px hsl(210 100% 60% / 0.5), 0 2px 8px -2px hsl(210 100% 60% / 0.3);
+    
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
     --sidebar-primary: 224.3 76.3% 48%;
@@ -111,6 +123,120 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+@layer components {
+  /* Glassmorphism card */
+  .glass-card {
+    @apply relative overflow-hidden;
+    background: var(--gradient-glass);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid hsl(var(--border) / 0.5);
+    box-shadow: var(--shadow-card);
+  }
+  
+  .glass-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, hsl(0 0% 100% / 0.6), transparent);
+  }
+
+  /* Glossy button effect */
+  .glossy-button {
+    @apply relative overflow-hidden;
+    box-shadow: var(--shadow-button);
+  }
+  
+  .glossy-button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(180deg, hsl(0 0% 100% / 0.3) 0%, transparent 100%);
+    border-radius: inherit;
+    pointer-events: none;
+  }
+  
+  .glossy-button::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    right: 0;
+    bottom: 0;
+    width: 200%;
+    background: var(--gradient-shine);
+    animation: shine 3s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  /* Subtle shine animation */
+  @keyframes shine {
+    0%, 100% {
+      transform: translateX(-50%);
+    }
+    50% {
+      transform: translateX(0%);
+    }
+  }
+
+  /* Premium input styling */
+  .glass-input {
+    @apply relative;
+    background: hsl(var(--background) / 0.8);
+    backdrop-filter: blur(8px);
+    box-shadow: var(--shadow-inset), 0 0 0 1px hsl(var(--border) / 0.5);
+    transition: var(--transition-smooth);
+  }
+  
+  .glass-input:focus {
+    box-shadow: var(--shadow-inset), 0 0 0 2px hsl(var(--ring) / 0.5), var(--shadow-glow);
+  }
+
+  /* Floating effect */
+  .float-hover {
+    transition: var(--transition-bounce);
+  }
+  
+  .float-hover:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-soft);
+  }
+
+  /* Premium badge */
+  .glossy-badge {
+    @apply relative overflow-hidden;
+    background: linear-gradient(135deg, hsl(var(--primary) / 0.2) 0%, hsl(var(--primary) / 0.1) 100%);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.2);
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: var(--gradient-learning);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .bg-glossy {
+    background: var(--gradient-glossy);
+  }
+  
+  .shadow-glossy {
+    box-shadow: var(--shadow-card);
+  }
+  
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
   }
 }

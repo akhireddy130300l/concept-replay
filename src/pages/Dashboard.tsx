@@ -318,16 +318,16 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-primary/5">
-      <header className="border-b bg-card/80 backdrop-blur-sm sticky top-0 z-10 shadow-[var(--shadow-soft)]">
+    <div className="min-h-screen bg-[image:var(--gradient-hero)]">
+      <header className="glass-card sticky top-0 z-10 border-b border-border/30">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-[var(--shadow-button)] animate-glow-pulse">
               <Brain className="w-5 h-5 text-primary-foreground" />
             </div>
-            <h1 className="text-xl font-bold">LearnLoop</h1>
+            <h1 className="text-xl font-semibold tracking-tight">LearnLoop</h1>
           </div>
-          <Button onClick={handleSignOut} variant="outline" size="sm">
+          <Button onClick={handleSignOut} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
             <LogOut className="w-4 h-4 mr-2" />
             Sign Out
           </Button>
@@ -335,17 +335,19 @@ const Dashboard = () => {
       </header>
 
       <main className="container mx-auto px-4 py-8 max-w-4xl">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold mb-2">Welcome back!</h2>
+        <div className="mb-8 animate-fade-in">
+          <h2 className="text-3xl font-semibold mb-2 tracking-tight">Welcome back!</h2>
           <p className="text-muted-foreground">
             Add topics you've learned today and we'll remind you to review them.
           </p>
         </div>
 
-        <Card className="mb-8 shadow-[var(--shadow-card)]">
+        <Card className="mb-8 glass-card float-hover animate-fade-in" style={{ animationDelay: '0.1s' }}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Plus className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
+                <Plus className="w-4 h-4 text-primary" />
+              </div>
               Add New Topic
             </CardTitle>
             <CardDescription>
@@ -362,6 +364,7 @@ const Dashboard = () => {
                   value={newTopic}
                   onChange={(e) => setNewTopic(e.target.value)}
                   required
+                  className="glass-input border-border/50 focus:border-primary/50"
                 />
               </div>
               <div className="space-y-2">
@@ -372,13 +375,16 @@ const Dashboard = () => {
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
                   rows={3}
+                  className="glass-input border-border/50 focus:border-primary/50"
                 />
               </div>
-              <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <RefreshCw className="w-4 h-4 text-muted-foreground" />
+              <div className="flex items-center justify-between p-4 glass-card rounded-xl border border-border/30">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-accent/20 to-primary/10 flex items-center justify-center">
+                    <RefreshCw className="w-4 h-4 text-accent" />
+                  </div>
                   <div>
-                    <Label htmlFor="daily-toggle" className="cursor-pointer">Daily Reminder</Label>
+                    <Label htmlFor="daily-toggle" className="cursor-pointer font-medium">Daily Reminder</Label>
                     <p className="text-xs text-muted-foreground">Send every day instead of spaced repetition</p>
                   </div>
                 </div>
@@ -390,7 +396,7 @@ const Dashboard = () => {
               </div>
               <Button
                 type="submit"
-                className="w-full bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-opacity"
+                className="w-full glossy-button bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-all text-primary-foreground font-medium"
                 disabled={adding}
               >
                 {adding ? "Adding..." : "Add Topic"}
@@ -400,26 +406,27 @@ const Dashboard = () => {
         </Card>
 
         <div className="space-y-4">
-          <h3 className="text-xl font-semibold flex items-center gap-2">
-            <BookOpen className="w-5 h-5" />
+          <h3 className="text-xl font-semibold flex items-center gap-2 animate-fade-in" style={{ animationDelay: '0.2s' }}>
+            <BookOpen className="w-5 h-5 text-primary" />
             Your Learning Journey
           </h3>
           
           {loading ? (
-            <Card>
+            <Card className="glass-card animate-fade-in">
               <CardContent className="py-8 text-center text-muted-foreground">
-                Loading your topics...
+                <div className="inline-block w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mb-2" />
+                <p>Loading your topics...</p>
               </CardContent>
             </Card>
           ) : topics.length === 0 ? (
-            <Card>
+            <Card className="glass-card animate-fade-in">
               <CardContent className="py-8 text-center text-muted-foreground">
                 No topics yet. Add your first topic above!
               </CardContent>
             </Card>
           ) : (
-            topics.map((topic) => (
-              <Card key={topic.id} className="shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-soft)] transition-shadow">
+            topics.map((topic, index) => (
+              <Card key={topic.id} className="glass-card float-hover animate-fade-in" style={{ animationDelay: `${0.3 + index * 0.05}s` }}>
                 <CardContent className="py-4">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -439,7 +446,7 @@ const Dashboard = () => {
                           Next Review: {formatDateTime(topic.next_revision_date)}
                         </div>
                         {topic.is_daily && (
-                          <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs font-medium">
+                          <span className="glossy-badge px-3 py-1 text-primary rounded-full text-xs font-medium">
                             Daily
                           </span>
                         )}
@@ -459,12 +466,12 @@ const Dashboard = () => {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="text-muted-foreground hover:text-foreground hover:bg-muted"
+                            className="text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-xl transition-all"
                           >
                             <Info className="w-4 h-4" />
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-72" align="end">
+                        <PopoverContent className="w-72 glass-card border-border/50" align="end">
                           <div className="space-y-2">
                             <h4 className="font-medium text-sm flex items-center gap-2">
                               <Clock className="w-4 h-4" />
@@ -511,7 +518,7 @@ const Dashboard = () => {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleEditClick(topic)}
-                        className="text-primary hover:text-primary hover:bg-primary/10"
+                        className="text-primary hover:text-primary hover:bg-primary/10 rounded-xl"
                       >
                         <Pencil className="w-4 h-4" />
                       </Button>
@@ -519,7 +526,7 @@ const Dashboard = () => {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleDeleteClick(topic.id)}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10 rounded-xl"
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>
@@ -532,16 +539,17 @@ const Dashboard = () => {
         </div>
 
         {deletedTopics.length > 0 && (
-          <div className="space-y-4 mt-8">
+          <div className="space-y-4 mt-8 animate-fade-in">
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-semibold flex items-center gap-2">
-                <Archive className="w-5 h-5" />
+                <Archive className="w-5 h-5 text-muted-foreground" />
                 Archived Topics ({deletedTopics.length})
               </h3>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowDeleted(!showDeleted)}
+                className="hover:bg-muted/50 rounded-xl"
               >
                 {showDeleted ? "Hide" : "Show"}
               </Button>
@@ -550,7 +558,7 @@ const Dashboard = () => {
             {showDeleted && (
               <div className="space-y-4">
                 {deletedTopics.map((topic) => (
-                  <Card key={topic.id} className="opacity-60 shadow-[var(--shadow-card)]">
+                  <Card key={topic.id} className="glass-card opacity-60">
                     <CardContent className="py-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -578,7 +586,7 @@ const Dashboard = () => {
       </main>
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent>
+        <DialogContent className="glass-card border-border/50">
           <DialogHeader>
             <DialogTitle>Edit Topic</DialogTitle>
             <DialogDescription>
