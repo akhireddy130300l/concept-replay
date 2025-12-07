@@ -484,7 +484,7 @@ const Dashboard = () => {
                             ) : (
                               <div className="space-y-1">
                                 <p className="text-xs text-muted-foreground mb-2">
-                                  Revision dates based on learning date:
+                                  Your revision schedule:
                                 </p>
                                 <div className="space-y-1">
                                   {spacedRepetitionIntervals.map((day) => {
@@ -495,7 +495,7 @@ const Dashboard = () => {
                                     return (
                                       <div
                                         key={day}
-                                        className={`flex justify-between items-center px-2 py-1 rounded text-xs ${
+                                        className={`px-3 py-1.5 rounded-lg text-sm ${
                                           isNext 
                                             ? 'bg-primary/20 text-primary font-medium' 
                                             : isPast 
@@ -503,8 +503,7 @@ const Dashboard = () => {
                                               : 'text-foreground'
                                         }`}
                                       >
-                                        <span>Day {day}</span>
-                                        <span>{formatDate(revisionDate.toISOString())}</span>
+                                        {formatDate(revisionDate.toISOString())}
                                       </div>
                                     );
                                   })}
