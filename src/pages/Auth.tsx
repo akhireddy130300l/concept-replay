@@ -225,15 +225,15 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-background to-primary/5 p-4">
-      <Card className="w-full max-w-md shadow-[var(--shadow-soft)]">
+    <div className="min-h-screen flex items-center justify-center bg-[image:var(--gradient-hero)] p-4">
+      <Card className="w-full max-w-md glass-card animate-scale-in">
         <CardHeader className="space-y-1 text-center">
           <div className="flex justify-center mb-4">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-[var(--shadow-button)] animate-glow-pulse">
               <Brain className="w-8 h-8 text-primary-foreground" />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold">
+          <CardTitle className="text-2xl font-semibold tracking-tight">
             {isRecoveryMode 
               ? "Set New Password" 
               : isForgotPassword 
@@ -264,6 +264,7 @@ const Auth = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
+                  className="glass-input border-border/50 focus:border-primary/50"
                 />
               </div>
             )}
@@ -277,6 +278,7 @@ const Auth = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  className="glass-input border-border/50 focus:border-primary/50"
                 />
               </div>
             )}
@@ -290,6 +292,7 @@ const Auth = () => {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
+                  className="glass-input border-border/50 focus:border-primary/50"
                 />
               </div>
             )}
@@ -306,7 +309,7 @@ const Auth = () => {
             )}
             <Button
               type="submit"
-              className="w-full bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-opacity"
+              className="w-full glossy-button bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-all text-primary-foreground font-medium"
               disabled={loading}
             >
               {loading 
