@@ -29,12 +29,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const TruncatedText = ({ text, maxLength = 120 }: { text: string; maxLength?: number }) => {
+const TruncatedText = ({ text, maxLength = 120, className }: { text: string; maxLength?: number; className?: string }) => {
   const [expanded, setExpanded] = useState(false);
   const needsTruncation = text.length > maxLength;
   
   return (
-    <div className="text-muted-foreground text-sm mb-3">
+    <div className={className || "text-muted-foreground text-sm mb-3"}>
       <p>{expanded || !needsTruncation ? text : `${text.slice(0, maxLength)}...`}</p>
       {needsTruncation && (
         <button
