@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+const TruncatedText = ({ text, maxLength = 120 }: { text: string; maxLength?: number }) => {
+  const [expanded, setExpanded] = useState(false);
+  const needsTruncation = text.length > maxLength;
+  
+  return (
+    <div className="text-muted-foreground text-sm mb-3">
+      <p>{expanded || !needsTruncation ? text : `${text.slice(0, maxLength)}...`}</p>
+      {needsTruncation && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-primary text-xs font-medium mt-1 hover:underline"
+        >
+          {expanded ? "See less" : "See more"}
+        </button>
+      )}
+    </div>
+  );
+};
 
 interface Topic {
   id: string;
@@ -432,9 +451,7 @@ const Dashboard = () => {
                     <div className="flex-1">
                       <h4 className="font-semibold text-lg mb-1">{topic.title}</h4>
                       {topic.description && (
-                        <p className="text-muted-foreground text-sm mb-3">
-                          {topic.description}
-                        </p>
+                        <TruncatedText text={topic.description} maxLength={120} />
                       )}
                        <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                         <div className="flex items-center gap-1">
@@ -563,9 +580,7 @@ const Dashboard = () => {
                         <div className="flex-1">
                           <h4 className="font-semibold text-lg mb-1">{topic.title}</h4>
                           {topic.description && (
-                            <p className="text-muted-foreground text-sm mb-3">
-                              {topic.description}
-                            </p>
+                            <TruncatedText text={topic.description} maxLength={120} />
                           )}
                           <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                             <div className="flex items-center gap-1">
