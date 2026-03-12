@@ -561,9 +561,7 @@ const Dashboard = () => {
                         <div className="flex-1">
                           <h4 className="font-semibold text-lg mb-1">{topic.title}</h4>
                           {topic.description && (
-                            <p className="text-muted-foreground text-sm mb-3">
-                              {topic.description}
-                            </p>
+                            <TruncatedText text={topic.description} maxLength={120} />
                           )}
                           <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                             <div className="flex items-center gap-1">
