@@ -29,12 +29,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const TruncatedText = ({ text, maxLength = 120 }: { text: string; maxLength?: number }) => {
+const TruncatedText = ({ text, maxLength = 120, className }: { text: string; maxLength?: number; className?: string }) => {
   const [expanded, setExpanded] = useState(false);
   const needsTruncation = text.length > maxLength;
   
   return (
-    <div className="text-muted-foreground text-sm mb-3">
+    <div className={className || "text-muted-foreground text-sm mb-3"}>
       <p>{expanded || !needsTruncation ? text : `${text.slice(0, maxLength)}...`}</p>
       {needsTruncation && (
         <button
@@ -449,7 +449,7 @@ const Dashboard = () => {
                 <CardContent className="py-4">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <h4 className="font-semibold text-lg mb-1">{topic.title}</h4>
+                      <TruncatedText text={topic.title} maxLength={60} className="font-semibold text-lg mb-1 text-foreground" />
                       {topic.description && (
                         <TruncatedText text={topic.description} maxLength={120} />
                       )}
@@ -578,7 +578,7 @@ const Dashboard = () => {
                     <CardContent className="py-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <h4 className="font-semibold text-lg mb-1">{topic.title}</h4>
+                          <TruncatedText text={topic.title} maxLength={60} className="font-semibold text-lg mb-1 text-foreground" />
                           {topic.description && (
                             <TruncatedText text={topic.description} maxLength={120} />
                           )}
