@@ -578,7 +578,7 @@ const Dashboard = () => {
                     <CardContent className="py-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <h4 className="font-semibold text-lg mb-1">{topic.title}</h4>
+                          <TruncatedText text={topic.title} maxLength={60} className="font-semibold text-lg mb-1 text-foreground" />
                           {topic.description && (
                             <TruncatedText text={topic.description} maxLength={120} />
                           )}
