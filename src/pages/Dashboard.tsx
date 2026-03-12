@@ -29,6 +29,25 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+const TruncatedText = ({ text, maxLength = 120 }: { text: string; maxLength?: number }) => {
+  const [expanded, setExpanded] = useState(false);
+  const needsTruncation = text.length > maxLength;
+  
+  return (
+    <div className="text-muted-foreground text-sm mb-3">
+      <p>{expanded || !needsTruncation ? text : `${text.slice(0, maxLength)}...`}</p>
+      {needsTruncation && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-primary text-xs font-medium mt-1 hover:underline"
+        >
+          {expanded ? "See less" : "See more"}
+        </button>
+      )}
+    </div>
+  );
+};
+
 interface Topic {
   id: string;
   title: string;
