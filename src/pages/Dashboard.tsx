@@ -77,6 +77,7 @@ const Dashboard = () => {
   const [editNextRevisionDate, setEditNextRevisionDate] = useState("");
   const [editNextRevisionTime, setEditNextRevisionTime] = useState("");
   const [updating, setUpdating] = useState(false);
+  const [rewards, setRewards] = useState<any>(null);
 
   // Spaced repetition intervals in days
   const spacedRepetitionIntervals = [1, 3, 7, 14, 30, 60];
