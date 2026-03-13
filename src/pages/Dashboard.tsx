@@ -488,6 +488,7 @@ const Dashboard = () => {
           </Card>
         )}
 
+        <div className="space-y-4">
           <h3 className="text-xl font-semibold flex items-center gap-2 animate-fade-in" style={{ animationDelay: '0.2s' }}>
             <BookOpen className="w-5 h-5 text-primary" />
             Your Learning Journey
