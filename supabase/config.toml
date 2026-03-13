@@ -2,3 +2,6 @@ project_id = "ualisresposcbqgbvgms"
 
 [functions.send-revision-reminders]
 verify_jwt = false
+
+[functions.handle-quiz-answer]
+verify_jwt = false
