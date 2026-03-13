@@ -107,7 +107,6 @@ const Dashboard = () => {
 
   const fetchTopics = async () => {
     try {
-      // Fetch active topics (not deleted)
       const { data: activeData, error: activeError } = await supabase
         .from("learned_topics")
         .select("*")
@@ -117,7 +116,6 @@ const Dashboard = () => {
       if (activeError) throw activeError;
       setTopics(activeData || []);
 
-      // Fetch deleted topics
       const { data: deletedData, error: deletedError } = await supabase
         .from("learned_topics")
         .select("*")
@@ -126,6 +124,13 @@ const Dashboard = () => {
 
       if (deletedError) throw deletedError;
       setDeletedTopics(deletedData || []);
+
+      // Fetch rewards
+      const { data: rewardsData } = await supabase
+        .from("user_rewards")
+        .select("*")
+        .single();
+      setRewards(rewardsData);
     } catch (error: any) {
       toast({
         title: "Error",
