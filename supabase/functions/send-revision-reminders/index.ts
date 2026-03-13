@@ -120,6 +120,81 @@ STRICT RULES:
   }
 }
 
+interface MCQ {
+  question: string;
+  options: string[];
+  correctAnswer: string;
+}
+
+async function generateMCQ(topic: string): Promise<MCQ | null> {
+  console.log("Generating MCQ for topic:", topic);
+  try {
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          {
+            role: "system",
+            content: "You generate quiz questions. Return ONLY valid JSON, no markdown, no code fences.",
+          },
+          {
+            role: "user",
+            content: `Generate a multiple choice question about "${topic}". Return JSON with this exact structure:
+{"question":"Your question here?","options":["A) option1","B) option2","C) option3","D) option4"],"correctAnswer":"A) option1"}
+The correct answer must exactly match one of the options. Make the question test understanding, not just memorization.`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("MCQ generation failed:", response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    let content = data.choices[0].message.content.trim();
+    // Strip markdown code fences if present
+    content = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    const mcq = JSON.parse(content);
+    console.log("MCQ generated for topic:", topic);
+    return mcq;
+  } catch (error) {
+    console.error("Error generating MCQ:", error);
+    return null;
+  }
+}
+
+function buildQuizHTML(mcq: MCQ, userId: string, topicId: string, quizBaseUrl: string): string {
+  const encodedQuestion = encodeURIComponent(mcq.question);
+  const encodedCorrect = encodeURIComponent(mcq.correctAnswer);
+
+  const optionsHTML = mcq.options
+    .map((opt) => {
+      const encodedOpt = encodeURIComponent(opt);
+      const answerUrl = `${quizBaseUrl}?user_id=${userId}&topic_id=${topicId}&question=${encodedQuestion}&selected=${encodedOpt}&correct=${encodedCorrect}`;
+      return `<a href="${answerUrl}" style="display: block; padding: 14px 20px; margin: 8px 0; background: #f0f9ff; border: 2px solid #bae6fd; border-radius: 10px; text-decoration: none; color: #0c4a6e; font-size: 15px; font-weight: 500; transition: all 0.2s;">${opt}</a>`;
+    })
+    .join("");
+
+  return `
+    <div style="background: linear-gradient(135deg, #eff6ff, #f0f9ff); padding: 28px; margin: 30px 0; border-radius: 16px; border: 2px solid #93c5fd;">
+      <div style="display: flex; align-items: center; margin-bottom: 16px;">
+        <span style="font-size: 28px; margin-right: 10px;">🎯</span>
+        <h3 style="color: #1e40af; font-size: 18px; margin: 0; font-weight: 700;">Quick Quiz — Test Your Knowledge!</h3>
+      </div>
+      <p style="color: #1e3a5f; font-size: 16px; font-weight: 600; margin-bottom: 16px; line-height: 1.5;">${mcq.question}</p>
+      ${optionsHTML}
+      <p style="color: #94a3b8; font-size: 12px; margin-top: 16px; text-align: center;">Click an answer to earn reward points 🏆</p>
+    </div>
+  `;
+}
+
 serve(async (req) => {
   console.log("Request received at:", new Date().toISOString());
 
@@ -132,7 +207,6 @@ serve(async (req) => {
     console.log("Initializing Supabase client...");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Only fetch topics where revision time has actually passed (not future times today)
     const now = new Date();
     const currentTime = now.toISOString();
     console.log("Fetching topics due for revision up to:", currentTime);
@@ -165,6 +239,7 @@ serve(async (req) => {
 
     console.log("Topics grouped by user:", Object.keys(topicsByUser));
 
+    const quizBaseUrl = `${supabaseUrl}/functions/v1/handle-quiz-answer`;
     let emailsSent = 0;
 
     for (const [userId, topics] of Object.entries(topicsByUser)) {
@@ -180,18 +255,41 @@ serve(async (req) => {
       const userEmail = userData.user.email;
       console.log("User email:", userEmail);
 
+      // Fetch user rewards for stats in email
+      const { data: rewards } = await supabase
+        .from("user_rewards")
+        .select("*")
+        .eq("user_id", userId)
+        .single();
+
       const topicsWithDescriptions = await Promise.all(
         topicsArray.map(async (topic) => {
-          const desc = await generateTopicDescription(topic.title);
-          console.log("Generated description for topic:", topic.title);
-          return { ...topic, aiDescription: desc };
+          const [desc, mcq] = await Promise.all([
+            generateTopicDescription(topic.title),
+            generateMCQ(topic.title),
+          ]);
+          console.log("Generated description and MCQ for topic:", topic.title);
+          return { ...topic, aiDescription: desc, mcq };
         })
       );
+
+      // Build reward stats banner for email
+      const rewardsBanner = rewards
+        ? `<div style="background: linear-gradient(135deg, #fef3c7, #fde68a); padding: 16px 24px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
+            <span style="font-size: 24px;">${getRankMedal(rewards.rank)}</span>
+            <strong style="color: #92400e; font-size: 16px;"> ${rewards.rank}</strong>
+            <span style="color: #a16207; margin: 0 12px;">|</span>
+            <span style="color: #92400e;">🔥 ${rewards.current_streak} day streak</span>
+            <span style="color: #a16207; margin: 0 12px;">|</span>
+            <span style="color: #92400e;">⭐ ${rewards.total_points} pts</span>
+           </div>`
+        : "";
 
       const emailContent = `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
           <h1 style="color: #0891b2; font-size: 28px; margin-bottom: 10px; font-weight: 600;">🧠 Time to Review Your Topics!</h1>
-          <p style="color: #475569; font-size: 16px; line-height: 1.6; margin-bottom: 30px;">Hello! Here are the topics due for revision today:</p>
+          <p style="color: #475569; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">Hello! Here are the topics due for revision today:</p>
+          ${rewardsBanner}
           ${topicsWithDescriptions
             .map(
               (topic) => `
@@ -210,6 +308,7 @@ serve(async (req) => {
                 </style>
                 ${topic.aiDescription}
               </div>
+              ${topic.mcq ? buildQuizHTML(topic.mcq, userId, topic.id, quizBaseUrl) : ""}
               <p style="color: #94a3b8; font-size: 13px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #e2e8f0;">📅 Originally learned: ${new Date(topic.learned_date).toLocaleDateString()}</p>
             </div>
           `
@@ -221,10 +320,8 @@ serve(async (req) => {
       `;
 
       const fromEmail = "onboarding@resend.dev";
-      // Send to actual user email (requires verified domain for production)
       const toEmail = userEmail;
 
-      // Create subject with topic name(s)
       const topicNames = topicsArray.map(t => t.title);
       let emailSubject: string;
       if (topicNames.length === 1) {
@@ -263,7 +360,6 @@ serve(async (req) => {
       for (const topic of topicsArray) {
         const nextRevisionDate = new Date();
         
-        // Daily topics always get scheduled for tomorrow
         if (topic.is_daily) {
           nextRevisionDate.setDate(nextRevisionDate.getDate() + 1);
           console.log(`Topic ${topic.id} is daily - scheduling for tomorrow: ${nextRevisionDate.toISOString()}`);
@@ -274,7 +370,6 @@ serve(async (req) => {
             })
             .eq("id", topic.id);
         } else {
-          // Regular spaced repetition for non-daily topics
           const currentCount = topic.revision_count || 0;
           const nextCount = currentCount + 1;
           const intervalIndex = Math.min(nextCount, REVISION_INTERVALS.length - 1);
@@ -306,3 +401,11 @@ serve(async (req) => {
     });
   }
 });
+
+function getRankMedal(rank: string): string {
+  const medals: Record<string, string> = {
+    Bronze: "🥉", Silver: "🥈", Gold: "🥇", Platinum: "💎",
+    Diamond: "💠", Crown: "👑", Ace: "🏆", Conqueror: "⚔️",
+  };
+  return medals[rank] || "🥉";
+}
