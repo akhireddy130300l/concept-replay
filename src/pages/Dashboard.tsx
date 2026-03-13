@@ -58,6 +58,35 @@ interface Topic {
   is_daily?: boolean;
 }
 
+const RANK_THRESHOLDS = [
+  { name: "Bronze", minPoints: 0, emoji: "🥉" },
+  { name: "Silver", minPoints: 50, emoji: "🥈" },
+  { name: "Gold", minPoints: 150, emoji: "🥇" },
+  { name: "Platinum", minPoints: 300, emoji: "💎" },
+  { name: "Diamond", minPoints: 500, emoji: "💠" },
+  { name: "Crown", minPoints: 800, emoji: "👑" },
+  { name: "Ace", minPoints: 1200, emoji: "🏆" },
+  { name: "Conqueror", minPoints: 2000, emoji: "⚔️" },
+];
+
+function getRankEmoji(rank: string): string {
+  return RANK_THRESHOLDS.find(r => r.name === rank)?.emoji || "🥉";
+}
+
+function getNextRank(currentRank: string, points: number) {
+  const idx = RANK_THRESHOLDS.findIndex(r => r.name === currentRank);
+  if (idx < RANK_THRESHOLDS.length - 1) return RANK_THRESHOLDS[idx + 1];
+  return null;
+}
+
+function getProgressToNextRank(currentRank: string, points: number): number {
+  const idx = RANK_THRESHOLDS.findIndex(r => r.name === currentRank);
+  if (idx >= RANK_THRESHOLDS.length - 1) return 100;
+  const current = RANK_THRESHOLDS[idx].minPoints;
+  const next = RANK_THRESHOLDS[idx + 1].minPoints;
+  return Math.min(100, Math.round(((points - current) / (next - current)) * 100));
+}
+
 const Dashboard = () => {
   const [user, setUser] = useState<any>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
