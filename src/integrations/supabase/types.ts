@@ -53,6 +53,92 @@ export type Database = {
         }
         Relationships: []
       }
+      quiz_responses: {
+        Row: {
+          answered_at: string
+          correct_answer: string
+          id: string
+          is_correct: boolean
+          question: string
+          selected_answer: string
+          topic_id: string
+          user_id: string
+        }
+        Insert: {
+          answered_at?: string
+          correct_answer: string
+          id?: string
+          is_correct: boolean
+          question: string
+          selected_answer: string
+          topic_id: string
+          user_id: string
+        }
+        Update: {
+          answered_at?: string
+          correct_answer?: string
+          id?: string
+          is_correct?: boolean
+          question?: string
+          selected_answer?: string
+          topic_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quiz_responses_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "learned_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_rewards: {
+        Row: {
+          correct_answers: number
+          created_at: string
+          current_streak: number
+          id: string
+          last_quiz_date: string | null
+          longest_streak: number
+          rank: string
+          total_points: number
+          total_quizzes: number
+          updated_at: string
+          user_id: string
+          wrong_answers: number
+        }
+        Insert: {
+          correct_answers?: number
+          created_at?: string
+          current_streak?: number
+          id?: string
+          last_quiz_date?: string | null
+          longest_streak?: number
+          rank?: string
+          total_points?: number
+          total_quizzes?: number
+          updated_at?: string
+          user_id: string
+          wrong_answers?: number
+        }
+        Update: {
+          correct_answers?: number
+          created_at?: string
+          current_streak?: number
+          id?: string
+          last_quiz_date?: string | null
+          longest_streak?: number
+          rank?: string
+          total_points?: number
+          total_quizzes?: number
+          updated_at?: string
+          user_id?: string
+          wrong_answers?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

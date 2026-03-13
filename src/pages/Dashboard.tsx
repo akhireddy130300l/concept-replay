@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive, Pencil, RefreshCw, Clock, Info } from "lucide-react";
+import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive, Pencil, RefreshCw, Clock, Info, Trophy, Flame, Target, Star } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -58,6 +58,35 @@ interface Topic {
   is_daily?: boolean;
 }
 
+const RANK_THRESHOLDS = [
+  { name: "Bronze", minPoints: 0, emoji: "🥉" },
+  { name: "Silver", minPoints: 50, emoji: "🥈" },
+  { name: "Gold", minPoints: 150, emoji: "🥇" },
+  { name: "Platinum", minPoints: 300, emoji: "💎" },
+  { name: "Diamond", minPoints: 500, emoji: "💠" },
+  { name: "Crown", minPoints: 800, emoji: "👑" },
+  { name: "Ace", minPoints: 1200, emoji: "🏆" },
+  { name: "Conqueror", minPoints: 2000, emoji: "⚔️" },
+];
+
+function getRankEmoji(rank: string): string {
+  return RANK_THRESHOLDS.find(r => r.name === rank)?.emoji || "🥉";
+}
+
+function getNextRank(currentRank: string, points: number) {
+  const idx = RANK_THRESHOLDS.findIndex(r => r.name === currentRank);
+  if (idx < RANK_THRESHOLDS.length - 1) return RANK_THRESHOLDS[idx + 1];
+  return null;
+}
+
+function getProgressToNextRank(currentRank: string, points: number): number {
+  const idx = RANK_THRESHOLDS.findIndex(r => r.name === currentRank);
+  if (idx >= RANK_THRESHOLDS.length - 1) return 100;
+  const current = RANK_THRESHOLDS[idx].minPoints;
+  const next = RANK_THRESHOLDS[idx + 1].minPoints;
+  return Math.min(100, Math.round(((points - current) / (next - current)) * 100));
+}
+
 const Dashboard = () => {
   const [user, setUser] = useState<any>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -77,6 +106,7 @@ const Dashboard = () => {
   const [editNextRevisionDate, setEditNextRevisionDate] = useState("");
   const [editNextRevisionTime, setEditNextRevisionTime] = useState("");
   const [updating, setUpdating] = useState(false);
+  const [rewards, setRewards] = useState<any>(null);
 
   // Spaced repetition intervals in days
   const spacedRepetitionIntervals = [1, 3, 7, 14, 30, 60];
@@ -106,7 +136,6 @@ const Dashboard = () => {
 
   const fetchTopics = async () => {
     try {
-      // Fetch active topics (not deleted)
       const { data: activeData, error: activeError } = await supabase
         .from("learned_topics")
         .select("*")
@@ -116,7 +145,6 @@ const Dashboard = () => {
       if (activeError) throw activeError;
       setTopics(activeData || []);
 
-      // Fetch deleted topics
       const { data: deletedData, error: deletedError } = await supabase
         .from("learned_topics")
         .select("*")
@@ -125,6 +153,13 @@ const Dashboard = () => {
 
       if (deletedError) throw deletedError;
       setDeletedTopics(deletedData || []);
+
+      // Fetch rewards
+      const { data: rewardsData } = await supabase
+        .from("user_rewards")
+        .select("*")
+        .single();
+      setRewards(rewardsData);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -423,6 +458,64 @@ const Dashboard = () => {
             </form>
           </CardContent>
         </Card>
+
+        {/* PUBG-style Rewards Widget */}
+        {rewards && (
+          <Card className="glass-card animate-fade-in overflow-hidden" style={{ animationDelay: '0.15s' }}>
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-yellow-500/10" />
+              <CardContent className="py-5 relative">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <Trophy className="w-5 h-5 text-amber-500" />
+                    Your Rewards
+                  </h3>
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30">
+                    <span className="text-lg">{getRankEmoji(rewards.rank)}</span>
+                    <span className="font-bold text-sm text-amber-700 dark:text-amber-300">{rewards.rank}</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
+                    <Star className="w-4 h-4 mx-auto mb-1 text-amber-500" />
+                    <p className="text-xl font-bold">{rewards.total_points}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Points</p>
+                  </div>
+                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
+                    <Flame className="w-4 h-4 mx-auto mb-1 text-orange-500" />
+                    <p className="text-xl font-bold">{rewards.current_streak}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Streak</p>
+                  </div>
+                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
+                    <Target className="w-4 h-4 mx-auto mb-1 text-green-500" />
+                    <p className="text-xl font-bold">{rewards.correct_answers}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Correct</p>
+                  </div>
+                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
+                    <Trophy className="w-4 h-4 mx-auto mb-1 text-primary" />
+                    <p className="text-xl font-bold">{rewards.total_quizzes}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Quizzes</p>
+                  </div>
+                </div>
+                {/* Progress to next rank */}
+                {getNextRank(rewards.rank, rewards.total_points) && (
+                  <div className="mt-4">
+                    <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                      <span>{rewards.rank}</span>
+                      <span>{getNextRank(rewards.rank, rewards.total_points)!.name} ({getNextRank(rewards.rank, rewards.total_points)!.minPoints} pts)</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500"
+                        style={{ width: `${getProgressToNextRank(rewards.rank, rewards.total_points)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </div>
+          </Card>
+        )}
 
         <div className="space-y-4">
           <h3 className="text-xl font-semibold flex items-center gap-2 animate-fade-in" style={{ animationDelay: '0.2s' }}>
