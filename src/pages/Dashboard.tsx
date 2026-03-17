@@ -213,6 +213,9 @@ const Dashboard = () => {
 
       if (error) throw error;
 
+      // Update topic streak
+      await updateTopicStreak();
+
       toast({
         title: "Success!",
         description: newIsDaily ? "Daily topic added - you'll receive reminders every day!" : "Topic added successfully",
@@ -230,6 +233,41 @@ const Dashboard = () => {
       });
     } finally {
       setAdding(false);
+    }
+  };
+
+  const updateTopicStreak = async () => {
+    const today = new Date().toISOString().split("T")[0];
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split("T")[0];
+
+    const { data: existing } = await supabase
+      .from("user_rewards")
+      .select("*")
+      .eq("user_id", user.id)
+      .single();
+
+    if (existing) {
+      if (existing.last_topic_date === today) return; // already counted today
+      const isConsecutive = existing.last_topic_date === yesterdayStr;
+      const newStreak = isConsecutive ? (existing.topic_streak || 0) + 1 : 1;
+      await supabase
+        .from("user_rewards")
+        .update({
+          topic_streak: newStreak,
+          longest_topic_streak: Math.max(newStreak, existing.longest_topic_streak || 0),
+          last_topic_date: today,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", user.id);
+    } else {
+      await supabase.from("user_rewards").insert({
+        user_id: user.id,
+        topic_streak: 1,
+        longest_topic_streak: 1,
+        last_topic_date: today,
+      });
     }
   };
 
@@ -485,7 +523,7 @@ const Dashboard = () => {
                     <span className="font-bold text-sm text-amber-700 dark:text-amber-300">{rewards.rank}</span>
                   </div>
                 </div>
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
                     <Star className="w-4 h-4 mx-auto mb-1 text-amber-500" />
                     <p className="text-xl font-bold">{rewards.total_points}</p>
@@ -494,7 +532,12 @@ const Dashboard = () => {
                   <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
                     <Flame className="w-4 h-4 mx-auto mb-1 text-orange-500" />
                     <p className="text-xl font-bold">{rewards.current_streak}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Streak</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Quiz Streak</p>
+                  </div>
+                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
+                    <BookOpen className="w-4 h-4 mx-auto mb-1 text-cyan-500" />
+                    <p className="text-xl font-bold">{rewards.topic_streak || 0}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Topic Streak</p>
                   </div>
                   <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
                     <Target className="w-4 h-4 mx-auto mb-1 text-green-500" />
@@ -505,6 +548,11 @@ const Dashboard = () => {
                     <Trophy className="w-4 h-4 mx-auto mb-1 text-primary" />
                     <p className="text-xl font-bold">{rewards.total_quizzes}</p>
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Quizzes</p>
+                  </div>
+                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
+                    <Flame className="w-4 h-4 mx-auto mb-1 text-rose-500" />
+                    <p className="text-xl font-bold">{Math.max(rewards.longest_streak, rewards.longest_topic_streak || 0)}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Best Streak</p>
                   </div>
                 </div>
                 {/* Progress to next rank */}
