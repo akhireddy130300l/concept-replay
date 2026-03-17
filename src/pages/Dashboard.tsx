@@ -523,7 +523,7 @@ const Dashboard = () => {
                     <span className="font-bold text-sm text-amber-700 dark:text-amber-300">{rewards.rank}</span>
                   </div>
                 </div>
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
                     <Star className="w-4 h-4 mx-auto mb-1 text-amber-500" />
                     <p className="text-xl font-bold">{rewards.total_points}</p>
@@ -532,7 +532,12 @@ const Dashboard = () => {
                   <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
                     <Flame className="w-4 h-4 mx-auto mb-1 text-orange-500" />
                     <p className="text-xl font-bold">{rewards.current_streak}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Streak</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Quiz Streak</p>
+                  </div>
+                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
+                    <BookOpen className="w-4 h-4 mx-auto mb-1 text-cyan-500" />
+                    <p className="text-xl font-bold">{rewards.topic_streak || 0}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Topic Streak</p>
                   </div>
                   <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
                     <Target className="w-4 h-4 mx-auto mb-1 text-green-500" />
@@ -543,6 +548,11 @@ const Dashboard = () => {
                     <Trophy className="w-4 h-4 mx-auto mb-1 text-primary" />
                     <p className="text-xl font-bold">{rewards.total_quizzes}</p>
                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Quizzes</p>
+                  </div>
+                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
+                    <Flame className="w-4 h-4 mx-auto mb-1 text-rose-500" />
+                    <p className="text-xl font-bold">{Math.max(rewards.longest_streak, rewards.longest_topic_streak || 0)}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Best Streak</p>
                   </div>
                 </div>
                 {/* Progress to next rank */}
