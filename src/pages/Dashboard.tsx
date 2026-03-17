@@ -236,6 +236,41 @@ const Dashboard = () => {
     }
   };
 
+  const updateTopicStreak = async () => {
+    const today = new Date().toISOString().split("T")[0];
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split("T")[0];
+
+    const { data: existing } = await supabase
+      .from("user_rewards")
+      .select("*")
+      .eq("user_id", user.id)
+      .single();
+
+    if (existing) {
+      if (existing.last_topic_date === today) return; // already counted today
+      const isConsecutive = existing.last_topic_date === yesterdayStr;
+      const newStreak = isConsecutive ? (existing.topic_streak || 0) + 1 : 1;
+      await supabase
+        .from("user_rewards")
+        .update({
+          topic_streak: newStreak,
+          longest_topic_streak: Math.max(newStreak, existing.longest_topic_streak || 0),
+          last_topic_date: today,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", user.id);
+    } else {
+      await supabase.from("user_rewards").insert({
+        user_id: user.id,
+        topic_streak: 1,
+        longest_topic_streak: 1,
+        last_topic_date: today,
+      });
+    }
+  };
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate("/");
