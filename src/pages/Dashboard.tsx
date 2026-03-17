@@ -213,6 +213,9 @@ const Dashboard = () => {
 
       if (error) throw error;
 
+      // Update topic streak
+      await updateTopicStreak();
+
       toast({
         title: "Success!",
         description: newIsDaily ? "Daily topic added - you'll receive reminders every day!" : "Topic added successfully",
