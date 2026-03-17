@@ -162,6 +162,14 @@ const Dashboard = () => {
         .select("*")
         .single();
       setRewards(rewardsData);
+
+      // Fetch quiz history
+      const { data: quizData } = await supabase
+        .from("quiz_responses")
+        .select("*")
+        .order("answered_at", { ascending: false })
+        .limit(50);
+      setQuizHistory(quizData || []);
     } catch (error: any) {
       toast({
         title: "Error",
