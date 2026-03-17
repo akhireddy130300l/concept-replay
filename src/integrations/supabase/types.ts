@@ -101,8 +101,11 @@ export type Database = {
           current_streak: number
           id: string
           last_quiz_date: string | null
+          last_topic_date: string | null
           longest_streak: number
+          longest_topic_streak: number
           rank: string
+          topic_streak: number
           total_points: number
           total_quizzes: number
           updated_at: string
@@ -115,8 +118,11 @@ export type Database = {
           current_streak?: number
           id?: string
           last_quiz_date?: string | null
+          last_topic_date?: string | null
           longest_streak?: number
+          longest_topic_streak?: number
           rank?: string
+          topic_streak?: number
           total_points?: number
           total_quizzes?: number
           updated_at?: string
@@ -129,8 +135,11 @@ export type Database = {
           current_streak?: number
           id?: string
           last_quiz_date?: string | null
+          last_topic_date?: string | null
           longest_streak?: number
+          longest_topic_streak?: number
           rank?: string
+          topic_streak?: number
           total_points?: number
           total_quizzes?: number
           updated_at?: string
