@@ -527,6 +527,88 @@ const Dashboard = () => {
           </Card>
         )}
 
+        {/* Quiz Progress Timeline */}
+        {quizHistory.length > 0 && (
+          <Card className="mt-4 mb-4 glass-card animate-fade-in" style={{ animationDelay: '0.18s' }}>
+            <CardContent className="py-4">
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="w-full flex items-center justify-between"
+              >
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <History className="w-5 h-5 text-primary" />
+                  Quiz Progress Timeline
+                </h3>
+                {showHistory ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
+              </button>
+
+              {showHistory && (
+                <div className="mt-4 space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                  {quizHistory.map((quiz, idx) => {
+                    const date = new Date(quiz.answered_at);
+                    const prevQuiz = quizHistory[idx + 1];
+                    const prevDate = prevQuiz ? new Date(prevQuiz.answered_at).toDateString() : null;
+                    const isNewDay = !prevDate || date.toDateString() !== prevDate;
+
+                    return (
+                      <div key={quiz.id}>
+                        {isNewDay && (
+                          <div className="flex items-center gap-2 mt-3 mb-2">
+                            <div className="h-px flex-1 bg-border/50" />
+                            <span className="text-xs font-medium text-muted-foreground px-2">
+                              {date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                            </span>
+                            <div className="h-px flex-1 bg-border/50" />
+                          </div>
+                        )}
+                        <div className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
+                          quiz.is_correct 
+                            ? 'bg-green-500/5 border-green-500/20' 
+                            : 'bg-destructive/5 border-destructive/20'
+                        }`}>
+                          <div className={`mt-0.5 rounded-full p-1 ${
+                            quiz.is_correct ? 'bg-green-500/20' : 'bg-destructive/20'
+                          }`}>
+                            {quiz.is_correct 
+                              ? <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400" />
+                              : <XCircle className="w-4 h-4 text-destructive" />
+                            }
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium leading-snug truncate">{quiz.question}</p>
+                            {!quiz.is_correct && (
+                              <div className="mt-1.5 space-y-0.5">
+                                <p className="text-xs text-destructive">
+                                  Your answer: <span className="font-medium">{quiz.selected_answer}</span>
+                                </p>
+                                <p className="text-xs text-green-600 dark:text-green-400">
+                                  Correct: <span className="font-medium">{quiz.correct_answer}</span>
+                                </p>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2 mt-1.5">
+                              <span className="text-[10px] text-muted-foreground">
+                                {date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                              </span>
+                              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                                quiz.is_correct 
+                                  ? 'bg-green-500/10 text-green-600 dark:text-green-400' 
+                                  : 'bg-destructive/10 text-destructive'
+                              }`}>
+                                {quiz.is_correct ? "+10 pts" : "+2 pts"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         <div className="space-y-4">
           <h3 className="text-xl font-semibold flex items-center gap-2 animate-fade-in" style={{ animationDelay: '0.2s' }}>
             <BookOpen className="w-5 h-5 text-primary" />
