@@ -7,7 +7,7 @@ const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const FUNCTION_VERSION = "market-gainers-v6-direct-debug-2026-06-12";
+const FUNCTION_VERSION = "market-gainers-v7-strong-intent-debug-2026-06-12";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -101,12 +101,18 @@ function isLatestMarketGainersRequest(topic: string): boolean {
   const normalized = normalizeTopicForIntent(topic);
 
   // Extra-safe check for hidden punctuation/quotes around the saved topic.
-  if (rawTopic.includes("latest") && rawTopic.includes("market") && rawTopic.includes("gainer")) {
+  if (
+    rawTopic.includes("latest") &&
+    (rawTopic.includes("market") || rawTopic.includes("stock") || rawTopic.includes("stocks")) &&
+    (rawTopic.includes("gainer") || rawTopic.includes("ranking") || rawTopic.includes("mover"))
+  ) {
     return true;
   }
 
   // Direct shortcuts. These MUST bypass the AI bucket classifier.
-  const directLiveMarketRequests = new Set([
+  // Use substring matching instead of exact matching so saved titles like
+  // "latest market gainers today" or quoted/padded values still work.
+  const directLiveMarketRequests = [
     "latest market gainers",
     "market gainers",
     "stock gainers",
@@ -124,10 +130,15 @@ function isLatestMarketGainersRequest(topic: string): boolean {
     "stocks movers",
     "top movers",
     "top stocks today",
+    "top stock today",
     "stocks today",
-  ]);
+    "biggest stock gainers",
+    "biggest market gainers",
+    "highest stock gainers",
+    "highest market gainers",
+  ];
 
-  if (directLiveMarketRequests.has(normalized)) {
+  if (directLiveMarketRequests.some((phrase) => normalized.includes(phrase))) {
     return true;
   }
 
