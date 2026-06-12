@@ -7,7 +7,7 @@ const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const FUNCTION_VERSION = "market-gainers-v8-loop-guard-debug-2026-06-12";
+const FUNCTION_VERSION = "market-gainers-v9-visible-email-debug-2026-06-12";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -695,6 +695,7 @@ serve(async (req) => {
             .join("")}
           <p style="color: #64748b; margin-top: 40px; font-size: 15px; line-height: 1.6;">Keep up the great work! Regular reviews help solidify your knowledge. 💪</p>
           <p style="color: #94a3b8; font-size: 14px; margin-top: 20px;">Best regards,<br><strong style="color: #0891b2;">LearnLoop Team</strong></p>
+          <p style="color: #cbd5e1; font-size: 11px; margin-top: 20px;">Function version: ${FUNCTION_VERSION}</p>
         </div>
       `;
 
@@ -704,11 +705,11 @@ serve(async (req) => {
       const topicNames = topicsArray.map(t => t.title);
       let emailSubject: string;
       if (topicNames.length === 1) {
-        emailSubject = `📚 Hey Buddy "${topicNames[0]}" - Ready for Review`;
+        emailSubject = `[${FUNCTION_VERSION}] 📚 Hey Buddy "${topicNames[0]}" - Ready for Review`;
       } else if (topicNames.length === 2) {
-        emailSubject = `📚 Hey Buddy "${topicNames[0]}" & "${topicNames[1]}" - Ready for Review`;
+        emailSubject = `[${FUNCTION_VERSION}] 📚 Hey Buddy "${topicNames[0]}" & "${topicNames[1]}" - Ready for Review`;
       } else {
-        emailSubject = `📚 Hey Buddy "${topicNames[0]}" & ${topicNames.length - 1} more - Ready for Review`;
+        emailSubject = `[${FUNCTION_VERSION}] 📚 Hey Buddy "${topicNames[0]}" & ${topicNames.length - 1} more - Ready for Review`;
       }
 
       console.log("Sending email with:");
