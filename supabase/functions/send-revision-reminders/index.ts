@@ -7,7 +7,7 @@ const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const FUNCTION_VERSION = "market-gainers-v7-strong-intent-debug-2026-06-12";
+const FUNCTION_VERSION = "market-gainers-v8-loop-guard-debug-2026-06-12";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -99,6 +99,10 @@ function normalizeTopicForIntent(topic: string): string {
 function isLatestMarketGainersRequest(topic: string): boolean {
   const rawTopic = String(topic || "").toLowerCase();
   const normalized = normalizeTopicForIntent(topic);
+
+  if (normalized.includes("latest market gainers")) {
+    return true;
+  }
 
   // Extra-safe check for hidden punctuation/quotes around the saved topic.
   if (
@@ -624,6 +628,21 @@ serve(async (req) => {
 
       const topicsWithDescriptions = await Promise.all(
         topicsArray.map(async (topic) => {
+          const isMarketGainersTopic = isLatestMarketGainersRequest(topic.title);
+          console.log("Topic loop market-gainers guard:", {
+            topicId: topic.id,
+            title: topic.title,
+            normalizedTitle: normalizeTopicForIntent(topic.title),
+            isMarketGainersTopic,
+            functionVersion: FUNCTION_VERSION,
+          });
+
+          if (isMarketGainersTopic) {
+            const desc = await generateTopicDescription(topic.title);
+            console.log("Generated market gainers description without MCQ for topic:", topic.title);
+            return { ...topic, aiDescription: desc, mcq: null };
+          }
+
           const [desc, mcq] = await Promise.all([
             generateTopicDescription(topic.title),
             generateMCQ(topic.title),
