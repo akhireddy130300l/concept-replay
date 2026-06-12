@@ -14,6 +14,217 @@ const corsHeaders = {
 
 const REVISION_INTERVALS = [1, 3, 7, 14, 30, 60];
 
+
+const YAHOO_GAINERS_PAGE_URL = "https://finance.yahoo.com/markets/stocks/gainers/";
+const YAHOO_GAINERS_ENDPOINT = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=true&lang=en-US&region=US&scrIds=day_gainers&count=25";
+
+type YahooFormattedValue = {
+  raw?: number;
+  fmt?: string;
+  longFmt?: string;
+};
+
+type MarketGainer = {
+  symbol: string;
+  companyName: string;
+  price: string;
+  percentGain: string;
+  volume: string;
+  marketCap: string;
+  exchange: string;
+  session: string;
+  priceRaw: number;
+  percentGainRaw: number;
+  volumeRaw: number;
+};
+
+type MarketGainersResult = {
+  movers: MarketGainer[];
+  fetchedAtIso: string;
+  sourceUrl: string;
+};
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function getRawNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value && typeof value === "object" && "raw" in value) {
+    const raw = (value as YahooFormattedValue).raw;
+    return typeof raw === "number" && Number.isFinite(raw) ? raw : Number.NaN;
+  }
+  return Number.NaN;
+}
+
+function getFormattedValue(value: unknown, fallback = "N/A"): string {
+  if (value && typeof value === "object") {
+    const formatted = (value as YahooFormattedValue).fmt || (value as YahooFormattedValue).longFmt;
+    if (formatted) return formatted;
+    const raw = (value as YahooFormattedValue).raw;
+    if (typeof raw === "number" && Number.isFinite(raw)) return raw.toLocaleString("en-US");
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return value.toLocaleString("en-US");
+  if (typeof value === "string" && value.trim()) return value;
+  return fallback;
+}
+
+function getMarketSession(value: unknown): string {
+  const session = String(value || "").toUpperCase();
+  const labels: Record<string, string> = {
+    PRE: "Pre-market",
+    REGULAR: "Regular",
+    POST: "After-hours",
+    POSTPOST: "After-hours",
+    CLOSED: "Closed",
+  };
+  return labels[session] || "N/A";
+}
+
+function isLatestMarketGainersRequest(topic: string): boolean {
+  const normalized = topic.toLowerCase();
+  const hasMarketTerm = /\b(stock|stocks|market|markets|equity|equities|ticker|tickers|share|shares|nasdaq|nyse|us market|u\.s\. market)\b/.test(normalized);
+  const hasGainerOrRankingTerm = /\b(gainer|gainers|gain|gains|mover|movers|ranking|rankings|ranked|top)\b/.test(normalized);
+  const asksForFreshness = /\b(latest|today|current|now|live|recent|day|daily|top 10|top ten)\b/.test(normalized);
+
+  return hasMarketTerm && hasGainerOrRankingTerm && asksForFreshness;
+}
+
+async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
+  const response = await fetch(YAHOO_GAINERS_ENDPOINT, {
+    method: "GET",
+    headers: {
+      "Accept": "application/json,text/plain,*/*",
+      "User-Agent": "Mozilla/5.0 LearnLoop/1.0 (+https://finance.yahoo.com/markets/stocks/gainers/)",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Yahoo Finance returned HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const quotes = data?.finance?.result?.[0]?.quotes;
+
+  if (!Array.isArray(quotes) || quotes.length === 0) {
+    throw new Error("Yahoo Finance response did not include market movers.");
+  }
+
+  const movers = quotes
+    .map((quote: any): MarketGainer => {
+      const priceRaw = getRawNumber(quote.regularMarketPrice);
+      const percentGainRaw = getRawNumber(quote.regularMarketChangePercent);
+      const volumeRaw = getRawNumber(quote.regularMarketVolume);
+
+      return {
+        symbol: String(quote.symbol || "").trim(),
+        companyName: String(quote.shortName || quote.longName || quote.displayName || "N/A").trim(),
+        price: getFormattedValue(quote.regularMarketPrice),
+        percentGain: getFormattedValue(quote.regularMarketChangePercent),
+        volume: getFormattedValue(quote.regularMarketVolume),
+        marketCap: getFormattedValue(quote.marketCap),
+        exchange: String(quote.fullExchangeName || quote.exchange || "N/A").trim(),
+        session: getMarketSession(quote.marketState),
+        priceRaw,
+        percentGainRaw,
+        volumeRaw,
+      };
+    })
+    .filter((mover) => mover.symbol && Number.isFinite(mover.percentGainRaw))
+    // Keep highly traded penny-stock movers, but remove obvious low-volume penny spikes.
+    .filter((mover) => !(Number.isFinite(mover.priceRaw) && mover.priceRaw < 5 && Number.isFinite(mover.volumeRaw) && mover.volumeRaw < 1_000_000))
+    .sort((a, b) => b.percentGainRaw - a.percentGainRaw)
+    .slice(0, 10);
+
+  if (movers.length === 0) {
+    throw new Error("Yahoo Finance returned movers, but none passed the liquidity filter.");
+  }
+
+  return {
+    movers,
+    fetchedAtIso: new Date().toISOString(),
+    sourceUrl: YAHOO_GAINERS_PAGE_URL,
+  };
+}
+
+function buildMarketGainersHTML(result: MarketGainersResult): string {
+  const fetchedAt = new Date(result.fetchedAtIso).toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+
+  const rows = result.movers
+    .map((mover, index) => `
+      <tr>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: 700; color: #0f172a;">${index + 1}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;"><strong>${escapeHtml(mover.symbol)}</strong></td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(mover.companyName)}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">${escapeHtml(mover.price)}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right; color: #047857; font-weight: 700;">${escapeHtml(mover.percentGain)}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">${escapeHtml(mover.volume)}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">${escapeHtml(mover.marketCap)}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(mover.session)}</td>
+      </tr>
+    `)
+    .join("");
+
+  return `
+    <h2>Latest US Stock Market Gainers</h2>
+    <p>Here are the top US stock market gainers ranked by percentage gain, based on Yahoo Finance market-movers data.</p>
+    <p><strong>Data timestamp:</strong> ${escapeHtml(fetchedAt)}</p>
+    <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin: 16px 0; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden;">
+      <thead>
+        <tr style="background: #f1f5f9; color: #334155;">
+          <th style="padding: 10px; text-align: left; border-bottom: 1px solid #cbd5e1;">#</th>
+          <th style="padding: 10px; text-align: left; border-bottom: 1px solid #cbd5e1;">Ticker</th>
+          <th style="padding: 10px; text-align: left; border-bottom: 1px solid #cbd5e1;">Company</th>
+          <th style="padding: 10px; text-align: right; border-bottom: 1px solid #cbd5e1;">Price</th>
+          <th style="padding: 10px; text-align: right; border-bottom: 1px solid #cbd5e1;">% Gain</th>
+          <th style="padding: 10px; text-align: right; border-bottom: 1px solid #cbd5e1;">Volume</th>
+          <th style="padding: 10px; text-align: right; border-bottom: 1px solid #cbd5e1;">Market Cap</th>
+          <th style="padding: 10px; text-align: left; border-bottom: 1px solid #cbd5e1;">Session</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <h2>Source and Notes</h2>
+    <ul>
+      <li><strong>Source:</strong> <a href="${YAHOO_GAINERS_PAGE_URL}">Yahoo Finance Top Gainers</a>.</li>
+      <li>Yahoo Finance market data can be delayed and may change during pre-market, regular market, and after-hours sessions.</li>
+      <li>The session column comes from Yahoo's market-state value when available.</li>
+      <li>Very low-priced stocks are excluded only when volume is also low. High-volume penny-stock movers are still allowed.</li>
+      <li>This is market information, not investment advice. Check the stock page, news, SEC filings, and risk before buying.</li>
+    </ul>
+  `;
+}
+
+function buildMarketGainersUnavailableHTML(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Unknown error";
+
+  return `
+    <h2>Latest US Stock Market Gainers</h2>
+    <p>I tried to read the current Yahoo Finance market-movers data, but the server could not fetch it right now.</p>
+    <h2>What to Open Manually</h2>
+    <ul>
+      <li><a href="${YAHOO_GAINERS_PAGE_URL}">Yahoo Finance Top Gainers</a></li>
+      <li><a href="https://finance.yahoo.com/markets/stocks/losers/">Yahoo Finance Losers</a></li>
+      <li><a href="https://finance.yahoo.com/markets/stocks/most-active/">Yahoo Finance Most Active</a></li>
+    </ul>
+    <h2>Technical Detail</h2>
+    <p>${escapeHtml(message)}</p>
+  `;
+}
+
 function getTimezoneOffsetMs(date: Date, tz: string): number {
   const dtf = new Intl.DateTimeFormat("en-US", {
     timeZone: tz, hourCycle: "h23",
@@ -54,6 +265,18 @@ function nextRevisionInstant(now: Date, daysFromNow: number, hour: number, minut
 
 async function generateTopicDescription(topic: string): Promise<string> {
   console.log("Generating AI description for topic:", topic);
+
+  if (isLatestMarketGainersRequest(topic)) {
+    console.log("Latest market gainers request detected; fetching Yahoo Finance movers instead of calling AI.");
+    try {
+      const gainers = await fetchYahooFinanceGainers();
+      return buildMarketGainersHTML(gainers);
+    } catch (error) {
+      console.error("Error fetching market gainers:", error);
+      return buildMarketGainersUnavailableHTML(error);
+    }
+  }
+
   try {
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -175,6 +398,12 @@ interface MCQ {
 
 async function generateMCQ(topic: string): Promise<MCQ | null> {
   console.log("Generating MCQ for topic:", topic);
+
+  if (isLatestMarketGainersRequest(topic)) {
+    console.log("Skipping MCQ for live market data request:", topic);
+    return null;
+  }
+
   try {
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
