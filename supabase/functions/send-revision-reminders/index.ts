@@ -14,6 +14,44 @@ const corsHeaders = {
 
 const REVISION_INTERVALS = [1, 3, 7, 14, 30, 60];
 
+function getTimezoneOffsetMs(date: Date, tz: string): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hourCycle: "h23",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+  const parts = dtf.formatToParts(date).reduce<Record<string, string>>((acc, p) => {
+    if (p.type !== "literal") acc[p.type] = p.value;
+    return acc;
+  }, {});
+  const asUTC = Date.UTC(
+    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour), Number(parts.minute), Number(parts.second),
+  );
+  return asUTC - date.getTime();
+}
+
+function zonedTimeToUtc(y: number, m: number, d: number, h: number, min: number, tz: string): Date {
+  const guess = Date.UTC(y, m - 1, d, h, min, 0);
+  const offset = getTimezoneOffsetMs(new Date(guess), tz);
+  return new Date(guess - offset);
+}
+
+function nextRevisionInstant(now: Date, daysFromNow: number, hour: number, minute: number, tz: string): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(now);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const cal = new Date(Date.UTC(get("year"), get("month") - 1, get("day")));
+  cal.setUTCDate(cal.getUTCDate() + daysFromNow);
+  let instant = zonedTimeToUtc(cal.getUTCFullYear(), cal.getUTCMonth() + 1, cal.getUTCDate(), hour, minute, tz);
+  if (instant.getTime() <= now.getTime()) {
+    cal.setUTCDate(cal.getUTCDate() + 1);
+    instant = zonedTimeToUtc(cal.getUTCFullYear(), cal.getUTCMonth() + 1, cal.getUTCDate(), hour, minute, tz);
+  }
+  return instant;
+}
+
 async function generateTopicDescription(topic: string): Promise<string> {
   console.log("Generating AI description for topic:", topic);
   try {
