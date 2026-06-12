@@ -28,6 +28,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ReminderSettings, type UserPreferences } from "@/components/ReminderSettings";
+import { nextRevisionInstant, formatInTz, getBrowserTimezone } from "@/lib/reminderTime";
 
 const TruncatedText = ({ text, maxLength = 120, className }: { text: string; maxLength?: number; className?: string }) => {
   const [expanded, setExpanded] = useState(false);
@@ -109,6 +111,7 @@ const Dashboard = () => {
   const [rewards, setRewards] = useState<any>(null);
   const [quizHistory, setQuizHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [prefs, setPrefs] = useState<UserPreferences | null>(null);
 
   // Spaced repetition intervals in days
   const spacedRepetitionIntervals = [1, 3, 7, 14, 30, 60];
@@ -197,9 +200,11 @@ const Dashboard = () => {
 
     try {
       const learnedDate = new Date();
-      const nextRevisionDate = new Date();
-      // Psychology-based spaced repetition: start with 1 day
-      nextRevisionDate.setDate(nextRevisionDate.getDate() + 1);
+      // Psychology-based spaced repetition: start with 1 day, at user's preferred local time.
+      const tz = prefs?.timezone || getBrowserTimezone();
+      const hour = prefs?.reminder_hour ?? 9;
+      const minute = prefs?.reminder_minute ?? 0;
+      const nextRevisionDate = nextRevisionInstant(learnedDate, 1, hour, minute, tz);
 
       const { error } = await supabase.from("learned_topics").insert({
         title: newTopic,
@@ -409,14 +414,8 @@ const Dashboard = () => {
 
   const formatDateTime = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
+    const tz = prefs?.timezone || getBrowserTimezone();
+    return formatInTz(date, tz);
   };
 
   return (
