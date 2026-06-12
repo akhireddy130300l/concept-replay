@@ -37,48 +37,53 @@ If the user asks anything, ALWAYS respond in pure HTML.
           },
           {
             role: "user",
-            content: `IF the topic is technical, study-related, course related (like Java, Spring Boot, Hibernate, Machine Learning, Networking):
+            content: `You are given a topic: "${topic}".
 
-Provide the explanation of topic "${topic}" ONLY in pure HTML.
-STRICT RULES:
-- Do NOT use Markdown.
-- Do NOT use **bold**, ## headings, *, -, or backticks.
-- Use only HTML tags like <h2>, <ul>, <li>, <p>, <strong>.
-- Structure sections as:
+First, CLASSIFY the topic into ONE of these three buckets, then respond using ONLY that bucket's format. Do NOT mix formats.
 
-<h2>Definition and Key Concepts</h2>
+============================================================
+BUCKET A — Prompt / Instruction / Task / Spec
+(The topic reads like an instruction, a request, a system prompt,
+a feature spec, a "build/make/create/design/write X" task, or a
+question phrased as a request. Examples: "You are a real-time
+stock market data agent...", "Write a function that...", "Design a
+schema for...", "Explain X in simple terms", "How do I deploy...".)
+
+If BUCKET A: respond NATURALLY and DIRECTLY to the request itself.
+Do NOT generate "Definition / Interview / Practical Applications /
+Common Interview Questions / Important Points". Just answer or
+fulfill the task like a normal helpful assistant would, in clean HTML.
+Use sensible sections only if they help the answer.
+
+Structure (flexible — only what fits):
+<h2>Answer</h2>
+<p>...</p>
+<h2>Details</h2>
 <ul><li>...</li></ul>
+<h2>Example</h2>
+<p>...</p>
 
-<h2>Breif overview</h2>
-<ul><li>...</li></ul>
+============================================================
+BUCKET B — Technical / Study / Course concept
+(A noun-like concept the user wants to learn or revise. Examples:
+Java, Spring Boot, Hibernate, Machine Learning, Networking, OOP,
+Kubernetes, REST API.)
 
-<h2>Explain this in an interview</h2>
-<ul><li>...</li></ul>
-
-<h2>Practical Applications</h2>
-<ul><li>...</li></ul>
-
+If BUCKET B: use the interview-prep structure.
+<h2>Definition and Key Concepts</h2><ul><li>...</li></ul>
+<h2>Brief overview</h2><ul><li>...</li></ul>
+<h2>Explain this in an interview</h2><ul><li>...</li></ul>
+<h2>Practical Applications</h2><ul><li>...</li></ul>
 <h2>Common Interview Questions and with short answers</h2>
 <ul><li><strong>Q:</strong> ... <strong>A:</strong> ...</li></ul>
+<h2>Important Points to Remember</h2><ul><li>...</li></ul>
 
-<h2>Important Points to Remember</h2>
-<ul><li>...</li></ul>
+============================================================
+BUCKET C — Communication / Language / Daily-usage
+(English speaking, fluency, slang, idioms, phrases, conversation.)
 
----------------------------------------------------------
-
-IF the topic is Communication, language learning, or daily usage (like English speaking, fluency, slang, idioms, phrases):
-
-Provide practical sentences and examples for "${topic}" ONLY in pure HTML.
-STRICT RULES:
-- Do NOT use Markdown.
-- Do NOT use **bold**, ## headings, *, -, or backticks.
-- Use only HTML tags like <h2>, <ul>, <li>, <p>, <strong>.
-- Focus on PRACTICAL, READY-TO-USE sentences and examples
-- Structure sections as:
-
-<h2>Quick Meaning</h2>
-<p>One line explanation of "${topic}"</p>
-
+If BUCKET C: use the practical-sentences structure.
+<h2>Quick Meaning</h2><p>One line explanation of "${topic}"</p>
 <h2>Sentences to Practice</h2>
 <ul>
 <li>Sentence 1 - <em>Context/When to use</em></li>
@@ -87,21 +92,25 @@ STRICT RULES:
 <li>Sentence 4 - <em>Context/When to use</em></li>
 <li>Sentence 5 - <em>Context/When to use</em></li>
 </ul>
-
 <h2>Common Conversations</h2>
 <p>A short dialogue example using "${topic}":</p>
 <ul>
 <li><strong>A:</strong> ...</li>
 <li><strong>B:</strong> ...</li>
 </ul>
-
 <h2>Similar Expressions</h2>
 <ul><li>Alternative ways to say the same thing</li></ul>
-
 <h2>Mistakes to Avoid</h2>
 <ul><li>Common errors learners make with this</li></ul>
-`,
+
+============================================================
+STRICT OUTPUT RULES (all buckets):
+- Output ONLY pure HTML. No Markdown, no **bold**, no ##, no -, no backticks, no code fences.
+- Use only tags like <h2>, <h3>, <p>, <ul>, <li>, <strong>, <em>, <a>, <pre>, <code>.
+- Pick exactly ONE bucket. Never combine buckets.
+- If the topic is clearly a prompt/instruction (Bucket A), you MUST NOT output the interview structure.`,
           },
+
         ],
       }),
     });
