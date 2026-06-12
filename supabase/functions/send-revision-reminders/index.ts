@@ -14,6 +14,44 @@ const corsHeaders = {
 
 const REVISION_INTERVALS = [1, 3, 7, 14, 30, 60];
 
+function getTimezoneOffsetMs(date: Date, tz: string): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hourCycle: "h23",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+  const parts = dtf.formatToParts(date).reduce<Record<string, string>>((acc, p) => {
+    if (p.type !== "literal") acc[p.type] = p.value;
+    return acc;
+  }, {});
+  const asUTC = Date.UTC(
+    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour), Number(parts.minute), Number(parts.second),
+  );
+  return asUTC - date.getTime();
+}
+
+function zonedTimeToUtc(y: number, m: number, d: number, h: number, min: number, tz: string): Date {
+  const guess = Date.UTC(y, m - 1, d, h, min, 0);
+  const offset = getTimezoneOffsetMs(new Date(guess), tz);
+  return new Date(guess - offset);
+}
+
+function nextRevisionInstant(now: Date, daysFromNow: number, hour: number, minute: number, tz: string): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(now);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const cal = new Date(Date.UTC(get("year"), get("month") - 1, get("day")));
+  cal.setUTCDate(cal.getUTCDate() + daysFromNow);
+  let instant = zonedTimeToUtc(cal.getUTCFullYear(), cal.getUTCMonth() + 1, cal.getUTCDate(), hour, minute, tz);
+  if (instant.getTime() <= now.getTime()) {
+    cal.setUTCDate(cal.getUTCDate() + 1);
+    instant = zonedTimeToUtc(cal.getUTCFullYear(), cal.getUTCMonth() + 1, cal.getUTCDate(), hour, minute, tz);
+  }
+  return instant;
+}
+
 async function generateTopicDescription(topic: string): Promise<string> {
   console.log("Generating AI description for topic:", topic);
   try {
@@ -264,6 +302,17 @@ serve(async (req) => {
       const userEmail = userData.user.email;
       console.log("User email:", userEmail);
 
+      // Fetch user reminder preferences (timezone + time-of-day).
+      const { data: prefsRow } = await supabase
+        .from("user_preferences")
+        .select("timezone, reminder_hour, reminder_minute")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const tz = prefsRow?.timezone || "UTC";
+      const reminderHour = prefsRow?.reminder_hour ?? 9;
+      const reminderMinute = prefsRow?.reminder_minute ?? 0;
+      console.log("User timezone:", tz, "reminder time:", `${reminderHour}:${reminderMinute}`);
+
       // Fetch user rewards for stats in email
       const { data: rewards } = await supabase
         .from("user_rewards")
@@ -367,24 +416,20 @@ serve(async (req) => {
 
       console.log("Updating next revision dates for topics...");
       for (const topic of topicsArray) {
-        const nextRevisionDate = new Date();
-        
+        const now = new Date();
         if (topic.is_daily) {
-          nextRevisionDate.setDate(nextRevisionDate.getDate() + 1);
-          console.log(`Topic ${topic.id} is daily - scheduling for tomorrow: ${nextRevisionDate.toISOString()}`);
+          const nextRevisionDate = nextRevisionInstant(now, 1, reminderHour, reminderMinute, tz);
+          console.log(`Topic ${topic.id} is daily - scheduling for: ${nextRevisionDate.toISOString()}`);
           await supabase
             .from("learned_topics")
-            .update({
-              next_revision_date: nextRevisionDate.toISOString(),
-            })
+            .update({ next_revision_date: nextRevisionDate.toISOString() })
             .eq("id", topic.id);
         } else {
           const currentCount = topic.revision_count || 0;
           const nextCount = currentCount + 1;
           const intervalIndex = Math.min(nextCount, REVISION_INTERVALS.length - 1);
           const daysUntilNext = REVISION_INTERVALS[intervalIndex];
-          nextRevisionDate.setDate(nextRevisionDate.getDate() + daysUntilNext);
-          
+          const nextRevisionDate = nextRevisionInstant(now, daysUntilNext, reminderHour, reminderMinute, tz);
           console.log(`Updating topic ${topic.id} next_revision_date to ${nextRevisionDate.toISOString()}`);
           await supabase
             .from("learned_topics")
