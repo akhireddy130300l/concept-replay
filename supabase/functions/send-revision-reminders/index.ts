@@ -86,11 +86,46 @@ function getMarketSession(value: unknown): string {
   return labels[session] || "N/A";
 }
 
+function normalizeTopicForIntent(topic: string): string {
+  return String(topic || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9%]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function isLatestMarketGainersRequest(topic: string): boolean {
-  const normalized = topic.toLowerCase();
-  const hasMarketTerm = /\b(stock|stocks|market|markets|equity|equities|ticker|tickers|share|shares|nasdaq|nyse|us market|u\.s\. market)\b/.test(normalized);
-  const hasGainerOrRankingTerm = /\b(gainer|gainers|gain|gains|mover|movers|ranking|rankings|ranked|top)\b/.test(normalized);
-  const asksForFreshness = /\b(latest|today|current|now|live|recent|day|daily|top 10|top ten)\b/.test(normalized);
+  const normalized = normalizeTopicForIntent(topic);
+
+  // Direct shortcuts. These MUST bypass the AI bucket classifier.
+  const directLiveMarketRequests = new Set([
+    "latest market gainers",
+    "market gainers",
+    "stock gainers",
+    "stocks gainers",
+    "top stock gainers",
+    "top stocks gainers",
+    "top market gainers",
+    "latest stock gainers",
+    "latest stocks gainers",
+    "latest rankings of stocks",
+    "stock rankings",
+    "stocks rankings",
+    "market movers",
+    "stock movers",
+    "stocks movers",
+    "top movers",
+    "top stocks today",
+    "stocks today",
+  ]);
+
+  if (directLiveMarketRequests.has(normalized)) {
+    return true;
+  }
+
+  const hasMarketTerm = /\b(stock|stocks|market|markets|equity|equities|ticker|tickers|share|shares|nasdaq|nyse|us market|u s market)\b/.test(normalized);
+  const hasGainerOrRankingTerm = /\b(gainer|gainers|gain|gains|mover|movers|ranking|rankings|ranked|top|highest|increased|up)\b/.test(normalized);
+  const asksForFreshness = /\b(latest|today|current|now|live|recent|day|daily|top 10|top ten|this session|most recent)\b/.test(normalized);
 
   return hasMarketTerm && hasGainerOrRankingTerm && asksForFreshness;
 }
