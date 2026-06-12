@@ -7,6 +7,8 @@ const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+const FUNCTION_VERSION = "market-gainers-v6-direct-debug-2026-06-12";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -95,7 +97,13 @@ function normalizeTopicForIntent(topic: string): string {
 }
 
 function isLatestMarketGainersRequest(topic: string): boolean {
+  const rawTopic = String(topic || "").toLowerCase();
   const normalized = normalizeTopicForIntent(topic);
+
+  // Extra-safe check for hidden punctuation/quotes around the saved topic.
+  if (rawTopic.includes("latest") && rawTopic.includes("market") && rawTopic.includes("gainer")) {
+    return true;
+  }
 
   // Direct shortcuts. These MUST bypass the AI bucket classifier.
   const directLiveMarketRequests = new Set([
@@ -299,9 +307,18 @@ function nextRevisionInstant(now: Date, daysFromNow: number, hour: number, minut
 }
 
 async function generateTopicDescription(topic: string): Promise<string> {
-  console.log("Generating AI description for topic:", topic);
+  const normalizedTopic = normalizeTopicForIntent(topic);
+  const isMarketGainers = isLatestMarketGainersRequest(topic);
 
-  if (isLatestMarketGainersRequest(topic)) {
+  console.log("Generating AI description for topic:", topic);
+  console.log("Topic detection check:", {
+    rawTopic: topic,
+    normalizedTopic,
+    isMarketGainers,
+    functionVersion: FUNCTION_VERSION,
+  });
+
+  if (isMarketGainers) {
     console.log("Latest market gainers request detected; fetching Yahoo Finance movers instead of calling AI.");
     try {
       const gainers = await fetchYahooFinanceGainers();
@@ -432,9 +449,18 @@ interface MCQ {
 }
 
 async function generateMCQ(topic: string): Promise<MCQ | null> {
-  console.log("Generating MCQ for topic:", topic);
+  const normalizedTopic = normalizeTopicForIntent(topic);
+  const isMarketGainers = isLatestMarketGainersRequest(topic);
 
-  if (isLatestMarketGainersRequest(topic)) {
+  console.log("Generating MCQ for topic:", topic);
+  console.log("MCQ detection check:", {
+    rawTopic: topic,
+    normalizedTopic,
+    isMarketGainers,
+    functionVersion: FUNCTION_VERSION,
+  });
+
+  if (isMarketGainers) {
     console.log("Skipping MCQ for live market data request:", topic);
     return null;
   }
@@ -507,6 +533,7 @@ function buildQuizHTML(mcq: MCQ, userId: string, topicId: string, quizBaseUrl: s
 }
 
 serve(async (req) => {
+  console.log("FUNCTION_VERSION:", FUNCTION_VERSION);
   console.log("Request received at:", new Date().toISOString());
 
   if (req.method === "OPTIONS") {
