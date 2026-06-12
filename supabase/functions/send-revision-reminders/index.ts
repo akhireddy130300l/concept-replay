@@ -302,6 +302,17 @@ serve(async (req) => {
       const userEmail = userData.user.email;
       console.log("User email:", userEmail);
 
+      // Fetch user reminder preferences (timezone + time-of-day).
+      const { data: prefsRow } = await supabase
+        .from("user_preferences")
+        .select("timezone, reminder_hour, reminder_minute")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const tz = prefsRow?.timezone || "UTC";
+      const reminderHour = prefsRow?.reminder_hour ?? 9;
+      const reminderMinute = prefsRow?.reminder_minute ?? 0;
+      console.log("User timezone:", tz, "reminder time:", `${reminderHour}:${reminderMinute}`);
+
       // Fetch user rewards for stats in email
       const { data: rewards } = await supabase
         .from("user_rewards")
@@ -405,24 +416,20 @@ serve(async (req) => {
 
       console.log("Updating next revision dates for topics...");
       for (const topic of topicsArray) {
-        const nextRevisionDate = new Date();
-        
+        const now = new Date();
         if (topic.is_daily) {
-          nextRevisionDate.setDate(nextRevisionDate.getDate() + 1);
-          console.log(`Topic ${topic.id} is daily - scheduling for tomorrow: ${nextRevisionDate.toISOString()}`);
+          const nextRevisionDate = nextRevisionInstant(now, 1, reminderHour, reminderMinute, tz);
+          console.log(`Topic ${topic.id} is daily - scheduling for: ${nextRevisionDate.toISOString()}`);
           await supabase
             .from("learned_topics")
-            .update({
-              next_revision_date: nextRevisionDate.toISOString(),
-            })
+            .update({ next_revision_date: nextRevisionDate.toISOString() })
             .eq("id", topic.id);
         } else {
           const currentCount = topic.revision_count || 0;
           const nextCount = currentCount + 1;
           const intervalIndex = Math.min(nextCount, REVISION_INTERVALS.length - 1);
           const daysUntilNext = REVISION_INTERVALS[intervalIndex];
-          nextRevisionDate.setDate(nextRevisionDate.getDate() + daysUntilNext);
-          
+          const nextRevisionDate = nextRevisionInstant(now, daysUntilNext, reminderHour, reminderMinute, tz);
           console.log(`Updating topic ${topic.id} next_revision_date to ${nextRevisionDate.toISOString()}`);
           await supabase
             .from("learned_topics")
