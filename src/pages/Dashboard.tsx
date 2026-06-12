@@ -574,6 +574,12 @@ const Dashboard = () => {
           </Card>
         )}
 
+        {user && (
+          <div className="mt-4">
+            <ReminderSettings userId={user.id} onChange={setPrefs} />
+          </div>
+        )}
+
         {/* Quiz Progress Timeline */}
         {quizHistory.length > 0 && (
           <Card className="mt-4 mb-4 glass-card animate-fade-in" style={{ animationDelay: '0.18s' }}>
