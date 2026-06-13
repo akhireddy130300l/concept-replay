@@ -176,11 +176,12 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
     throw new Error("Yahoo Finance response did not include market movers.");
   }
 
-  const movers = quotes
+  const allMovers = quotes
     .map((quote: any): MarketGainer => {
       const priceRaw = getRawNumber(quote.regularMarketPrice);
       const percentGainRaw = getRawNumber(quote.regularMarketChangePercent);
       const volumeRaw = getRawNumber(quote.regularMarketVolume);
+      const marketCapRaw = getRawNumber(quote.marketCap);
 
       return {
         symbol: String(quote.symbol || "").trim(),
@@ -194,12 +195,17 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
         priceRaw,
         percentGainRaw,
         volumeRaw,
+        marketCapRaw,
       };
     })
     .filter((mover) => mover.symbol && Number.isFinite(mover.percentGainRaw))
     // Keep highly traded penny-stock movers, but remove obvious low-volume penny spikes.
     .filter((mover) => !(Number.isFinite(mover.priceRaw) && mover.priceRaw < 5 && Number.isFinite(mover.volumeRaw) && mover.volumeRaw < 1_000_000))
-    .sort((a, b) => b.percentGainRaw - a.percentGainRaw)
+    .sort((a, b) => b.percentGainRaw - a.percentGainRaw);
+
+  const movers = allMovers.slice(0, 10);
+  const largeCapMovers = allMovers
+    .filter((m) => Number.isFinite(m.marketCapRaw) && m.marketCapRaw >= LARGE_CAP_THRESHOLD)
     .slice(0, 10);
 
   if (movers.length === 0) {
@@ -208,6 +214,7 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
 
   return {
     movers,
+    largeCapMovers,
     fetchedAtIso: new Date().toISOString(),
     sourceUrl: YAHOO_GAINERS_PAGE_URL,
   };
