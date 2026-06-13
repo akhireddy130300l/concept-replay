@@ -237,7 +237,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return `<span style="display:inline-block;min-width:28px;height:28px;line-height:28px;text-align:center;border-radius:14px;background:${bg};color:#ffffff;font-weight:700;font-size:13px;padding:0 8px;">#${i + 1}</span>`;
   };
 
-  const cards = result.movers
+  const renderCards = (movers: MarketGainer[]) => movers
     .map((m, i) => `
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;margin:0 0 12px 0;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,0.04);">
         <tr>
@@ -272,13 +272,24 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     `)
     .join("");
 
+  const allCards = renderCards(result.movers);
+  const largeCapCards = result.largeCapMovers.length > 0
+    ? renderCards(result.largeCapMovers)
+    : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">No large-cap (≥ $10B) stocks made today's top gainers list.</p>`;
+
   return `
     <div style="background:linear-gradient(135deg,#ecfeff,#f0f9ff);padding:18px 20px;border-radius:12px;margin:8px 0 20px 0;border:1px solid #bae6fd;">
       <h2 style="margin:0 0 6px 0;color:#0c4a6e;font-size:20px;">📈 Top US Stock Market Gainers</h2>
       <p style="margin:0;color:#0369a1;font-size:13px;">Ranked by % gain · Source: Yahoo Finance</p>
       <p style="margin:8px 0 0 0;color:#475569;font-size:12px;">🕒 ${escapeHtml(fetchedAt)}</p>
     </div>
-    ${cards}
+
+    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🚀 Top 10 Overall Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(all market caps)</span></h3>
+    ${allCards}
+
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🏛️ Top Large-Cap Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(market cap ≥ $10B — e.g. Google, Micron, SanDisk)</span></h3>
+    ${largeCapCards}
+
     <div style="margin-top:20px;padding:14px 16px;background:#f8fafc;border-radius:10px;border-left:3px solid #0891b2;">
       <p style="margin:0 0 8px 0;font-size:13px;color:#334155;"><strong>Source:</strong> <a href="${YAHOO_GAINERS_PAGE_URL}" style="color:#0891b2;text-decoration:none;">Yahoo Finance Top Gainers</a></p>
       <p style="margin:0;font-size:12px;color:#64748b;line-height:1.6;">Market data can be delayed. Session reflects Yahoo's market-state value. Low-priced low-volume stocks are filtered. This is market information, not investment advice — always check the stock page, news, SEC filings, and risk before buying.</p>
