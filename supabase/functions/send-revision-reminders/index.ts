@@ -221,48 +221,58 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     timeZoneName: "short",
   });
 
-  const rows = result.movers
-    .map((mover, index) => `
-      <tr>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: 700; color: #0f172a;">${index + 1}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;"><strong>${escapeHtml(mover.symbol)}</strong></td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(mover.companyName)}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">${escapeHtml(mover.price)}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right; color: #047857; font-weight: 700;">${escapeHtml(mover.percentGain)}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">${escapeHtml(mover.volume)}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: right;">${escapeHtml(mover.marketCap)}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(mover.session)}</td>
-      </tr>
+  const rankBadge = (i: number) => {
+    const colors = ["#f59e0b", "#94a3b8", "#b45309"];
+    const bg = i < 3 ? colors[i] : "#0891b2";
+    return `<span style="display:inline-block;min-width:28px;height:28px;line-height:28px;text-align:center;border-radius:14px;background:${bg};color:#ffffff;font-weight:700;font-size:13px;padding:0 8px;">#${i + 1}</span>`;
+  };
+
+  const cards = result.movers
+    .map((m, i) => `
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;margin:0 0 12px 0;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,0.04);">
+        <tr>
+          <td style="padding:14px 16px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+              <tr>
+                <td style="vertical-align:middle;">
+                  ${rankBadge(i)}
+                  <strong style="font-size:18px;color:#0f172a;margin-left:10px;letter-spacing:0.3px;">${escapeHtml(m.symbol)}</strong>
+                  <div style="color:#64748b;font-size:13px;margin-top:4px;">${escapeHtml(m.companyName)}</div>
+                </td>
+                <td style="vertical-align:middle;text-align:right;white-space:nowrap;">
+                  <div style="font-size:18px;font-weight:700;color:#0f172a;">$${escapeHtml(m.price)}</div>
+                  <div style="display:inline-block;margin-top:4px;padding:3px 10px;background:#dcfce7;color:#047857;border-radius:999px;font-size:13px;font-weight:700;">▲ ${escapeHtml(m.percentGain)}</div>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="2" style="padding-top:12px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-top:1px solid #f1f5f9;margin-top:8px;">
+                    <tr>
+                      <td style="padding:10px 0 0 0;font-size:12px;color:#64748b;">Volume<br><strong style="color:#0f172a;font-size:13px;">${escapeHtml(m.volume)}</strong></td>
+                      <td style="padding:10px 0 0 0;font-size:12px;color:#64748b;text-align:center;">Market Cap<br><strong style="color:#0f172a;font-size:13px;">${escapeHtml(m.marketCap)}</strong></td>
+                      <td style="padding:10px 0 0 0;font-size:12px;color:#64748b;text-align:right;">Session<br><strong style="color:#0f172a;font-size:13px;">${escapeHtml(m.session)}</strong></td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
     `)
     .join("");
 
   return `
-    <h2>Latest US Stock Market Gainers</h2>
-    <p>Here are the top US stock market gainers ranked by percentage gain, based on Yahoo Finance market-movers data.</p>
-    <p><strong>Data timestamp:</strong> ${escapeHtml(fetchedAt)}</p>
-    <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin: 16px 0; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden;">
-      <thead>
-        <tr style="background: #f1f5f9; color: #334155;">
-          <th style="padding: 10px; text-align: left; border-bottom: 1px solid #cbd5e1;">#</th>
-          <th style="padding: 10px; text-align: left; border-bottom: 1px solid #cbd5e1;">Ticker</th>
-          <th style="padding: 10px; text-align: left; border-bottom: 1px solid #cbd5e1;">Company</th>
-          <th style="padding: 10px; text-align: right; border-bottom: 1px solid #cbd5e1;">Price</th>
-          <th style="padding: 10px; text-align: right; border-bottom: 1px solid #cbd5e1;">% Gain</th>
-          <th style="padding: 10px; text-align: right; border-bottom: 1px solid #cbd5e1;">Volume</th>
-          <th style="padding: 10px; text-align: right; border-bottom: 1px solid #cbd5e1;">Market Cap</th>
-          <th style="padding: 10px; text-align: left; border-bottom: 1px solid #cbd5e1;">Session</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <h2>Source and Notes</h2>
-    <ul>
-      <li><strong>Source:</strong> <a href="${YAHOO_GAINERS_PAGE_URL}">Yahoo Finance Top Gainers</a>.</li>
-      <li>Yahoo Finance market data can be delayed and may change during pre-market, regular market, and after-hours sessions.</li>
-      <li>The session column comes from Yahoo's market-state value when available.</li>
-      <li>Very low-priced stocks are excluded only when volume is also low. High-volume penny-stock movers are still allowed.</li>
-      <li>This is market information, not investment advice. Check the stock page, news, SEC filings, and risk before buying.</li>
-    </ul>
+    <div style="background:linear-gradient(135deg,#ecfeff,#f0f9ff);padding:18px 20px;border-radius:12px;margin:8px 0 20px 0;border:1px solid #bae6fd;">
+      <h2 style="margin:0 0 6px 0;color:#0c4a6e;font-size:20px;">📈 Top US Stock Market Gainers</h2>
+      <p style="margin:0;color:#0369a1;font-size:13px;">Ranked by % gain · Source: Yahoo Finance</p>
+      <p style="margin:8px 0 0 0;color:#475569;font-size:12px;">🕒 ${escapeHtml(fetchedAt)}</p>
+    </div>
+    ${cards}
+    <div style="margin-top:20px;padding:14px 16px;background:#f8fafc;border-radius:10px;border-left:3px solid #0891b2;">
+      <p style="margin:0 0 8px 0;font-size:13px;color:#334155;"><strong>Source:</strong> <a href="${YAHOO_GAINERS_PAGE_URL}" style="color:#0891b2;text-decoration:none;">Yahoo Finance Top Gainers</a></p>
+      <p style="margin:0;font-size:12px;color:#64748b;line-height:1.6;">Market data can be delayed. Session reflects Yahoo's market-state value. Low-priced low-volume stocks are filtered. This is market information, not investment advice — always check the stock page, news, SEC filings, and risk before buying.</p>
+    </div>
   `;
 }
 
