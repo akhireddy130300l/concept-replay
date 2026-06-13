@@ -39,10 +39,12 @@ type MarketGainer = {
   priceRaw: number;
   percentGainRaw: number;
   volumeRaw: number;
+  marketCapRaw: number;
 };
 
 type MarketGainersResult = {
   movers: MarketGainer[];
+  largeCapMovers: MarketGainer[];
   fetchedAtIso: string;
   sourceUrl: string;
 };
