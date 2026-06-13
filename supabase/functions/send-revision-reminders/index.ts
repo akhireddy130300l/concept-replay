@@ -18,7 +18,8 @@ const REVISION_INTERVALS = [1, 3, 7, 14, 30, 60];
 
 
 const YAHOO_GAINERS_PAGE_URL = "https://finance.yahoo.com/markets/stocks/gainers/";
-const YAHOO_GAINERS_ENDPOINT = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=true&lang=en-US&region=US&scrIds=day_gainers&count=25";
+const YAHOO_GAINERS_ENDPOINT = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=true&lang=en-US&region=US&scrIds=day_gainers&count=100";
+const LARGE_CAP_THRESHOLD = 10_000_000_000; // $10B+ = large cap
 
 type YahooFormattedValue = {
   raw?: number;
@@ -38,10 +39,12 @@ type MarketGainer = {
   priceRaw: number;
   percentGainRaw: number;
   volumeRaw: number;
+  marketCapRaw: number;
 };
 
 type MarketGainersResult = {
   movers: MarketGainer[];
+  largeCapMovers: MarketGainer[];
   fetchedAtIso: string;
   sourceUrl: string;
 };
@@ -173,11 +176,12 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
     throw new Error("Yahoo Finance response did not include market movers.");
   }
 
-  const movers = quotes
+  const allMovers = quotes
     .map((quote: any): MarketGainer => {
       const priceRaw = getRawNumber(quote.regularMarketPrice);
       const percentGainRaw = getRawNumber(quote.regularMarketChangePercent);
       const volumeRaw = getRawNumber(quote.regularMarketVolume);
+      const marketCapRaw = getRawNumber(quote.marketCap);
 
       return {
         symbol: String(quote.symbol || "").trim(),
@@ -191,12 +195,17 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
         priceRaw,
         percentGainRaw,
         volumeRaw,
+        marketCapRaw,
       };
     })
     .filter((mover) => mover.symbol && Number.isFinite(mover.percentGainRaw))
     // Keep highly traded penny-stock movers, but remove obvious low-volume penny spikes.
     .filter((mover) => !(Number.isFinite(mover.priceRaw) && mover.priceRaw < 5 && Number.isFinite(mover.volumeRaw) && mover.volumeRaw < 1_000_000))
-    .sort((a, b) => b.percentGainRaw - a.percentGainRaw)
+    .sort((a, b) => b.percentGainRaw - a.percentGainRaw);
+
+  const movers = allMovers.slice(0, 10);
+  const largeCapMovers = allMovers
+    .filter((m) => Number.isFinite(m.marketCapRaw) && m.marketCapRaw >= LARGE_CAP_THRESHOLD)
     .slice(0, 10);
 
   if (movers.length === 0) {
@@ -205,6 +214,7 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
 
   return {
     movers,
+    largeCapMovers,
     fetchedAtIso: new Date().toISOString(),
     sourceUrl: YAHOO_GAINERS_PAGE_URL,
   };
@@ -227,7 +237,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return `<span style="display:inline-block;min-width:28px;height:28px;line-height:28px;text-align:center;border-radius:14px;background:${bg};color:#ffffff;font-weight:700;font-size:13px;padding:0 8px;">#${i + 1}</span>`;
   };
 
-  const cards = result.movers
+  const renderCards = (movers: MarketGainer[]) => movers
     .map((m, i) => `
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;margin:0 0 12px 0;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,0.04);">
         <tr>
@@ -262,13 +272,24 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     `)
     .join("");
 
+  const allCards = renderCards(result.movers);
+  const largeCapCards = result.largeCapMovers.length > 0
+    ? renderCards(result.largeCapMovers)
+    : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">No large-cap (≥ $10B) stocks made today's top gainers list.</p>`;
+
   return `
     <div style="background:linear-gradient(135deg,#ecfeff,#f0f9ff);padding:18px 20px;border-radius:12px;margin:8px 0 20px 0;border:1px solid #bae6fd;">
       <h2 style="margin:0 0 6px 0;color:#0c4a6e;font-size:20px;">📈 Top US Stock Market Gainers</h2>
       <p style="margin:0;color:#0369a1;font-size:13px;">Ranked by % gain · Source: Yahoo Finance</p>
       <p style="margin:8px 0 0 0;color:#475569;font-size:12px;">🕒 ${escapeHtml(fetchedAt)}</p>
     </div>
-    ${cards}
+
+    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🚀 Top 10 Overall Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(all market caps)</span></h3>
+    ${allCards}
+
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🏛️ Top Large-Cap Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(market cap ≥ $10B — e.g. Google, Micron, SanDisk)</span></h3>
+    ${largeCapCards}
+
     <div style="margin-top:20px;padding:14px 16px;background:#f8fafc;border-radius:10px;border-left:3px solid #0891b2;">
       <p style="margin:0 0 8px 0;font-size:13px;color:#334155;"><strong>Source:</strong> <a href="${YAHOO_GAINERS_PAGE_URL}" style="color:#0891b2;text-decoration:none;">Yahoo Finance Top Gainers</a></p>
       <p style="margin:0;font-size:12px;color:#64748b;line-height:1.6;">Market data can be delayed. Session reflects Yahoo's market-state value. Low-priced low-volume stocks are filtered. This is market information, not investment advice — always check the stock page, news, SEC filings, and risk before buying.</p>
@@ -705,7 +726,6 @@ serve(async (req) => {
             .join("")}
           <p style="color: #64748b; margin-top: 40px; font-size: 15px; line-height: 1.6;">Keep up the great work! Regular reviews help solidify your knowledge. 💪</p>
           <p style="color: #94a3b8; font-size: 14px; margin-top: 20px;">Best regards,<br><strong style="color: #0891b2;">LearnLoop Team</strong></p>
-          <p style="color: #cbd5e1; font-size: 11px; margin-top: 20px;">Function version: ${FUNCTION_VERSION}</p>
         </div>
       `;
 
@@ -715,11 +735,11 @@ serve(async (req) => {
       const topicNames = topicsArray.map(t => t.title);
       let emailSubject: string;
       if (topicNames.length === 1) {
-        emailSubject = `[${FUNCTION_VERSION}] 📚 Hey Buddy "${topicNames[0]}" - Ready for Review`;
+        emailSubject = `📚 "${topicNames[0]}" - Ready for Review`;
       } else if (topicNames.length === 2) {
-        emailSubject = `[${FUNCTION_VERSION}] 📚 Hey Buddy "${topicNames[0]}" & "${topicNames[1]}" - Ready for Review`;
+        emailSubject = `📚 "${topicNames[0]}" & "${topicNames[1]}" - Ready for Review`;
       } else {
-        emailSubject = `[${FUNCTION_VERSION}] 📚 Hey Buddy "${topicNames[0]}" & ${topicNames.length - 1} more - Ready for Review`;
+        emailSubject = `📚 "${topicNames[0]}" & ${topicNames.length - 1} more - Ready for Review`;
       }
 
       console.log("Sending email with:");
