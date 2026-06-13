@@ -18,7 +18,8 @@ const REVISION_INTERVALS = [1, 3, 7, 14, 30, 60];
 
 
 const YAHOO_GAINERS_PAGE_URL = "https://finance.yahoo.com/markets/stocks/gainers/";
-const YAHOO_GAINERS_ENDPOINT = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=true&lang=en-US&region=US&scrIds=day_gainers&count=25";
+const YAHOO_GAINERS_ENDPOINT = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=true&lang=en-US&region=US&scrIds=day_gainers&count=100";
+const LARGE_CAP_THRESHOLD = 10_000_000_000; // $10B+ = large cap
 
 type YahooFormattedValue = {
   raw?: number;
