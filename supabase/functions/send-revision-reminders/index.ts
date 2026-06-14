@@ -27,6 +27,17 @@ type YahooFormattedValue = {
   longFmt?: string;
 };
 
+type AnalystEstimate = {
+  targetMean: number;
+  targetHigh: number;
+  targetLow: number;
+  numAnalysts: number;
+  recommendationKey: string; // strong_buy | buy | hold | sell | strong_sell | none
+  upsidePct: number; // (mean - current) / current * 100
+  downsidePct: number; // (low - current) / current * 100  (negative number)
+  highPct: number;   // (high - current) / current * 100
+};
+
 type MarketGainer = {
   symbol: string;
   companyName: string;
@@ -40,6 +51,7 @@ type MarketGainer = {
   percentGainRaw: number;
   volumeRaw: number;
   marketCapRaw: number;
+  analyst?: AnalystEstimate | null;
 };
 
 type MarketGainersResult = {
