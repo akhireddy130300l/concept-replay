@@ -45,9 +45,74 @@ type MarketGainer = {
 type MarketGainersResult = {
   movers: MarketGainer[];
   largeCapMovers: MarketGainer[];
+  largeCapWeekly: MarketGainer[];
   fetchedAtIso: string;
   sourceUrl: string;
 };
+
+// Curated universe of well-known US large-caps used for the 7-day ranking.
+const LARGE_CAP_UNIVERSE = [
+  "AAPL","MSFT","GOOGL","GOOG","AMZN","NVDA","META","TSLA","AVGO","BRK-B",
+  "JPM","V","MA","UNH","XOM","WMT","JNJ","PG","HD","LLY",
+  "ORCL","COST","BAC","ABBV","CVX","KO","PEP","MRK","TMO","CSCO",
+  "ACN","ADBE","CRM","NFLX","AMD","INTC","QCOM","TXN","INTU","IBM",
+  "MU","WDC","SNDK","ARM","PLTR","SMCI","ASML","TSM","NOW","UBER",
+  "DIS","NKE","MCD","SBUX","BA","CAT","GE","HON","RTX","LMT",
+  "GS","MS","WFC","C","BLK","SCHW","AXP","PYPL","COIN",
+  "PFE","ABT","DHR","BMY","GILD","AMGN","CVS","T","VZ","TMUS",
+  "SPY","QQQ","DIA","IWM"
+];
+
+const YAHOO_CHART_ENDPOINT = "https://query1.finance.yahoo.com/v8/finance/chart";
+
+async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null> {
+  try {
+    const url = `${YAHOO_CHART_ENDPOINT}/${encodeURIComponent(symbol)}?range=1mo&interval=1d`;
+    const res = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 LearnLoop/1.0",
+      },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const result = data?.chart?.result?.[0];
+    const closes: (number | null)[] = result?.indicators?.quote?.[0]?.close ?? [];
+    const meta = result?.meta;
+    const validCloses = closes.filter((c): c is number => typeof c === "number" && Number.isFinite(c));
+    if (validCloses.length < 6) return null;
+    // Compare last close to the close from ~5 trading sessions ago (≈ 7 calendar days).
+    const last = validCloses[validCloses.length - 1];
+    const weekAgo = validCloses[validCloses.length - 6];
+    if (!weekAgo) return null;
+    const pct = ((last - weekAgo) / weekAgo) * 100;
+    const marketCapRaw = Number(meta?.marketCap) || 0;
+    return {
+      symbol,
+      companyName: String(meta?.longName || meta?.shortName || symbol),
+      price: `${last.toFixed(2)}`,
+      percentGain: `${pct.toFixed(2)}%`,
+      volume: meta?.regularMarketVolume ? Number(meta.regularMarketVolume).toLocaleString("en-US") : "N/A",
+      marketCap: marketCapRaw >= 1e12 ? `${(marketCapRaw / 1e12).toFixed(2)}T` : marketCapRaw >= 1e9 ? `${(marketCapRaw / 1e9).toFixed(2)}B` : "N/A",
+      exchange: String(meta?.exchangeName || "N/A"),
+      session: "7-day",
+      priceRaw: last,
+      percentGainRaw: pct,
+      volumeRaw: Number(meta?.regularMarketVolume) || 0,
+      marketCapRaw,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchLargeCapWeeklyGainers(): Promise<MarketGainer[]> {
+  const results = await Promise.all(LARGE_CAP_UNIVERSE.map((s) => fetchSevenDayChange(s)));
+  return results
+    .filter((r): r is MarketGainer => r !== null && Number.isFinite(r.percentGainRaw))
+    .sort((a, b) => b.percentGainRaw - a.percentGainRaw)
+    .slice(0, 10);
+}
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -212,9 +277,18 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
     throw new Error("Yahoo Finance returned movers, but none passed the liquidity filter.");
   }
 
+  // Fetch 7-day large-cap performance in parallel (best-effort; tolerate failure).
+  let largeCapWeekly: MarketGainer[] = [];
+  try {
+    largeCapWeekly = await fetchLargeCapWeeklyGainers();
+  } catch (err) {
+    console.error("Failed to fetch 7-day large-cap gainers:", err);
+  }
+
   return {
     movers,
     largeCapMovers,
+    largeCapWeekly,
     fetchedAtIso: new Date().toISOString(),
     sourceUrl: YAHOO_GAINERS_PAGE_URL,
   };
@@ -276,6 +350,9 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   const largeCapCards = result.largeCapMovers.length > 0
     ? renderCards(result.largeCapMovers)
     : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">No large-cap (≥ $10B) stocks made today's top gainers list.</p>`;
+  const weeklyCards = result.largeCapWeekly.length > 0
+    ? renderCards(result.largeCapWeekly)
+    : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">7-day large-cap performance data is unavailable right now.</p>`;
 
   return `
     <div style="background:linear-gradient(135deg,#ecfeff,#f0f9ff);padding:18px 20px;border-radius:12px;margin:8px 0 20px 0;border:1px solid #bae6fd;">
@@ -284,11 +361,15 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       <p style="margin:8px 0 0 0;color:#475569;font-size:12px;">🕒 ${escapeHtml(fetchedAt)}</p>
     </div>
 
-    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🚀 Top 10 Overall Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(all market caps)</span></h3>
+    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🚀 Top 10 Overall Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(last 1 day · all market caps)</span></h3>
     ${allCards}
 
-    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🏛️ Top Large-Cap Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(market cap ≥ $10B — e.g. Google, Micron, SanDisk)</span></h3>
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🏛️ Top Large-Cap Gainers — Last 1 Day <span style="font-weight:400;color:#64748b;font-size:13px;">(market cap ≥ $10B)</span></h3>
     ${largeCapCards}
+
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">📅 Top Large-Cap Gainers — Last 7 Days <span style="font-weight:400;color:#64748b;font-size:13px;">(best weekly performers from a curated mega-cap universe)</span></h3>
+    ${weeklyCards}
+
 
     <div style="margin-top:20px;padding:14px 16px;background:#f8fafc;border-radius:10px;border-left:3px solid #0891b2;">
       <p style="margin:0 0 8px 0;font-size:13px;color:#334155;"><strong>Source:</strong> <a href="${YAHOO_GAINERS_PAGE_URL}" style="color:#0891b2;text-decoration:none;">Yahoo Finance Top Gainers</a></p>
