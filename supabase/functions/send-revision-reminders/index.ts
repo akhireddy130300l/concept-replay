@@ -851,8 +851,9 @@ serve(async (req) => {
       for (const topic of topicsArray) {
         const now = new Date();
         if (topic.is_daily) {
-          const nextRevisionDate = nextRevisionInstant(now, 1, reminderHour, reminderMinute, tz);
-          console.log(`Topic ${topic.id} is daily - scheduling for: ${nextRevisionDate.toISOString()}`);
+          // Rolling 24h schedule from when the reminder was sent
+          const nextRevisionDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+          console.log(`Topic ${topic.id} is daily - scheduling 24h from now: ${nextRevisionDate.toISOString()}`);
           await supabase
             .from("learned_topics")
             .update({ next_revision_date: nextRevisionDate.toISOString() })
@@ -862,8 +863,9 @@ serve(async (req) => {
           const nextCount = currentCount + 1;
           const intervalIndex = Math.min(nextCount, REVISION_INTERVALS.length - 1);
           const daysUntilNext = REVISION_INTERVALS[intervalIndex];
-          const nextRevisionDate = nextRevisionInstant(now, daysUntilNext, reminderHour, reminderMinute, tz);
-          console.log(`Updating topic ${topic.id} next_revision_date to ${nextRevisionDate.toISOString()}`);
+          // Rolling schedule: exactly N * 24h from this send, not pinned to a fixed hour
+          const nextRevisionDate = new Date(now.getTime() + daysUntilNext * 24 * 60 * 60 * 1000);
+          console.log(`Updating topic ${topic.id} next_revision_date to ${nextRevisionDate.toISOString()} (${daysUntilNext} days from now)`);
           await supabase
             .from("learned_topics")
             .update({
@@ -873,6 +875,7 @@ serve(async (req) => {
             .eq("id", topic.id);
         }
       }
+
     }
 
     console.log(`All users processed. Emails sent: ${emailsSent}`);
