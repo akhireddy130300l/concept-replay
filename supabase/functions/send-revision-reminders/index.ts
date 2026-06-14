@@ -27,6 +27,17 @@ type YahooFormattedValue = {
   longFmt?: string;
 };
 
+type AnalystEstimate = {
+  targetMean: number;
+  targetHigh: number;
+  targetLow: number;
+  numAnalysts: number;
+  recommendationKey: string; // strong_buy | buy | hold | sell | strong_sell | none
+  upsidePct: number; // (mean - current) / current * 100
+  downsidePct: number; // (low - current) / current * 100  (negative number)
+  highPct: number;   // (high - current) / current * 100
+};
+
 type MarketGainer = {
   symbol: string;
   companyName: string;
@@ -40,6 +51,7 @@ type MarketGainer = {
   percentGainRaw: number;
   volumeRaw: number;
   marketCapRaw: number;
+  analyst?: AnalystEstimate | null;
 };
 
 type MarketGainersResult = {
@@ -112,6 +124,61 @@ async function fetchLargeCapWeeklyGainers(): Promise<MarketGainer[]> {
     .filter((r): r is MarketGainer => r !== null && Number.isFinite(r.percentGainRaw))
     .sort((a, b) => b.percentGainRaw - a.percentGainRaw)
     .slice(0, 10);
+}
+
+const YAHOO_QUOTE_SUMMARY = "https://query1.finance.yahoo.com/v10/finance/quoteSummary";
+
+async function fetchAnalystEstimate(symbol: string, currentPrice: number): Promise<AnalystEstimate | null> {
+  try {
+    const url = `${YAHOO_QUOTE_SUMMARY}/${encodeURIComponent(symbol)}?modules=financialData,recommendationTrend`;
+    const res = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 LearnLoop/1.0",
+      },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const fin = data?.quoteSummary?.result?.[0]?.financialData;
+    if (!fin) return null;
+    const targetMean = getRawNumber(fin.targetMeanPrice);
+    const targetHigh = getRawNumber(fin.targetHighPrice);
+    const targetLow = getRawNumber(fin.targetLowPrice);
+    const numAnalysts = getRawNumber(fin.numberOfAnalystOpinions);
+    const recKey = String(fin.recommendationKey || "none");
+    if (!Number.isFinite(targetMean) || !Number.isFinite(currentPrice) || currentPrice <= 0) return null;
+    return {
+      targetMean,
+      targetHigh: Number.isFinite(targetHigh) ? targetHigh : targetMean,
+      targetLow: Number.isFinite(targetLow) ? targetLow : targetMean,
+      numAnalysts: Number.isFinite(numAnalysts) ? numAnalysts : 0,
+      recommendationKey: recKey,
+      upsidePct: ((targetMean - currentPrice) / currentPrice) * 100,
+      downsidePct: Number.isFinite(targetLow) ? ((targetLow - currentPrice) / currentPrice) * 100 : 0,
+      highPct: Number.isFinite(targetHigh) ? ((targetHigh - currentPrice) / currentPrice) * 100 : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function attachAnalystEstimates(movers: MarketGainer[]): Promise<void> {
+  // Dedupe by symbol; share results across lists.
+  const unique = new Map<string, MarketGainer[]>();
+  for (const m of movers) {
+    if (!m.symbol) continue;
+    if (!unique.has(m.symbol)) unique.set(m.symbol, []);
+    unique.get(m.symbol)!.push(m);
+  }
+  const symbols = Array.from(unique.keys());
+  const results = await Promise.all(symbols.map(async (s) => {
+    const ref = unique.get(s)![0];
+    const price = Number.isFinite(ref.priceRaw) ? ref.priceRaw : Number(ref.price);
+    return [s, await fetchAnalystEstimate(s, price)] as const;
+  }));
+  for (const [s, est] of results) {
+    for (const m of unique.get(s)!) m.analyst = est;
+  }
 }
 
 function escapeHtml(value: unknown): string {
@@ -285,6 +352,14 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
     console.error("Failed to fetch 7-day large-cap gainers:", err);
   }
 
+  // Attach Wall Street analyst price targets (best-effort).
+  try {
+    await attachAnalystEstimates([...movers, ...largeCapMovers, ...largeCapWeekly]);
+  } catch (err) {
+    console.error("Failed to attach analyst estimates:", err);
+  }
+
+
   return {
     movers,
     largeCapMovers,
@@ -309,6 +384,55 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     const colors = ["#f59e0b", "#94a3b8", "#b45309"];
     const bg = i < 3 ? colors[i] : "#0891b2";
     return `<span style="display:inline-block;min-width:28px;height:28px;line-height:28px;text-align:center;border-radius:14px;background:${bg};color:#ffffff;font-weight:700;font-size:13px;padding:0 8px;">#${i + 1}</span>`;
+  };
+
+  const recLabel = (key: string) => {
+    const map: Record<string, { label: string; bg: string; color: string }> = {
+      strong_buy: { label: "Strong Buy", bg: "#dcfce7", color: "#047857" },
+      buy:        { label: "Buy",         bg: "#dcfce7", color: "#047857" },
+      hold:       { label: "Hold",        bg: "#fef3c7", color: "#92400e" },
+      underperform:{label: "Underperform",bg: "#fee2e2", color: "#b91c1c" },
+      sell:       { label: "Sell",        bg: "#fee2e2", color: "#b91c1c" },
+      strong_sell:{ label: "Strong Sell", bg: "#fee2e2", color: "#b91c1c" },
+    };
+    return map[key] || { label: "No Rating", bg: "#e2e8f0", color: "#475569" };
+  };
+
+  const renderAnalyst = (m: MarketGainer) => {
+    const a = m.analyst;
+    if (!a) {
+      return `<tr><td colspan="2" style="padding-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Wall Street analyst targets unavailable for this ticker.</td></tr>`;
+    }
+    const rec = recLabel(a.recommendationKey);
+    const upColor = a.upsidePct >= 0 ? "#047857" : "#b91c1c";
+    const upArrow = a.upsidePct >= 0 ? "▲" : "▼";
+    const downColor = a.downsidePct < 0 ? "#b91c1c" : "#047857";
+    return `
+      <tr>
+        <td colspan="2" style="padding-top:14px;">
+          <div style="border-top:1px dashed #e2e8f0;padding-top:10px;">
+            <div style="font-size:11px;color:#0c4a6e;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:6px;">🏦 Wall Street Analyst Estimate</div>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+              <tr>
+                <td style="font-size:11px;color:#64748b;">Mean Target<br><strong style="color:#0f172a;font-size:13px;">$${a.targetMean.toFixed(2)}</strong> <span style="color:${upColor};font-weight:700;">${upArrow} ${a.upsidePct.toFixed(1)}%</span></td>
+                <td style="font-size:11px;color:#64748b;text-align:center;">High<br><strong style="color:#047857;font-size:13px;">$${a.targetHigh.toFixed(2)}</strong> <span style="color:#047857;">(+${a.highPct.toFixed(1)}%)</span></td>
+                <td style="font-size:11px;color:#64748b;text-align:right;">Low<br><strong style="color:${downColor};font-size:13px;">$${a.targetLow.toFixed(2)}</strong> <span style="color:${downColor};">(${a.downsidePct.toFixed(1)}%)</span></td>
+              </tr>
+              <tr>
+                <td colspan="3" style="padding-top:8px;">
+                  <span style="display:inline-block;padding:3px 10px;background:${rec.bg};color:${rec.color};border-radius:999px;font-size:11px;font-weight:700;">${rec.label}</span>
+                  <span style="font-size:11px;color:#64748b;margin-left:8px;">based on <strong style="color:#0f172a;">${a.numAnalysts}</strong> analyst${a.numAnalysts === 1 ? "" : "s"} (JPM, Citi, BofA, Goldman, MS &amp; peers)</span>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="3" style="padding-top:6px;font-size:11px;color:#475569;line-height:1.5;">
+                  <strong style="color:#0f172a;">Why &amp; When:</strong> Targets are 12-month forward-looking and reflect analyst views on earnings, guidance, sector trends and macro risk. They are revised after each quarterly report or major news event — treat them as direction, not a guarantee.
+                </td>
+              </tr>
+            </table>
+          </div>
+        </td>
+      </tr>`;
   };
 
   const renderCards = (movers: MarketGainer[]) => movers
@@ -339,12 +463,14 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
                   </table>
                 </td>
               </tr>
+              ${renderAnalyst(m)}
             </table>
           </td>
         </tr>
       </table>
     `)
     .join("");
+
 
   const allCards = renderCards(result.movers);
   const largeCapCards = result.largeCapMovers.length > 0
