@@ -352,6 +352,14 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
     console.error("Failed to fetch 7-day large-cap gainers:", err);
   }
 
+  // Attach Wall Street analyst price targets (best-effort).
+  try {
+    await attachAnalystEstimates([...movers, ...largeCapMovers, ...largeCapWeekly]);
+  } catch (err) {
+    console.error("Failed to attach analyst estimates:", err);
+  }
+
+
   return {
     movers,
     largeCapMovers,
