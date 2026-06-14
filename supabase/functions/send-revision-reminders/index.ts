@@ -277,9 +277,18 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
     throw new Error("Yahoo Finance returned movers, but none passed the liquidity filter.");
   }
 
+  // Fetch 7-day large-cap performance in parallel (best-effort; tolerate failure).
+  let largeCapWeekly: MarketGainer[] = [];
+  try {
+    largeCapWeekly = await fetchLargeCapWeeklyGainers();
+  } catch (err) {
+    console.error("Failed to fetch 7-day large-cap gainers:", err);
+  }
+
   return {
     movers,
     largeCapMovers,
+    largeCapWeekly,
     fetchedAtIso: new Date().toISOString(),
     sourceUrl: YAHOO_GAINERS_PAGE_URL,
   };
