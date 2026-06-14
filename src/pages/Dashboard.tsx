@@ -200,11 +200,9 @@ const Dashboard = () => {
 
     try {
       const learnedDate = new Date();
-      // Psychology-based spaced repetition: start with 1 day, at user's preferred local time.
-      const tz = prefs?.timezone || getBrowserTimezone();
-      const hour = prefs?.reminder_hour ?? 9;
-      const minute = prefs?.reminder_minute ?? 0;
-      const nextRevisionDate = nextRevisionInstant(learnedDate, 1, hour, minute, tz);
+      // Rolling schedule: first reminder exactly 24 hours after the topic is added
+      const nextRevisionDate = new Date(learnedDate.getTime() + 24 * 60 * 60 * 1000);
+
 
       const { error } = await supabase.from("learned_topics").insert({
         title: newTopic,
