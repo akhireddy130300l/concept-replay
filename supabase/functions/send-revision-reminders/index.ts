@@ -126,6 +126,61 @@ async function fetchLargeCapWeeklyGainers(): Promise<MarketGainer[]> {
     .slice(0, 10);
 }
 
+const YAHOO_QUOTE_SUMMARY = "https://query1.finance.yahoo.com/v10/finance/quoteSummary";
+
+async function fetchAnalystEstimate(symbol: string, currentPrice: number): Promise<AnalystEstimate | null> {
+  try {
+    const url = `${YAHOO_QUOTE_SUMMARY}/${encodeURIComponent(symbol)}?modules=financialData,recommendationTrend`;
+    const res = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 LearnLoop/1.0",
+      },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const fin = data?.quoteSummary?.result?.[0]?.financialData;
+    if (!fin) return null;
+    const targetMean = getRawNumber(fin.targetMeanPrice);
+    const targetHigh = getRawNumber(fin.targetHighPrice);
+    const targetLow = getRawNumber(fin.targetLowPrice);
+    const numAnalysts = getRawNumber(fin.numberOfAnalystOpinions);
+    const recKey = String(fin.recommendationKey || "none");
+    if (!Number.isFinite(targetMean) || !Number.isFinite(currentPrice) || currentPrice <= 0) return null;
+    return {
+      targetMean,
+      targetHigh: Number.isFinite(targetHigh) ? targetHigh : targetMean,
+      targetLow: Number.isFinite(targetLow) ? targetLow : targetMean,
+      numAnalysts: Number.isFinite(numAnalysts) ? numAnalysts : 0,
+      recommendationKey: recKey,
+      upsidePct: ((targetMean - currentPrice) / currentPrice) * 100,
+      downsidePct: Number.isFinite(targetLow) ? ((targetLow - currentPrice) / currentPrice) * 100 : 0,
+      highPct: Number.isFinite(targetHigh) ? ((targetHigh - currentPrice) / currentPrice) * 100 : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function attachAnalystEstimates(movers: MarketGainer[]): Promise<void> {
+  // Dedupe by symbol; share results across lists.
+  const unique = new Map<string, MarketGainer[]>();
+  for (const m of movers) {
+    if (!m.symbol) continue;
+    if (!unique.has(m.symbol)) unique.set(m.symbol, []);
+    unique.get(m.symbol)!.push(m);
+  }
+  const symbols = Array.from(unique.keys());
+  const results = await Promise.all(symbols.map(async (s) => {
+    const ref = unique.get(s)![0];
+    const price = Number.isFinite(ref.priceRaw) ? ref.priceRaw : Number(ref.price);
+    return [s, await fetchAnalystEstimate(s, price)] as const;
+  }));
+  for (const [s, est] of results) {
+    for (const m of unique.get(s)!) m.analyst = est;
+  }
+}
+
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
