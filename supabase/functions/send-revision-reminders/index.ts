@@ -350,6 +350,9 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   const largeCapCards = result.largeCapMovers.length > 0
     ? renderCards(result.largeCapMovers)
     : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">No large-cap (≥ $10B) stocks made today's top gainers list.</p>`;
+  const weeklyCards = result.largeCapWeekly.length > 0
+    ? renderCards(result.largeCapWeekly)
+    : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">7-day large-cap performance data is unavailable right now.</p>`;
 
   return `
     <div style="background:linear-gradient(135deg,#ecfeff,#f0f9ff);padding:18px 20px;border-radius:12px;margin:8px 0 20px 0;border:1px solid #bae6fd;">
@@ -358,11 +361,15 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       <p style="margin:8px 0 0 0;color:#475569;font-size:12px;">🕒 ${escapeHtml(fetchedAt)}</p>
     </div>
 
-    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🚀 Top 10 Overall Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(all market caps)</span></h3>
+    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🚀 Top 10 Overall Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(last 1 day · all market caps)</span></h3>
     ${allCards}
 
-    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🏛️ Top Large-Cap Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(market cap ≥ $10B — e.g. Google, Micron, SanDisk)</span></h3>
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🏛️ Top Large-Cap Gainers — Last 1 Day <span style="font-weight:400;color:#64748b;font-size:13px;">(market cap ≥ $10B)</span></h3>
     ${largeCapCards}
+
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">📅 Top Large-Cap Gainers — Last 7 Days <span style="font-weight:400;color:#64748b;font-size:13px;">(best weekly performers from a curated mega-cap universe)</span></h3>
+    ${weeklyCards}
+
 
     <div style="margin-top:20px;padding:14px 16px;background:#f8fafc;border-radius:10px;border-left:3px solid #0891b2;">
       <p style="margin:0 0 8px 0;font-size:13px;color:#334155;"><strong>Source:</strong> <a href="${YAHOO_GAINERS_PAGE_URL}" style="color:#0891b2;text-decoration:none;">Yahoo Finance Top Gainers</a></p>
