@@ -541,7 +541,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return `
       <tr>
         <td colspan="3" style="padding-top:10px;">
-          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Analyst recommendations <span style="color:#94a3b8;">(${escapeHtml(t.period)})</span></div>
+          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Analyst recommendations <span style="color:#94a3b8;">(latest monthly aggregation — ${escapeHtml(t.period)})</span></div>
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;border-radius:6px;overflow:hidden;">
             <tr>
               ${seg(t.strongBuy, "#047857", "Strong Buy")}
