@@ -27,15 +27,27 @@ type YahooFormattedValue = {
   longFmt?: string;
 };
 
+type RecTrend = {
+  period: string;       // e.g. "2026-06-01"
+  strongBuy: number;
+  buy: number;
+  hold: number;
+  sell: number;
+  strongSell: number;
+};
+
 type AnalystEstimate = {
   targetMean: number;
   targetHigh: number;
   targetLow: number;
   numAnalysts: number;
   recommendationKey: string; // strong_buy | buy | hold | sell | strong_sell | none
-  upsidePct: number; // (mean - current) / current * 100
-  downsidePct: number; // (low - current) / current * 100  (negative number)
-  highPct: number;   // (high - current) / current * 100
+  upsidePct: number;
+  downsidePct: number;
+  highPct: number;
+  source: string; // "Finnhub" | "Yahoo" | "Finnhub + Yahoo"
+  trend?: RecTrend | null;
+  prevTrend?: RecTrend | null;
 };
 
 type MarketGainer = {
@@ -127,15 +139,107 @@ async function fetchLargeCapWeeklyGainers(): Promise<MarketGainer[]> {
 }
 
 const YAHOO_QUOTE_SUMMARY = "https://query1.finance.yahoo.com/v10/finance/quoteSummary";
+const FINNHUB_BASE = "https://finnhub.io/api/v1";
 
-async function fetchAnalystEstimate(symbol: string, currentPrice: number): Promise<AnalystEstimate | null> {
+function deriveRecKey(t: RecTrend | null | undefined): string {
+  if (!t) return "none";
+  const total = t.strongBuy + t.buy + t.hold + t.sell + t.strongSell;
+  if (total <= 0) return "none";
+  // Weighted score: strongBuy=2, buy=1, hold=0, sell=-1, strongSell=-2
+  const score = (t.strongBuy * 2 + t.buy - t.sell - t.strongSell * 2) / total;
+  if (score >= 1.3) return "strong_buy";
+  if (score >= 0.4) return "buy";
+  if (score >= -0.4) return "hold";
+  if (score >= -1.3) return "sell";
+  return "strong_sell";
+}
+
+async function fetchFinnhub(path: string, token: string): Promise<any | null> {
+  try {
+    const sep = path.includes("?") ? "&" : "?";
+    const res = await fetch(`${FINNHUB_BASE}${path}${sep}token=${token}`, {
+      headers: { "Accept": "application/json" },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFromFinnhub(symbol: string, currentPrice: number, token: string): Promise<AnalystEstimate | null> {
+  const sym = symbol.replace("-", "."); // Finnhub uses BRK.B not BRK-B
+  const [pt, trends] = await Promise.all([
+    fetchFinnhub(`/stock/price-target?symbol=${encodeURIComponent(sym)}`, token),
+    fetchFinnhub(`/stock/recommendation?symbol=${encodeURIComponent(sym)}`, token),
+  ]);
+
+  const trendArr: any[] = Array.isArray(trends) ? trends : [];
+  const latest = trendArr[0]
+    ? {
+        period: String(trendArr[0].period || ""),
+        strongBuy: Number(trendArr[0].strongBuy) || 0,
+        buy: Number(trendArr[0].buy) || 0,
+        hold: Number(trendArr[0].hold) || 0,
+        sell: Number(trendArr[0].sell) || 0,
+        strongSell: Number(trendArr[0].strongSell) || 0,
+      } as RecTrend
+    : null;
+  const prev = trendArr[1]
+    ? {
+        period: String(trendArr[1].period || ""),
+        strongBuy: Number(trendArr[1].strongBuy) || 0,
+        buy: Number(trendArr[1].buy) || 0,
+        hold: Number(trendArr[1].hold) || 0,
+        sell: Number(trendArr[1].sell) || 0,
+        strongSell: Number(trendArr[1].strongSell) || 0,
+      } as RecTrend
+    : null;
+
+  const targetMean = Number(pt?.targetMean);
+  const targetHigh = Number(pt?.targetHigh);
+  const targetLow = Number(pt?.targetLow);
+  const numAnalysts = Number(pt?.numberOfAnalysts) ||
+    (latest ? latest.strongBuy + latest.buy + latest.hold + latest.sell + latest.strongSell : 0);
+
+  if (!Number.isFinite(targetMean) || targetMean <= 0) {
+    // No price target but we may still have recommendations
+    if (!latest) return null;
+    return {
+      targetMean: 0,
+      targetHigh: 0,
+      targetLow: 0,
+      numAnalysts,
+      recommendationKey: deriveRecKey(latest),
+      upsidePct: 0,
+      downsidePct: 0,
+      highPct: 0,
+      source: "Finnhub",
+      trend: latest,
+      prevTrend: prev,
+    };
+  }
+
+  return {
+    targetMean,
+    targetHigh: Number.isFinite(targetHigh) && targetHigh > 0 ? targetHigh : targetMean,
+    targetLow: Number.isFinite(targetLow) && targetLow > 0 ? targetLow : targetMean,
+    numAnalysts,
+    recommendationKey: deriveRecKey(latest),
+    upsidePct: currentPrice > 0 ? ((targetMean - currentPrice) / currentPrice) * 100 : 0,
+    downsidePct: currentPrice > 0 && Number.isFinite(targetLow) ? ((targetLow - currentPrice) / currentPrice) * 100 : 0,
+    highPct: currentPrice > 0 && Number.isFinite(targetHigh) ? ((targetHigh - currentPrice) / currentPrice) * 100 : 0,
+    source: "Finnhub",
+    trend: latest,
+    prevTrend: prev,
+  };
+}
+
+async function fetchFromYahoo(symbol: string, currentPrice: number): Promise<AnalystEstimate | null> {
   try {
     const url = `${YAHOO_QUOTE_SUMMARY}/${encodeURIComponent(symbol)}?modules=financialData,recommendationTrend`;
     const res = await fetch(url, {
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 LearnLoop/1.0",
-      },
+      headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0 LearnLoop/1.0" },
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -156,10 +260,35 @@ async function fetchAnalystEstimate(symbol: string, currentPrice: number): Promi
       upsidePct: ((targetMean - currentPrice) / currentPrice) * 100,
       downsidePct: Number.isFinite(targetLow) ? ((targetLow - currentPrice) / currentPrice) * 100 : 0,
       highPct: Number.isFinite(targetHigh) ? ((targetHigh - currentPrice) / currentPrice) * 100 : 0,
+      source: "Yahoo",
     };
   } catch {
     return null;
   }
+}
+
+async function fetchAnalystEstimate(symbol: string, currentPrice: number): Promise<AnalystEstimate | null> {
+  const finnhubToken = Deno.env.get("FINNHUB_API_KEY");
+  let primary: AnalystEstimate | null = null;
+  if (finnhubToken) {
+    primary = await fetchFromFinnhub(symbol, currentPrice, finnhubToken);
+  }
+  // If Finnhub missing price target, try to enrich from Yahoo
+  if (primary && primary.targetMean === 0) {
+    const yahoo = await fetchFromYahoo(symbol, currentPrice);
+    if (yahoo) {
+      return {
+        ...yahoo,
+        trend: primary.trend,
+        prevTrend: primary.prevTrend,
+        recommendationKey: primary.recommendationKey !== "none" ? primary.recommendationKey : yahoo.recommendationKey,
+        numAnalysts: Math.max(primary.numAnalysts, yahoo.numAnalysts),
+        source: "Finnhub + Yahoo",
+      };
+    }
+  }
+  if (primary) return primary;
+  return await fetchFromYahoo(symbol, currentPrice);
 }
 
 async function attachAnalystEstimates(movers: MarketGainer[]): Promise<void> {
@@ -398,35 +527,73 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return map[key] || { label: "No Rating", bg: "#e2e8f0", color: "#475569" };
   };
 
+  const renderTrendBar = (t: RecTrend | null | undefined) => {
+    if (!t) return "";
+    const total = t.strongBuy + t.buy + t.hold + t.sell + t.strongSell;
+    if (total <= 0) return "";
+    const seg = (n: number, color: string, label: string) => {
+      if (n <= 0) return "";
+      const pct = (n / total) * 100;
+      return `<td style="background:${color};color:#ffffff;font-size:10px;font-weight:700;text-align:center;padding:3px 0;width:${pct.toFixed(2)}%;" title="${label}: ${n}">${n}</td>`;
+    };
+    return `
+      <tr>
+        <td colspan="3" style="padding-top:10px;">
+          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Analyst recommendations <span style="color:#94a3b8;">(${escapeHtml(t.period)})</span></div>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;border-radius:6px;overflow:hidden;">
+            <tr>
+              ${seg(t.strongBuy, "#047857", "Strong Buy")}
+              ${seg(t.buy, "#16a34a", "Buy")}
+              ${seg(t.hold, "#f59e0b", "Hold")}
+              ${seg(t.sell, "#ef4444", "Sell")}
+              ${seg(t.strongSell, "#b91c1c", "Strong Sell")}
+            </tr>
+          </table>
+          <div style="font-size:10px;color:#64748b;margin-top:4px;">
+            <span style="color:#047857;">■</span> Strong Buy ${t.strongBuy}
+            &nbsp;<span style="color:#16a34a;">■</span> Buy ${t.buy}
+            &nbsp;<span style="color:#f59e0b;">■</span> Hold ${t.hold}
+            &nbsp;<span style="color:#ef4444;">■</span> Sell ${t.sell}
+            &nbsp;<span style="color:#b91c1c;">■</span> Strong Sell ${t.strongSell}
+          </div>
+        </td>
+      </tr>`;
+  };
+
   const renderAnalyst = (m: MarketGainer) => {
     const a = m.analyst;
     if (!a) {
-      return `<tr><td colspan="2" style="padding-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Wall Street analyst targets unavailable for this ticker.</td></tr>`;
+      return `<tr><td colspan="2" style="padding-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">No analyst coverage published yet for <strong>${escapeHtml(m.symbol)}</strong> (smaller-cap or newly-listed names often lack Wall Street targets).</td></tr>`;
     }
     const rec = recLabel(a.recommendationKey);
+    const hasTarget = a.targetMean > 0;
     const upColor = a.upsidePct >= 0 ? "#047857" : "#b91c1c";
     const upArrow = a.upsidePct >= 0 ? "▲" : "▼";
     const downColor = a.downsidePct < 0 ? "#b91c1c" : "#047857";
-    return `
-      <tr>
-        <td colspan="2" style="padding-top:14px;">
-          <div style="border-top:1px dashed #e2e8f0;padding-top:10px;">
-            <div style="font-size:11px;color:#0c4a6e;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:6px;">🏦 Wall Street Analyst Estimate</div>
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+    const targetRow = hasTarget ? `
               <tr>
                 <td style="font-size:11px;color:#64748b;">Mean Target<br><strong style="color:#0f172a;font-size:13px;">$${a.targetMean.toFixed(2)}</strong> <span style="color:${upColor};font-weight:700;">${upArrow} ${a.upsidePct.toFixed(1)}%</span></td>
                 <td style="font-size:11px;color:#64748b;text-align:center;">High<br><strong style="color:#047857;font-size:13px;">$${a.targetHigh.toFixed(2)}</strong> <span style="color:#047857;">(+${a.highPct.toFixed(1)}%)</span></td>
                 <td style="font-size:11px;color:#64748b;text-align:right;">Low<br><strong style="color:${downColor};font-size:13px;">$${a.targetLow.toFixed(2)}</strong> <span style="color:${downColor};">(${a.downsidePct.toFixed(1)}%)</span></td>
-              </tr>
+              </tr>` : `
+              <tr><td colspan="3" style="font-size:11px;color:#64748b;font-style:italic;">12-month price target not published — showing analyst recommendation breakdown only.</td></tr>`;
+    return `
+      <tr>
+        <td colspan="2" style="padding-top:14px;">
+          <div style="border-top:1px dashed #e2e8f0;padding-top:10px;">
+            <div style="font-size:11px;color:#0c4a6e;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:6px;">🏦 Wall Street Analyst Estimate <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">· source: ${escapeHtml(a.source)}</span></div>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+              ${targetRow}
               <tr>
                 <td colspan="3" style="padding-top:8px;">
                   <span style="display:inline-block;padding:3px 10px;background:${rec.bg};color:${rec.color};border-radius:999px;font-size:11px;font-weight:700;">${rec.label}</span>
                   <span style="font-size:11px;color:#64748b;margin-left:8px;">based on <strong style="color:#0f172a;">${a.numAnalysts}</strong> analyst${a.numAnalysts === 1 ? "" : "s"} (JPM, Citi, BofA, Goldman, MS &amp; peers)</span>
                 </td>
               </tr>
+              ${renderTrendBar(a.trend)}
               <tr>
                 <td colspan="3" style="padding-top:6px;font-size:11px;color:#475569;line-height:1.5;">
-                  <strong style="color:#0f172a;">Why &amp; When:</strong> Targets are 12-month forward-looking and reflect analyst views on earnings, guidance, sector trends and macro risk. They are revised after each quarterly report or major news event — treat them as direction, not a guarantee.
+                  <strong style="color:#0f172a;">Why &amp; When:</strong> Price targets are 12-month forward views; recommendation counts come from the latest monthly Finnhub aggregation of sell-side ratings (JPM, Citi, BofA, Goldman, MS &amp; peers). Both are revised after each quarterly report or major news event — treat as direction, not a guarantee.
                 </td>
               </tr>
             </table>
@@ -434,6 +601,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
         </td>
       </tr>`;
   };
+
 
   const renderCards = (movers: MarketGainer[]) => movers
     .map((m, i) => `
