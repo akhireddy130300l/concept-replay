@@ -174,7 +174,9 @@ async function fetchFromFinnhub(symbol: string, currentPrice: number, token: str
     fetchFinnhub(`/stock/recommendation?symbol=${encodeURIComponent(sym)}`, token),
   ]);
 
-  const trendArr: any[] = Array.isArray(trends) ? trends : [];
+  const trendArr: any[] = (Array.isArray(trends) ? [...trends] : [])
+    .filter((t) => t && t.period)
+    .sort((a, b) => String(b.period).localeCompare(String(a.period)));
   const latest = trendArr[0]
     ? {
         period: String(trendArr[0].period || ""),
@@ -539,7 +541,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return `
       <tr>
         <td colspan="3" style="padding-top:10px;">
-          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Analyst recommendations <span style="color:#94a3b8;">(${escapeHtml(t.period)})</span></div>
+          <div style="font-size:11px;color:#64748b;margin-bottom:4px;">Analyst recommendations <span style="color:#94a3b8;">(latest monthly aggregation — ${escapeHtml(t.period)})</span></div>
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;border-radius:6px;overflow:hidden;">
             <tr>
               ${seg(t.strongBuy, "#047857", "Strong Buy")}
@@ -1122,14 +1124,18 @@ serve(async (req) => {
       console.log("TO:", toEmail);
       console.log("SUBJECT:", emailSubject);
 
+      const hasMarketGainers = topicsArray.some((t: any) => isLatestMarketGainersRequest(t.title));
+      const ccList = hasMarketGainers ? ["harish.pythondev24@gmail.com"] : undefined;
+
       try {
         const result = await resend.emails.send({
           from: fromEmail,
           to: [toEmail],
+          ...(ccList ? { cc: ccList } : {}),
           subject: emailSubject,
           html: emailContent,
         });
-        console.log("Resend API response:", result);
+        console.log("Resend API response:", result, "cc:", ccList);
 
         if (result.data?.id) {
           emailsSent++;
