@@ -27,15 +27,27 @@ type YahooFormattedValue = {
   longFmt?: string;
 };
 
+type RecTrend = {
+  period: string;       // e.g. "2026-06-01"
+  strongBuy: number;
+  buy: number;
+  hold: number;
+  sell: number;
+  strongSell: number;
+};
+
 type AnalystEstimate = {
   targetMean: number;
   targetHigh: number;
   targetLow: number;
   numAnalysts: number;
   recommendationKey: string; // strong_buy | buy | hold | sell | strong_sell | none
-  upsidePct: number; // (mean - current) / current * 100
-  downsidePct: number; // (low - current) / current * 100  (negative number)
-  highPct: number;   // (high - current) / current * 100
+  upsidePct: number;
+  downsidePct: number;
+  highPct: number;
+  source: string; // "Finnhub" | "Yahoo" | "Finnhub + Yahoo"
+  trend?: RecTrend | null;
+  prevTrend?: RecTrend | null;
 };
 
 type MarketGainer = {
