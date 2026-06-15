@@ -174,7 +174,9 @@ async function fetchFromFinnhub(symbol: string, currentPrice: number, token: str
     fetchFinnhub(`/stock/recommendation?symbol=${encodeURIComponent(sym)}`, token),
   ]);
 
-  const trendArr: any[] = Array.isArray(trends) ? trends : [];
+  const trendArr: any[] = (Array.isArray(trends) ? [...trends] : [])
+    .filter((t) => t && t.period)
+    .sort((a, b) => String(b.period).localeCompare(String(a.period)));
   const latest = trendArr[0]
     ? {
         period: String(trendArr[0].period || ""),
