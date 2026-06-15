@@ -139,15 +139,107 @@ async function fetchLargeCapWeeklyGainers(): Promise<MarketGainer[]> {
 }
 
 const YAHOO_QUOTE_SUMMARY = "https://query1.finance.yahoo.com/v10/finance/quoteSummary";
+const FINNHUB_BASE = "https://finnhub.io/api/v1";
 
-async function fetchAnalystEstimate(symbol: string, currentPrice: number): Promise<AnalystEstimate | null> {
+function deriveRecKey(t: RecTrend | null | undefined): string {
+  if (!t) return "none";
+  const total = t.strongBuy + t.buy + t.hold + t.sell + t.strongSell;
+  if (total <= 0) return "none";
+  // Weighted score: strongBuy=2, buy=1, hold=0, sell=-1, strongSell=-2
+  const score = (t.strongBuy * 2 + t.buy - t.sell - t.strongSell * 2) / total;
+  if (score >= 1.3) return "strong_buy";
+  if (score >= 0.4) return "buy";
+  if (score >= -0.4) return "hold";
+  if (score >= -1.3) return "sell";
+  return "strong_sell";
+}
+
+async function fetchFinnhub(path: string, token: string): Promise<any | null> {
+  try {
+    const sep = path.includes("?") ? "&" : "?";
+    const res = await fetch(`${FINNHUB_BASE}${path}${sep}token=${token}`, {
+      headers: { "Accept": "application/json" },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFromFinnhub(symbol: string, currentPrice: number, token: string): Promise<AnalystEstimate | null> {
+  const sym = symbol.replace("-", "."); // Finnhub uses BRK.B not BRK-B
+  const [pt, trends] = await Promise.all([
+    fetchFinnhub(`/stock/price-target?symbol=${encodeURIComponent(sym)}`, token),
+    fetchFinnhub(`/stock/recommendation?symbol=${encodeURIComponent(sym)}`, token),
+  ]);
+
+  const trendArr: any[] = Array.isArray(trends) ? trends : [];
+  const latest = trendArr[0]
+    ? {
+        period: String(trendArr[0].period || ""),
+        strongBuy: Number(trendArr[0].strongBuy) || 0,
+        buy: Number(trendArr[0].buy) || 0,
+        hold: Number(trendArr[0].hold) || 0,
+        sell: Number(trendArr[0].sell) || 0,
+        strongSell: Number(trendArr[0].strongSell) || 0,
+      } as RecTrend
+    : null;
+  const prev = trendArr[1]
+    ? {
+        period: String(trendArr[1].period || ""),
+        strongBuy: Number(trendArr[1].strongBuy) || 0,
+        buy: Number(trendArr[1].buy) || 0,
+        hold: Number(trendArr[1].hold) || 0,
+        sell: Number(trendArr[1].sell) || 0,
+        strongSell: Number(trendArr[1].strongSell) || 0,
+      } as RecTrend
+    : null;
+
+  const targetMean = Number(pt?.targetMean);
+  const targetHigh = Number(pt?.targetHigh);
+  const targetLow = Number(pt?.targetLow);
+  const numAnalysts = Number(pt?.numberOfAnalysts) ||
+    (latest ? latest.strongBuy + latest.buy + latest.hold + latest.sell + latest.strongSell : 0);
+
+  if (!Number.isFinite(targetMean) || targetMean <= 0) {
+    // No price target but we may still have recommendations
+    if (!latest) return null;
+    return {
+      targetMean: 0,
+      targetHigh: 0,
+      targetLow: 0,
+      numAnalysts,
+      recommendationKey: deriveRecKey(latest),
+      upsidePct: 0,
+      downsidePct: 0,
+      highPct: 0,
+      source: "Finnhub",
+      trend: latest,
+      prevTrend: prev,
+    };
+  }
+
+  return {
+    targetMean,
+    targetHigh: Number.isFinite(targetHigh) && targetHigh > 0 ? targetHigh : targetMean,
+    targetLow: Number.isFinite(targetLow) && targetLow > 0 ? targetLow : targetMean,
+    numAnalysts,
+    recommendationKey: deriveRecKey(latest),
+    upsidePct: currentPrice > 0 ? ((targetMean - currentPrice) / currentPrice) * 100 : 0,
+    downsidePct: currentPrice > 0 && Number.isFinite(targetLow) ? ((targetLow - currentPrice) / currentPrice) * 100 : 0,
+    highPct: currentPrice > 0 && Number.isFinite(targetHigh) ? ((targetHigh - currentPrice) / currentPrice) * 100 : 0,
+    source: "Finnhub",
+    trend: latest,
+    prevTrend: prev,
+  };
+}
+
+async function fetchFromYahoo(symbol: string, currentPrice: number): Promise<AnalystEstimate | null> {
   try {
     const url = `${YAHOO_QUOTE_SUMMARY}/${encodeURIComponent(symbol)}?modules=financialData,recommendationTrend`;
     const res = await fetch(url, {
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 LearnLoop/1.0",
-      },
+      headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0 LearnLoop/1.0" },
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -168,10 +260,35 @@ async function fetchAnalystEstimate(symbol: string, currentPrice: number): Promi
       upsidePct: ((targetMean - currentPrice) / currentPrice) * 100,
       downsidePct: Number.isFinite(targetLow) ? ((targetLow - currentPrice) / currentPrice) * 100 : 0,
       highPct: Number.isFinite(targetHigh) ? ((targetHigh - currentPrice) / currentPrice) * 100 : 0,
+      source: "Yahoo",
     };
   } catch {
     return null;
   }
+}
+
+async function fetchAnalystEstimate(symbol: string, currentPrice: number): Promise<AnalystEstimate | null> {
+  const finnhubToken = Deno.env.get("FINNHUB_API_KEY");
+  let primary: AnalystEstimate | null = null;
+  if (finnhubToken) {
+    primary = await fetchFromFinnhub(symbol, currentPrice, finnhubToken);
+  }
+  // If Finnhub missing price target, try to enrich from Yahoo
+  if (primary && primary.targetMean === 0) {
+    const yahoo = await fetchFromYahoo(symbol, currentPrice);
+    if (yahoo) {
+      return {
+        ...yahoo,
+        trend: primary.trend,
+        prevTrend: primary.prevTrend,
+        recommendationKey: primary.recommendationKey !== "none" ? primary.recommendationKey : yahoo.recommendationKey,
+        numAnalysts: Math.max(primary.numAnalysts, yahoo.numAnalysts),
+        source: "Finnhub + Yahoo",
+      };
+    }
+  }
+  if (primary) return primary;
+  return await fetchFromYahoo(symbol, currentPrice);
 }
 
 async function attachAnalystEstimates(movers: MarketGainer[]): Promise<void> {
