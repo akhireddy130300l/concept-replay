@@ -140,7 +140,7 @@ serve(async (req) => {
 
     return new Response(
       getResultPage(
-        isCorrect ? "Correct! 🎉" : `Wrong! The answer was: ${decodeURIComponent(correct)}`,
+        isCorrect ? "Correct! 🎉" : `Wrong! The answer was: ${escapeHtml(decodeURIComponent(correct))}`,
         isCorrect,
         { total_points: pointsEarned, current_streak: 1, rank: newRank.name, medal: newRank.medal, pointsEarned }
       ),
