@@ -328,6 +328,9 @@ function sanitizeForPrompt(value: unknown): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 200);
+}
+
+
 
 function getRawNumber(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
