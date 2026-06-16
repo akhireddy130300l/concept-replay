@@ -1124,18 +1124,14 @@ serve(async (req) => {
       console.log("TO:", toEmail);
       console.log("SUBJECT:", emailSubject);
 
-      const hasMarketGainers = topicsArray.some((t: any) => isLatestMarketGainersRequest(t.title));
-      const ccList = hasMarketGainers ? ["harish.pythondev24@gmail.com"] : undefined;
-
       try {
         const result = await resend.emails.send({
           from: fromEmail,
           to: [toEmail],
-          ...(ccList ? { cc: ccList } : {}),
           subject: emailSubject,
           html: emailContent,
         });
-        console.log("Resend API response:", result, "cc:", ccList);
+        console.log("Resend API response:", result);
 
         if (result.data?.id) {
           emailsSent++;
