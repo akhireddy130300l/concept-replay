@@ -321,6 +321,14 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
+function sanitizeForPrompt(value: unknown): string {
+  return String(value ?? "")
+    .replace(/[`"'<>\\]/g, " ")
+    .replace(/\b(ignore|disregard|override)\b[^\n]*\b(previous|prior|above|system)\b[^\n]*\binstruction/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+
 function getRawNumber(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (value && typeof value === "object" && "raw" in value) {
