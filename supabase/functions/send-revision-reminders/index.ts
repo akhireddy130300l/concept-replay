@@ -1081,8 +1081,8 @@ serve(async (req) => {
             .map(
               (topic) => `
             <div style="background: #f8fafc; padding: 24px; margin: 24px 0; border-radius: 12px; border-left: 4px solid #0891b2; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-              <h2 style="color: #0f172a; font-size: 22px; margin: 0 0 12px 0; font-weight: 600;">${topic.title}</h2>
-              ${topic.description ? `<p style="color: #64748b; font-style: italic; font-size: 14px; margin-bottom: 16px; padding: 10px; background: #e0f2fe; border-radius: 6px;">${topic.description}</p>` : ""}
+              <h2 style="color: #0f172a; font-size: 22px; margin: 0 0 12px 0; font-weight: 600;">${escapeHtml(topic.title)}</h2>
+              ${topic.description ? `<p style="color: #64748b; font-style: italic; font-size: 14px; margin-bottom: 16px; padding: 10px; background: #e0f2fe; border-radius: 6px;">${escapeHtml(topic.description)}</p>` : ""}
               <div style="margin-top: 20px; line-height: 1.8; color: #334155; font-size: 15px;">
                 <style>
                   h2 { color: #0891b2 !important; font-size: 18px !important; margin: 20px 0 10px 0 !important; font-weight: 600 !important; }
