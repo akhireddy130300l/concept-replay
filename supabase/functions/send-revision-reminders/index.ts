@@ -974,6 +974,20 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const cronSecret = Deno.env.get("CRON_SECRET");
+  if (cronSecret) {
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+    if (authHeader !== `Bearer ${cronSecret}`) {
+      console.warn("Unauthorized invocation of send-revision-reminders");
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  } else {
+    console.warn("CRON_SECRET is not configured — endpoint is publicly callable. Set CRON_SECRET to require authentication.");
+  }
+
   try {
     console.log("Initializing Supabase client...");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
