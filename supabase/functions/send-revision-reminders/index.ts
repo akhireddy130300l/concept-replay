@@ -1109,7 +1109,7 @@ serve(async (req) => {
       const fromEmail = "onboarding@resend.dev";
       const toEmail = userEmail;
 
-      const topicNames = topicsArray.map(t => t.title);
+      const topicNames = topicsArray.map(t => escapeHtml(t.title));
       let emailSubject: string;
       if (topicNames.length === 1) {
         emailSubject = `📚 "${topicNames[0]}" - Ready for Review`;
