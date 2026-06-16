@@ -166,10 +166,10 @@ function getResultPage(message: string, isCorrect: boolean, stats: any, alreadyA
     <h1 style="color: ${textColor}; font-size: 24px; margin: 0 0 8px 0;">${message}</h1>
     ${stats ? `
       <div style="margin-top: 24px; padding: 20px; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-        <p style="margin: 0 0 8px 0; font-size: 18px;">${stats.medal || "🥉"} <strong>Rank: ${stats.rank}</strong></p>
-        <p style="margin: 0 0 4px 0; color: #6b7280;">+${stats.pointsEarned} points earned</p>
-        <p style="margin: 0 0 4px 0; color: #6b7280;">Total: <strong>${stats.total_points} pts</strong></p>
-        <p style="margin: 0; color: #6b7280;">🔥 Streak: <strong>${stats.current_streak} day(s)</strong></p>
+        <p style="margin: 0 0 8px 0; font-size: 18px;">${escapeHtml(stats.medal || "🥉")} <strong>Rank: ${escapeHtml(stats.rank)}</strong></p>
+        <p style="margin: 0 0 4px 0; color: #6b7280;">+${escapeHtml(stats.pointsEarned)} points earned</p>
+        <p style="margin: 0 0 4px 0; color: #6b7280;">Total: <strong>${escapeHtml(stats.total_points)} pts</strong></p>
+        <p style="margin: 0; color: #6b7280;">🔥 Streak: <strong>${escapeHtml(stats.current_streak)} day(s)</strong></p>
       </div>
     ` : ""}
   </div>
