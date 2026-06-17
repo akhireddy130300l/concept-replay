@@ -64,6 +64,8 @@ type MarketGainer = {
   volumeRaw: number;
   marketCapRaw: number;
   analyst?: AnalystEstimate | null;
+  todayChangePct?: string;
+  todayChangeRaw?: number;
 };
 
 type MarketGainersResult = {
@@ -111,6 +113,19 @@ async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null>
     if (!weekAgo) return null;
     const pct = ((last - weekAgo) / weekAgo) * 100;
     const marketCapRaw = Number(meta?.marketCap) || 0;
+
+    // Today's intraday change: prefer live regularMarketPrice vs chartPreviousClose,
+    // fallback to last two daily closes.
+    const livePrice = Number(meta?.regularMarketPrice);
+    const prevClose = Number(meta?.chartPreviousClose ?? meta?.previousClose);
+    let todayPct: number | undefined;
+    if (Number.isFinite(livePrice) && Number.isFinite(prevClose) && prevClose > 0) {
+      todayPct = ((livePrice - prevClose) / prevClose) * 100;
+    } else if (validCloses.length >= 2) {
+      const prev = validCloses[validCloses.length - 2];
+      if (prev > 0) todayPct = ((last - prev) / prev) * 100;
+    }
+
     return {
       symbol,
       companyName: String(meta?.longName || meta?.shortName || symbol),
@@ -124,6 +139,8 @@ async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null>
       percentGainRaw: pct,
       volumeRaw: Number(meta?.regularMarketVolume) || 0,
       marketCapRaw,
+      todayChangePct: todayPct !== undefined ? `${todayPct >= 0 ? "+" : ""}${todayPct.toFixed(2)}%` : undefined,
+      todayChangeRaw: todayPct,
     };
   } catch {
     return null;
@@ -616,7 +633,18 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   };
 
 
-  const renderCards = (movers: MarketGainer[]) => movers
+  const renderTodayBadge = (m: MarketGainer) => {
+    if (m.todayChangePct === undefined || m.todayChangeRaw === undefined) {
+      return `<div style="margin-top:6px;font-size:11px;color:#94a3b8;font-style:italic;">Today: data unavailable</div>`;
+    }
+    const up = m.todayChangeRaw >= 0;
+    const bg = up ? "#dcfce7" : "#fee2e2";
+    const color = up ? "#047857" : "#b91c1c";
+    const arrow = up ? "▲" : "▼";
+    return `<div style="margin-top:6px;"><span style="display:inline-block;padding:2px 8px;background:${bg};color:${color};border-radius:999px;font-size:11px;font-weight:700;">Today ${arrow} ${escapeHtml(m.todayChangePct)}</span></div>`;
+  };
+
+  const renderCards = (movers: MarketGainer[], opts: { showToday?: boolean } = {}) => movers
     .map((m, i) => `
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:separate;margin:0 0 12px 0;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 1px 2px rgba(15,23,42,0.04);">
         <tr>
@@ -630,7 +658,8 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
                 </td>
                 <td style="vertical-align:middle;text-align:right;white-space:nowrap;">
                   <div style="font-size:18px;font-weight:700;color:#0f172a;">$${escapeHtml(m.price)}</div>
-                  <div style="display:inline-block;margin-top:4px;padding:3px 10px;background:#dcfce7;color:#047857;border-radius:999px;font-size:13px;font-weight:700;">▲ ${escapeHtml(m.percentGain)}</div>
+                  <div style="display:inline-block;margin-top:4px;padding:3px 10px;background:#dcfce7;color:#047857;border-radius:999px;font-size:13px;font-weight:700;">▲ ${escapeHtml(m.percentGain)}${opts.showToday ? " <span style=\"font-weight:500;opacity:0.8;\">· 7d</span>" : ""}</div>
+                  ${opts.showToday ? renderTodayBadge(m) : ""}
                 </td>
               </tr>
               <tr>
@@ -658,7 +687,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     ? renderCards(result.largeCapMovers)
     : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">No large-cap (≥ $10B) stocks made today's top gainers list.</p>`;
   const weeklyCards = result.largeCapWeekly.length > 0
-    ? renderCards(result.largeCapWeekly)
+    ? renderCards(result.largeCapWeekly, { showToday: true })
     : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">7-day large-cap performance data is unavailable right now.</p>`;
 
   return `
