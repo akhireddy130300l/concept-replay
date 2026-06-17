@@ -113,6 +113,19 @@ async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null>
     if (!weekAgo) return null;
     const pct = ((last - weekAgo) / weekAgo) * 100;
     const marketCapRaw = Number(meta?.marketCap) || 0;
+
+    // Today's intraday change: prefer live regularMarketPrice vs chartPreviousClose,
+    // fallback to last two daily closes.
+    const livePrice = Number(meta?.regularMarketPrice);
+    const prevClose = Number(meta?.chartPreviousClose ?? meta?.previousClose);
+    let todayPct: number | undefined;
+    if (Number.isFinite(livePrice) && Number.isFinite(prevClose) && prevClose > 0) {
+      todayPct = ((livePrice - prevClose) / prevClose) * 100;
+    } else if (validCloses.length >= 2) {
+      const prev = validCloses[validCloses.length - 2];
+      if (prev > 0) todayPct = ((last - prev) / prev) * 100;
+    }
+
     return {
       symbol,
       companyName: String(meta?.longName || meta?.shortName || symbol),
@@ -126,6 +139,8 @@ async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null>
       percentGainRaw: pct,
       volumeRaw: Number(meta?.regularMarketVolume) || 0,
       marketCapRaw,
+      todayChangePct: todayPct !== undefined ? `${todayPct >= 0 ? "+" : ""}${todayPct.toFixed(2)}%` : undefined,
+      todayChangeRaw: todayPct,
     };
   } catch {
     return null;
