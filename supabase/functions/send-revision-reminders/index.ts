@@ -64,6 +64,8 @@ type MarketGainer = {
   volumeRaw: number;
   marketCapRaw: number;
   analyst?: AnalystEstimate | null;
+  todayChangePct?: string;
+  todayChangeRaw?: number;
 };
 
 type MarketGainersResult = {
