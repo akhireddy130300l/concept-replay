@@ -1147,8 +1147,15 @@ serve(async (req) => {
         })
       );
 
-      // Build reward stats banner for email
-      const rewardsBanner = rewards
+      // Separate regular and market-gainers topics so the generic reminder
+      // header / reward banner only appears for regular topics.
+      const regularTopics = topicsWithDescriptions.filter((t) => !isLatestMarketGainersRequest(t.title));
+      const marketGainersTopics = topicsWithDescriptions.filter((t) => isLatestMarketGainersRequest(t.title));
+      const hasRegularTopics = regularTopics.length > 0;
+      const hasMarketGainersTopics = marketGainersTopics.length > 0;
+
+      // Build reward stats banner for email (only when regular topics are present)
+      const rewardsBanner = hasRegularTopics && rewards
         ? `<div style="background: linear-gradient(135deg, #fef3c7, #fde68a); padding: 16px 24px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
             <span style="font-size: 24px;">${getRankMedal(rewards.rank)}</span>
             <strong style="color: #92400e; font-size: 16px;"> ${rewards.rank}</strong>
@@ -1159,14 +1166,7 @@ serve(async (req) => {
            </div>`
         : "";
 
-      const emailContent = `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
-          <h1 style="color: #0891b2; font-size: 28px; margin-bottom: 10px; font-weight: 600;">🧠 Time to Review Your Topics!</h1>
-          <p style="color: #475569; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">Hello! Here are the topics due for revision today:</p>
-          ${rewardsBanner}
-          ${topicsWithDescriptions
-            .map(
-              (topic) => `
+      const renderTopicCard = (topic: any) => `
             <div style="background: #f8fafc; padding: 24px; margin: 24px 0; border-radius: 12px; border-left: 4px solid #0891b2; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
               <h2 style="color: #0f172a; font-size: 22px; margin: 0 0 12px 0; font-weight: 600;">${escapeHtml(topic.title)}</h2>
               ${topic.description ? `<p style="color: #64748b; font-style: italic; font-size: 14px; margin-bottom: 16px; padding: 10px; background: #e0f2fe; border-radius: 6px;">${escapeHtml(topic.description)}</p>` : ""}
@@ -1185,9 +1185,17 @@ serve(async (req) => {
               ${topic.mcq ? buildQuizHTML(topic.mcq, userId, topic.id, quizBaseUrl) : ""}
               <p style="color: #94a3b8; font-size: 13px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #e2e8f0;">📅 Originally learned: ${new Date(topic.learned_date).toLocaleDateString()}</p>
             </div>
-          `
-            )
-            .join("")}
+          `;
+
+      const emailContent = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
+          ${hasRegularTopics ? `
+            <h1 style="color: #0891b2; font-size: 28px; margin-bottom: 10px; font-weight: 600;">🧠 Time to Review Your Topics!</h1>
+            <p style="color: #475569; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">Hello! Here are the topics due for revision today:</p>
+            ${rewardsBanner}
+            ${regularTopics.map(renderTopicCard).join("")}
+          ` : ""}
+          ${hasMarketGainersTopics ? marketGainersTopics.map(renderTopicCard).join("") : ""}
           <p style="color: #64748b; margin-top: 40px; font-size: 15px; line-height: 1.6;">Keep up the great work! Regular reviews help solidify your knowledge. 💪</p>
           <p style="color: #94a3b8; font-size: 14px; margin-top: 20px;">Best regards,<br><strong style="color: #0891b2;">LearnLoop Team</strong></p>
         </div>
