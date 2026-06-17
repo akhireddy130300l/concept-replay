@@ -90,6 +90,24 @@ const LARGE_CAP_UNIVERSE = [
 ];
 
 const YAHOO_CHART_ENDPOINT = "https://query1.finance.yahoo.com/v8/finance/chart";
+const YAHOO_QUOTE_ENDPOINT = "https://query1.finance.yahoo.com/v7/finance/quote";
+
+async function fetchYahooLiveQuote(symbol: string): Promise<any | null> {
+  try {
+    const url = `${YAHOO_QUOTE_ENDPOINT}?symbols=${encodeURIComponent(symbol)}`;
+    const res = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 LearnLoop/1.0",
+      },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.quoteResponse?.result?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null> {
   try {
@@ -114,28 +132,40 @@ async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null>
     const pct = ((last - weekAgo) / weekAgo) * 100;
     const marketCapRaw = Number(meta?.marketCap) || 0;
 
-    // Today's intraday change: prefer live regularMarketPrice vs chartPreviousClose,
-    // fallback to last two daily closes.
-    const livePrice = Number(meta?.regularMarketPrice);
-    const prevClose = Number(meta?.chartPreviousClose ?? meta?.previousClose);
+    // Today's change: prefer Yahoo quote API's regularMarketChangePercent.
+    // Do NOT use meta.chartPreviousClose — with range=1mo it refers to the close
+    // before the chart range, producing ~1-month change instead of today's change.
+    const liveQuote = await fetchYahooLiveQuote(symbol);
+    const quoteTodayPct = Number(liveQuote?.regularMarketChangePercent);
+    const quoteLivePrice = Number(liveQuote?.regularMarketPrice);
+    const quotePrevClose = Number(liveQuote?.regularMarketPreviousClose);
+
+    const livePrice = Number.isFinite(quoteLivePrice)
+      ? quoteLivePrice
+      : Number(meta?.regularMarketPrice);
+
     let todayPct: number | undefined;
-    if (Number.isFinite(livePrice) && Number.isFinite(prevClose) && prevClose > 0) {
-      todayPct = ((livePrice - prevClose) / prevClose) * 100;
+    if (Number.isFinite(quoteTodayPct)) {
+      todayPct = quoteTodayPct;
+    } else if (Number.isFinite(livePrice) && Number.isFinite(quotePrevClose) && quotePrevClose > 0) {
+      todayPct = ((livePrice - quotePrevClose) / quotePrevClose) * 100;
     } else if (validCloses.length >= 2) {
       const prev = validCloses[validCloses.length - 2];
       if (prev > 0) todayPct = ((last - prev) / prev) * 100;
     }
 
+    const displayPrice = Number.isFinite(livePrice) ? livePrice : last;
+
     return {
       symbol,
       companyName: String(meta?.longName || meta?.shortName || symbol),
-      price: `${last.toFixed(2)}`,
+      price: `${displayPrice.toFixed(2)}`,
       percentGain: `${pct.toFixed(2)}%`,
       volume: meta?.regularMarketVolume ? Number(meta.regularMarketVolume).toLocaleString("en-US") : "N/A",
       marketCap: marketCapRaw >= 1e12 ? `${(marketCapRaw / 1e12).toFixed(2)}T` : marketCapRaw >= 1e9 ? `${(marketCapRaw / 1e9).toFixed(2)}B` : "N/A",
       exchange: String(meta?.exchangeName || "N/A"),
       session: "7-day",
-      priceRaw: last,
+      priceRaw: displayPrice,
       percentGainRaw: pct,
       volumeRaw: Number(meta?.regularMarketVolume) || 0,
       marketCapRaw,
@@ -146,6 +176,7 @@ async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null>
     return null;
   }
 }
+
 
 async function fetchLargeCapWeeklyGainers(): Promise<MarketGainer[]> {
   const results = await Promise.all(LARGE_CAP_UNIVERSE.map((s) => fetchSevenDayChange(s)));
