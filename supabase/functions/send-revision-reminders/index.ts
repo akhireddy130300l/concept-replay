@@ -897,8 +897,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       </div>`;
   };
 
-  const allCards = renderDailyTable(result.movers.slice(0, 10), "No top gainers available right now.");
-  const largeCapCards = renderDailyTable(result.largeCapMovers.slice(0, 10), "No large-cap (≥ $10B) stocks made today's top gainers list.");
+  // (allCards / largeCapCards assigned below, after statusBadge & analystSignal helpers are declared)
 
   // Weekly table renderer (per spec) — uses screener-quote data + chart closes.
   const fmtPL = (pctRaw: number | undefined, pctStr: string | undefined, suffix = "") => {
