@@ -108,7 +108,7 @@ const YAHOO_LARGE_CAP_SCREENERS = [
   "undervalued_growth_stocks",
 ];
 
-async function fetchYahooScreenerSymbols(scrId: string, count = 100): Promise<Array<{ symbol: string; marketCap: number }>> {
+async function fetchYahooScreenerQuotes(scrId: string, count = 100): Promise<ScreenerQuote[]> {
   try {
     const url = `${YAHOO_SCREENER_ENDPOINT}?scrIds=${encodeURIComponent(scrId)}&count=${count}`;
     const res = await fetch(url, {
@@ -117,57 +117,85 @@ async function fetchYahooScreenerSymbols(scrId: string, count = 100): Promise<Ar
         "User-Agent": "Mozilla/5.0 LearnLoop/1.0",
       },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.warn(`[screener:${scrId}] HTTP ${res.status}`);
+      return [];
+    }
     const data = await res.json();
     const quotes = data?.finance?.result?.[0]?.quotes ?? [];
-    return quotes
+    const mapped: ScreenerQuote[] = quotes
       .map((q: any) => ({
         symbol: String(q?.symbol || ""),
-        marketCap: Number(q?.marketCap) || 0,
+        longName: q?.longName,
+        shortName: q?.shortName,
+        marketCap: Number(q?.marketCap) || undefined,
+        regularMarketPrice: Number(q?.regularMarketPrice),
+        regularMarketChangePercent: Number(q?.regularMarketChangePercent),
+        regularMarketVolume: Number(q?.regularMarketVolume),
+        currency: q?.currency,
+        marketState: q?.marketState,
+        regularMarketTime: Number(q?.regularMarketTime) || undefined,
+        exchange: q?.exchange,
+        fullExchangeName: q?.fullExchangeName,
       }))
-      .filter((q: any) => q.symbol);
-  } catch {
+      .filter((q: ScreenerQuote) => q.symbol);
+    console.log(`[screener:${scrId}] fetched ${mapped.length} symbols`);
+    return mapped;
+  } catch (e) {
+    console.warn(`[screener:${scrId}] error`, e instanceof Error ? e.message : e);
     return [];
   }
 }
 
-async function discoverLargeCapUniverse(): Promise<string[]> {
-  const lists = await Promise.all(YAHOO_LARGE_CAP_SCREENERS.map((s) => fetchYahooScreenerSymbols(s, 100)));
-  const map = new Map<string, number>();
+async function discoverLargeCapUniverse(): Promise<Map<string, ScreenerQuote>> {
+  const lists = await Promise.all(YAHOO_LARGE_CAP_SCREENERS.map((s) => fetchYahooScreenerQuotes(s, 100)));
+  const map = new Map<string, ScreenerQuote>();
   for (const list of lists) {
-    for (const { symbol, marketCap } of list) {
-      const prev = map.get(symbol) ?? 0;
-      if (marketCap > prev) map.set(symbol, marketCap);
+    for (const q of list) {
+      const prev = map.get(q.symbol);
+      // Keep richer record (higher marketCap or pre-existing with price)
+      if (!prev) {
+        map.set(q.symbol, q);
+      } else {
+        const merged: ScreenerQuote = {
+          ...prev,
+          ...Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined && v !== null && !(typeof v === "number" && Number.isNaN(v)))),
+        };
+        if ((prev.marketCap ?? 0) > (q.marketCap ?? 0)) merged.marketCap = prev.marketCap;
+        map.set(q.symbol, merged);
+      }
     }
   }
-  // Keep symbols that look like large-caps (>= $10B) OR have unknown cap
-  // (screener sometimes omits marketCap — we'll re-check after fetching chart).
-  return Array.from(map.entries())
-    .filter(([, cap]) => cap === 0 || cap >= LARGE_CAP_THRESHOLD)
-    .map(([symbol]) => symbol);
+  console.log(`[universe] total unique candidates after dedupe: ${map.size}`);
+  const largeCapOnly = new Map<string, ScreenerQuote>();
+  for (const [sym, q] of map.entries()) {
+    if ((q.marketCap ?? 0) >= LARGE_CAP_THRESHOLD) largeCapOnly.set(sym, q);
+  }
+  console.log(`[universe] candidates with marketCap >= $10B: ${largeCapOnly.size}`);
+  return largeCapOnly;
 }
 
 const YAHOO_CHART_ENDPOINT = "https://query1.finance.yahoo.com/v8/finance/chart";
-const YAHOO_QUOTE_ENDPOINT = "https://query1.finance.yahoo.com/v7/finance/quote";
 
-async function fetchYahooLiveQuote(symbol: string): Promise<any | null> {
-  try {
-    const url = `${YAHOO_QUOTE_ENDPOINT}?symbols=${encodeURIComponent(symbol)}`;
-    const res = await fetch(url, {
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 LearnLoop/1.0",
-      },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.quoteResponse?.result?.[0] ?? null;
-  } catch {
-    return null;
-  }
+function formatMarketCap(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "N/A";
+  if (n >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  return n.toLocaleString("en-US");
 }
 
-async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null> {
+function deriveDataStatus(quote: ScreenerQuote, periodLabel: "7-day" | "since-listing"): string {
+  if (periodLabel === "since-listing") return "Since-listing";
+  const state = (quote.marketState || "").toUpperCase();
+  if (state === "PRE") return "Pre-market";
+  if (state === "REGULAR") return "Regular / Intraday";
+  if (state === "POST" || state === "POSTPOST") return "After-hours";
+  if (state === "CLOSED" || state === "PREPRE") return "Market closed";
+  return state || "Unknown";
+}
+
+async function fetchHistoricalCloses(symbol: string): Promise<{ closes: number[]; metaPrice?: number } | null> {
   try {
     const url = `${YAHOO_CHART_ENDPOINT}/${encodeURIComponent(symbol)}?range=1mo&interval=1d`;
     const res = await fetch(url, {
@@ -179,82 +207,120 @@ async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null>
     if (!res.ok) return null;
     const data = await res.json();
     const result = data?.chart?.result?.[0];
-    const closes: (number | null)[] = result?.indicators?.quote?.[0]?.close ?? [];
-    const meta = result?.meta;
-    const validCloses = closes.filter((c): c is number => typeof c === "number" && Number.isFinite(c));
-    if (validCloses.length < 6) return null;
-    // Compare last close to the close from ~5 trading sessions ago (≈ 7 calendar days).
-    const last = validCloses[validCloses.length - 1];
-    const weekAgo = validCloses[validCloses.length - 6];
-    if (!weekAgo) return null;
-    const pct = ((last - weekAgo) / weekAgo) * 100;
-    const marketCapRaw = Number(meta?.marketCap) || 0;
-
-    // Today's change: prefer Yahoo quote API's regularMarketChangePercent.
-    // Do NOT use meta.chartPreviousClose — with range=1mo it refers to the close
-    // before the chart range, producing ~1-month change instead of today's change.
-    const liveQuote = await fetchYahooLiveQuote(symbol);
-    const quoteTodayPct = Number(liveQuote?.regularMarketChangePercent);
-    const quoteLivePrice = Number(liveQuote?.regularMarketPrice);
-    const quotePrevClose = Number(liveQuote?.regularMarketPreviousClose);
-
-    const livePrice = Number.isFinite(quoteLivePrice)
-      ? quoteLivePrice
-      : Number(meta?.regularMarketPrice);
-
-    let todayPct: number | undefined;
-    if (Number.isFinite(quoteTodayPct)) {
-      todayPct = quoteTodayPct;
-    } else if (Number.isFinite(livePrice) && Number.isFinite(quotePrevClose) && quotePrevClose > 0) {
-      todayPct = ((livePrice - quotePrevClose) / quotePrevClose) * 100;
-    } else if (validCloses.length >= 2) {
-      const prev = validCloses[validCloses.length - 2];
-      if (prev > 0) todayPct = ((last - prev) / prev) * 100;
-    }
-
-    const displayPrice = Number.isFinite(livePrice) ? livePrice : last;
-
-    return {
-      symbol,
-      companyName: String(meta?.longName || meta?.shortName || symbol),
-      price: `${displayPrice.toFixed(2)}`,
-      percentGain: `${pct.toFixed(2)}%`,
-      volume: meta?.regularMarketVolume ? Number(meta.regularMarketVolume).toLocaleString("en-US") : "N/A",
-      marketCap: marketCapRaw >= 1e12 ? `${(marketCapRaw / 1e12).toFixed(2)}T` : marketCapRaw >= 1e9 ? `${(marketCapRaw / 1e9).toFixed(2)}B` : "N/A",
-      exchange: String(meta?.exchangeName || "N/A"),
-      session: "7-day",
-      priceRaw: displayPrice,
-      percentGainRaw: pct,
-      volumeRaw: Number(meta?.regularMarketVolume) || 0,
-      marketCapRaw,
-      todayChangePct: todayPct !== undefined ? `${todayPct >= 0 ? "+" : ""}${todayPct.toFixed(2)}%` : undefined,
-      todayChangeRaw: todayPct,
-    };
+    const raw: (number | null)[] = result?.indicators?.quote?.[0]?.close ?? [];
+    const closes = raw.filter((c): c is number => typeof c === "number" && Number.isFinite(c));
+    const metaPrice = Number(result?.meta?.regularMarketPrice);
+    return { closes, metaPrice: Number.isFinite(metaPrice) ? metaPrice : undefined };
   } catch {
     return null;
   }
 }
 
+function buildWeeklyGainerFromQuote(quote: ScreenerQuote, closes: number[], chartMetaPrice: number | undefined): MarketGainer | null {
+  if (closes.length < 2) return null;
+  let periodLabel: "7-day" | "since-listing";
+  let comparisonClose: number;
+  if (closes.length >= 6) {
+    periodLabel = "7-day";
+    comparisonClose = closes[closes.length - 6];
+  } else {
+    periodLabel = "since-listing";
+    comparisonClose = closes[0];
+  }
+  if (!Number.isFinite(comparisonClose) || comparisonClose <= 0) return null;
+
+  // Latest price: screener regularMarketPrice -> chart meta regularMarketPrice -> last close
+  const lastClose = closes[closes.length - 1];
+  const latestPrice = Number.isFinite(quote.regularMarketPrice as number)
+    ? (quote.regularMarketPrice as number)
+    : Number.isFinite(chartMetaPrice as number)
+      ? (chartMetaPrice as number)
+      : lastClose;
+
+  const pct = ((latestPrice - comparisonClose) / comparisonClose) * 100;
+  if (!Number.isFinite(pct)) return null;
+
+  const todayRaw = Number.isFinite(quote.regularMarketChangePercent as number)
+    ? (quote.regularMarketChangePercent as number)
+    : undefined;
+
+  const marketCapRaw = Number(quote.marketCap) || 0;
+  const dataStatus = deriveDataStatus(quote, periodLabel);
+
+  return {
+    symbol: quote.symbol,
+    companyName: String(quote.longName || quote.shortName || quote.symbol),
+    price: latestPrice.toFixed(2),
+    percentGain: `${pct.toFixed(2)}%`,
+    volume: Number.isFinite(quote.regularMarketVolume as number) && (quote.regularMarketVolume as number) > 0
+      ? (quote.regularMarketVolume as number).toLocaleString("en-US")
+      : "N/A",
+    marketCap: formatMarketCap(marketCapRaw),
+    exchange: String(quote.fullExchangeName || quote.exchange || "N/A"),
+    session: periodLabel,
+    priceRaw: latestPrice,
+    percentGainRaw: pct,
+    volumeRaw: Number(quote.regularMarketVolume) || 0,
+    marketCapRaw,
+    todayChangePct: todayRaw !== undefined ? `${todayRaw >= 0 ? "+" : ""}${todayRaw.toFixed(2)}%` : undefined,
+    todayChangeRaw: todayRaw,
+    periodLabel,
+    dataStatus,
+    currency: quote.currency,
+  };
+}
 
 async function fetchLargeCapWeeklyGainers(): Promise<MarketGainer[]> {
   const universe = await discoverLargeCapUniverse();
-  if (universe.length === 0) return [];
-  // Cap concurrency to avoid hammering Yahoo. Process in small chunks.
+  if (universe.size === 0) {
+    console.warn("[weekly] empty large-cap universe");
+    return [];
+  }
+  const entries = Array.from(universe.entries());
   const CHUNK = 15;
   const out: MarketGainer[] = [];
-  for (let i = 0; i < universe.length; i += CHUNK) {
-    const chunk = universe.slice(i, i + CHUNK);
-    const results = await Promise.all(chunk.map((s) => fetchSevenDayChange(s)));
-    for (const r of results) {
-      if (r && Number.isFinite(r.percentGainRaw) && r.marketCapRaw >= LARGE_CAP_THRESHOLD) {
-        out.push(r);
+  let chartOk = 0;
+  let chartFail = 0;
+  let skippedFewCloses = 0;
+  const rejected: Array<{ symbol: string; reason: string }> = [];
+
+  for (let i = 0; i < entries.length; i += CHUNK) {
+    const chunk = entries.slice(i, i + CHUNK);
+    const results = await Promise.all(chunk.map(async ([sym, q]) => {
+      const hist = await fetchHistoricalCloses(sym);
+      return { sym, q, hist };
+    }));
+    for (const { sym, q, hist } of results) {
+      if (!hist) {
+        chartFail++;
+        rejected.push({ symbol: sym, reason: "chart-fetch-failed" });
+        continue;
       }
+      chartOk++;
+      if (hist.closes.length < 2) {
+        skippedFewCloses++;
+        rejected.push({ symbol: sym, reason: `only ${hist.closes.length} valid closes` });
+        continue;
+      }
+      const m = buildWeeklyGainerFromQuote(q, hist.closes, hist.metaPrice);
+      if (!m) {
+        rejected.push({ symbol: sym, reason: "build-failed" });
+        continue;
+      }
+      out.push(m);
     }
   }
-  return out
-    .sort((a, b) => b.percentGainRaw - a.percentGainRaw)
-    .slice(0, 10);
+
+  console.log(`[weekly] chart success=${chartOk} fail=${chartFail} skipped(<2 closes)=${skippedFewCloses}`);
+  const sorted = out.sort((a, b) => b.percentGainRaw - a.percentGainRaw).slice(0, 10);
+  console.log(`[weekly] final movers count: ${sorted.length}`);
+  if (rejected.length > 0) {
+    console.log(`[weekly] rejected sample:`, rejected.slice(0, 10));
+  }
+  return sorted;
 }
+
+
 
 const YAHOO_QUOTE_SUMMARY = "https://query1.finance.yahoo.com/v10/finance/quoteSummary";
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
