@@ -1343,17 +1343,16 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Resolve CRON_SECRET: prefer env, fall back to vault via service-role RPC
-  let cronSecret = Deno.env.get("CRON_SECRET") ?? "";
-  if (!cronSecret) {
-    try {
-      const tmpClient = createClient(supabaseUrl, supabaseServiceKey);
-      const { data, error } = await tmpClient.rpc("get_cron_secret");
-      if (!error && typeof data === "string") cronSecret = data;
-    } catch (e) {
-      console.error("Failed to load CRON_SECRET from vault:", e);
-    }
+  // Resolve CRON_SECRET from vault (single source of truth), fall back to env
+  let cronSecret = "";
+  try {
+    const tmpClient = createClient(supabaseUrl, supabaseServiceKey);
+    const { data, error } = await tmpClient.rpc("get_cron_secret");
+    if (!error && typeof data === "string") cronSecret = data;
+  } catch (e) {
+    console.error("Failed to load CRON_SECRET from vault:", e);
   }
+  if (!cronSecret) cronSecret = Deno.env.get("CRON_SECRET") ?? "";
   if (!cronSecret) {
     console.error("CRON_SECRET is not configured — refusing to execute send-revision-reminders.");
     return new Response(JSON.stringify({ error: "Server not configured" }), {
