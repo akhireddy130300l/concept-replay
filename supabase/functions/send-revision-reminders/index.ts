@@ -993,7 +993,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">TICKER</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">COMPANY</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">PRICE</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">7-DAY / SINCE-LISTING P/L</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">7-DAYS P/L</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">TODAY P/L</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">VOLUME</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">MARKET CAP</th>
