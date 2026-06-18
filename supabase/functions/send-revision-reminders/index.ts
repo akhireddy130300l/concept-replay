@@ -66,6 +66,24 @@ type MarketGainer = {
   analyst?: AnalystEstimate | null;
   todayChangePct?: string;
   todayChangeRaw?: number;
+  periodLabel?: "7-day" | "since-listing";
+  dataStatus?: string;
+  currency?: string;
+};
+
+type ScreenerQuote = {
+  symbol: string;
+  longName?: string;
+  shortName?: string;
+  marketCap?: number;
+  regularMarketPrice?: number;
+  regularMarketChangePercent?: number;
+  regularMarketVolume?: number;
+  currency?: string;
+  marketState?: string;
+  regularMarketTime?: number;
+  exchange?: string;
+  fullExchangeName?: string;
 };
 
 type MarketGainersResult = {
