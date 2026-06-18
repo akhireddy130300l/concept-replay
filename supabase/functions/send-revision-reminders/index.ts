@@ -76,18 +76,58 @@ type MarketGainersResult = {
   sourceUrl: string;
 };
 
-// Curated universe of well-known US large-caps used for the 7-day ranking.
-const LARGE_CAP_UNIVERSE = [
-  "AAPL","MSFT","GOOGL","GOOG","AMZN","NVDA","META","TSLA","AVGO","BRK-B",
-  "JPM","V","MA","UNH","XOM","WMT","JNJ","PG","HD","LLY",
-  "ORCL","COST","BAC","ABBV","CVX","KO","PEP","MRK","TMO","CSCO",
-  "ACN","ADBE","CRM","NFLX","AMD","INTC","QCOM","TXN","INTU","IBM",
-  "MU","WDC","SNDK","ARM","PLTR","SMCI","ASML","TSM","NOW","UBER",
-  "DIS","NKE","MCD","SBUX","BA","CAT","GE","HON","RTX","LMT",
-  "GS","MS","WFC","C","BLK","SCHW","AXP","PYPL","COIN",
-  "PFE","ABT","DHR","BMY","GILD","AMGN","CVS","T","VZ","TMUS",
-  "SPY","QQQ","DIA","IWM"
+// Yahoo predefined screeners used to dynamically discover a broad pool of
+// liquid US equities. We then filter by market-cap >= $10B and rank by
+// trailing 7-day performance. This avoids any hardcoded ticker universe so
+// names like SNDK / SPCX / newly-popular mega-caps surface automatically.
+const YAHOO_SCREENER_ENDPOINT = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved";
+const YAHOO_LARGE_CAP_SCREENERS = [
+  "day_gainers",
+  "day_losers",
+  "most_actives",
+  "undervalued_large_caps",
+  "growth_technology_stocks",
+  "undervalued_growth_stocks",
 ];
+
+async function fetchYahooScreenerSymbols(scrId: string, count = 100): Promise<Array<{ symbol: string; marketCap: number }>> {
+  try {
+    const url = `${YAHOO_SCREENER_ENDPOINT}?scrIds=${encodeURIComponent(scrId)}&count=${count}`;
+    const res = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 LearnLoop/1.0",
+      },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const quotes = data?.finance?.result?.[0]?.quotes ?? [];
+    return quotes
+      .map((q: any) => ({
+        symbol: String(q?.symbol || ""),
+        marketCap: Number(q?.marketCap) || 0,
+      }))
+      .filter((q: any) => q.symbol);
+  } catch {
+    return [];
+  }
+}
+
+async function discoverLargeCapUniverse(): Promise<string[]> {
+  const lists = await Promise.all(YAHOO_LARGE_CAP_SCREENERS.map((s) => fetchYahooScreenerSymbols(s, 100)));
+  const map = new Map<string, number>();
+  for (const list of lists) {
+    for (const { symbol, marketCap } of list) {
+      const prev = map.get(symbol) ?? 0;
+      if (marketCap > prev) map.set(symbol, marketCap);
+    }
+  }
+  // Keep symbols that look like large-caps (>= $10B) OR have unknown cap
+  // (screener sometimes omits marketCap — we'll re-check after fetching chart).
+  return Array.from(map.entries())
+    .filter(([, cap]) => cap === 0 || cap >= LARGE_CAP_THRESHOLD)
+    .map(([symbol]) => symbol);
+}
 
 const YAHOO_CHART_ENDPOINT = "https://query1.finance.yahoo.com/v8/finance/chart";
 const YAHOO_QUOTE_ENDPOINT = "https://query1.finance.yahoo.com/v7/finance/quote";
@@ -179,9 +219,21 @@ async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null>
 
 
 async function fetchLargeCapWeeklyGainers(): Promise<MarketGainer[]> {
-  const results = await Promise.all(LARGE_CAP_UNIVERSE.map((s) => fetchSevenDayChange(s)));
-  return results
-    .filter((r): r is MarketGainer => r !== null && Number.isFinite(r.percentGainRaw))
+  const universe = await discoverLargeCapUniverse();
+  if (universe.length === 0) return [];
+  // Cap concurrency to avoid hammering Yahoo. Process in small chunks.
+  const CHUNK = 15;
+  const out: MarketGainer[] = [];
+  for (let i = 0; i < universe.length; i += CHUNK) {
+    const chunk = universe.slice(i, i + CHUNK);
+    const results = await Promise.all(chunk.map((s) => fetchSevenDayChange(s)));
+    for (const r of results) {
+      if (r && Number.isFinite(r.percentGainRaw) && r.marketCapRaw >= LARGE_CAP_THRESHOLD) {
+        out.push(r);
+      }
+    }
+  }
+  return out
     .sort((a, b) => b.percentGainRaw - a.percentGainRaw)
     .slice(0, 10);
 }
@@ -734,7 +786,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🏛️ Top Large-Cap Gainers — Last 1 Day <span style="font-weight:400;color:#64748b;font-size:13px;">(market cap ≥ $10B)</span></h3>
     ${largeCapCards}
 
-    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">📅 Top Large-Cap Gainers — Last 7 Days <span style="font-weight:400;color:#64748b;font-size:13px;">(best weekly performers from a curated mega-cap universe)</span></h3>
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">📅 Top Large-Cap Gainers — Last 7 Days <span style="font-weight:400;color:#64748b;font-size:13px;">(top weekly performers across the US market, market cap ≥ $10B)</span></h3>
     ${weeklyCards}
 
 
