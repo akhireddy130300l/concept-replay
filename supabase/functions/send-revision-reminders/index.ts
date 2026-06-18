@@ -270,6 +270,7 @@ function buildWeeklyGainerFromQuote(quote: ScreenerQuote, closes: number[], char
     periodLabel,
     dataStatus,
     currency: quote.currency,
+    averageAnalystRating: quote.averageAnalystRating,
   };
 }
 
