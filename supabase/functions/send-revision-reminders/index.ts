@@ -786,7 +786,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🏛️ Top Large-Cap Gainers — Last 1 Day <span style="font-weight:400;color:#64748b;font-size:13px;">(market cap ≥ $10B)</span></h3>
     ${largeCapCards}
 
-    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">📅 Top Large-Cap Gainers — Last 7 Days <span style="font-weight:400;color:#64748b;font-size:13px;">(best weekly performers from a curated mega-cap universe)</span></h3>
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">📅 Top Large-Cap Gainers — Last 7 Days <span style="font-weight:400;color:#64748b;font-size:13px;">(top weekly performers across the US market, market cap ≥ $10B)</span></h3>
     ${weeklyCards}
 
 
