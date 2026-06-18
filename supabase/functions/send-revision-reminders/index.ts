@@ -874,30 +874,31 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     }
     const rows = movers.map((m, i) => `
       <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"};">
-        <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;">#${i + 1}</td>
-        <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;">${escapeHtml(m.symbol)}</td>
-        <td style="padding:10px 8px;color:#334155;font-size:12px;text-align:left;">${escapeHtml(m.companyName)}</td>
-        <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;">$${escapeHtml(m.price)}</td>
-        <td style="padding:10px 8px;text-align:right;">${fmtDailyPL(m.percentGainRaw)}</td>
-        <td style="padding:10px 8px;color:#334155;font-size:12px;text-align:right;white-space:nowrap;">${escapeHtml(m.volume)}</td>
-        <td style="padding:10px 8px;color:#334155;font-size:12px;text-align:right;white-space:nowrap;">${escapeHtml(m.marketCap)}</td>
-        <td style="padding:10px 8px;text-align:left;">${statusBadge(m.session)}</td>
-        <td style="padding:10px 8px;text-align:left;">${analystSignal(m)}</td>
+        <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;white-space:nowrap;font-size:12px;">#${i + 1}</td>
+        <td style="padding:10px 8px;font-weight:800;color:#0f172a;text-align:left;white-space:nowrap;font-size:13px;">${escapeHtml(m.symbol)}</td>
+        <td style="padding:10px 8px;color:#334155;text-align:left;white-space:nowrap;font-size:12px;">${escapeHtml(m.companyName)}</td>
+        <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;font-size:12px;">$${escapeHtml(m.price)}</td>
+        <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtDailyPL(m.percentGainRaw)}</td>
+        <td style="padding:10px 8px;color:#334155;text-align:right;white-space:nowrap;font-size:12px;">${escapeHtml(m.volume)}</td>
+        <td style="padding:10px 8px;color:#334155;text-align:right;white-space:nowrap;font-size:12px;">${escapeHtml(m.marketCap)}</td>
+        <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${statusBadge(m.session)}</td>
+        <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${analystSignal(m)}</td>
       </tr>`).join("");
     return `
-      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:13px;">
+      <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns.</p>
+      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;-webkit-overflow-scrolling:touch;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;min-width:620px;border-collapse:collapse;font-size:13px;">
           <thead>
             <tr style="background:#0f172a;color:#ffffff;">
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;">RANK</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;">TICKER</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;">COMPANY</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;">PRICE</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;">PROFIT/LOSS</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;">VOLUME</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;">MARKET CAP</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;">SESSION</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;">ANALYST SIGNAL</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RANK</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">TICKER</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">COMPANY</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">PRICE</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">PROFIT/LOSS</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">VOLUME</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">MARKET CAP</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">SESSION</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">ANALYST SIGNAL</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -970,33 +971,34 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       const suffix = m.periodLabel === "since-listing" ? "since-listing" : "";
       return `
         <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"};">
-          <td style="padding:10px 8px;font-weight:700;color:#0f172a;">#${i + 1}</td>
-          <td style="padding:10px 8px;font-weight:700;color:#0f172a;">${escapeHtml(m.symbol)}</td>
-          <td style="padding:10px 8px;color:#334155;font-size:12px;">${escapeHtml(m.companyName)}</td>
-          <td style="padding:10px 8px;color:#0f172a;font-weight:600;">$${escapeHtml(m.price)}</td>
-          <td style="padding:10px 8px;">${fmtPL(m.percentGainRaw, m.percentGain, suffix)}</td>
-          <td style="padding:10px 8px;">${fmtPL(m.todayChangeRaw, m.todayChangePct)}</td>
-          <td style="padding:10px 8px;color:#334155;font-size:12px;">${escapeHtml(m.volume)}</td>
-          <td style="padding:10px 8px;color:#334155;font-size:12px;">${escapeHtml(m.marketCap)}</td>
-          <td style="padding:10px 8px;">${statusBadge(m.dataStatus)}</td>
-          <td style="padding:10px 8px;">${analystSignal(m)}</td>
+          <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;white-space:nowrap;font-size:12px;">#${i + 1}</td>
+          <td style="padding:10px 8px;font-weight:800;color:#0f172a;text-align:left;white-space:nowrap;font-size:13px;">${escapeHtml(m.symbol)}</td>
+          <td style="padding:10px 8px;color:#334155;text-align:left;white-space:nowrap;font-size:12px;">${escapeHtml(m.companyName)}</td>
+          <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;font-size:12px;">$${escapeHtml(m.price)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPL(m.percentGainRaw, m.percentGain, suffix)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPL(m.todayChangeRaw, m.todayChangePct)}</td>
+          <td style="padding:10px 8px;color:#334155;text-align:right;white-space:nowrap;font-size:12px;">${escapeHtml(m.volume)}</td>
+          <td style="padding:10px 8px;color:#334155;text-align:right;white-space:nowrap;font-size:12px;">${escapeHtml(m.marketCap)}</td>
+          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${statusBadge(m.dataStatus)}</td>
+          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${analystSignal(m)}</td>
         </tr>`;
     }).join("");
     return `
-      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:13px;">
+      <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns.</p>
+      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;-webkit-overflow-scrolling:touch;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;min-width:700px;border-collapse:collapse;font-size:13px;">
           <thead>
-            <tr style="background:#0f172a;color:#ffffff;text-align:left;">
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">RANK</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">TICKER</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">COMPANY</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">PRICE</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">7-DAY / SINCE-LISTING P/L</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">TODAY P/L</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">VOLUME</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">MARKET CAP</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">DATA STATUS</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">ANALYST SIGNAL</th>
+            <tr style="background:#0f172a;color:#ffffff;">
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RANK</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">TICKER</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">COMPANY</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">PRICE</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">7-DAY / SINCE-LISTING P/L</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">TODAY P/L</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">VOLUME</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">MARKET CAP</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">DATA STATUS</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">ANALYST SIGNAL</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -1010,8 +1012,8 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   const dataNote = result.largeCapWeekly.length === 0
     ? ""
     : intraday
-      ? `<p style="margin:8px 0 12px 0;padding:8px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;color:#92400e;font-size:12px;">⏱ Data is intraday and may change before market close.</p>`
-      : `<p style="margin:8px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-left:3px solid #64748b;border-radius:6px;color:#334155;font-size:12px;">📊 Data is based on latest available closing prices where available.</p>`;
+      ? `<p style="margin:8px 0 12px 0;padding:8px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;color:#92400e;font-size:12px;">⏱ 7-day performance uses the latest available price compared with recent historical closes. Intraday values may change before market close.</p>`
+      : `<p style="margin:8px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-left:3px solid #64748b;border-radius:6px;color:#334155;font-size:12px;">📊 7-day performance uses the latest available price compared with recent historical closes. Intraday values may change before market close.</p>`;
 
   const weeklyTable = renderWeeklyTable(result.largeCapWeekly);
 
@@ -1044,7 +1046,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
 
     <div style="margin-top:20px;padding:14px 16px;background:#f8fafc;border-radius:10px;border-left:3px solid #0891b2;">
       <p style="margin:0 0 8px 0;font-size:13px;color:#334155;"><strong>Source:</strong> <a href="${YAHOO_GAINERS_PAGE_URL}" style="color:#0891b2;text-decoration:none;">Yahoo Finance Top Gainers</a></p>
-      <p style="margin:0;font-size:12px;color:#64748b;line-height:1.6;">Market data can be delayed. Session reflects Yahoo's market-state value. Low-priced low-volume stocks are filtered. Always check the stock page, news, SEC filings, and risk before buying.</p>
+      <p style="margin:0;font-size:12px;color:#64748b;line-height:1.6;">Market data can be delayed. Session reflects Yahoo's market-state value. Low-priced low-volume stocks are filtered. Always check the stock page, news, official filings, company fundamentals, and risk before making any investment decision.</p>
     </div>
   `;
 }
