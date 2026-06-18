@@ -69,6 +69,7 @@ type MarketGainer = {
   periodLabel?: "7-day" | "since-listing";
   dataStatus?: string;
   currency?: string;
+  averageAnalystRating?: string;
 };
 
 type ScreenerQuote = {
@@ -84,6 +85,7 @@ type ScreenerQuote = {
   regularMarketTime?: number;
   exchange?: string;
   fullExchangeName?: string;
+  averageAnalystRating?: string;
 };
 
 type MarketGainersResult = {
@@ -137,6 +139,7 @@ async function fetchYahooScreenerQuotes(scrId: string, count = 100): Promise<Scr
         regularMarketTime: Number(q?.regularMarketTime) || undefined,
         exchange: q?.exchange,
         fullExchangeName: q?.fullExchangeName,
+        averageAnalystRating: q?.averageAnalystRating,
       }))
       .filter((q: ScreenerQuote) => q.symbol);
     console.log(`[screener:${scrId}] fetched ${mapped.length} symbols`);
@@ -539,13 +542,16 @@ function getFormattedValue(value: unknown, fallback = "N/A"): string {
 
 function getMarketSession(value: unknown): string {
   const session = String(value || "").toUpperCase();
+
   const labels: Record<string, string> = {
     PRE: "Pre-market",
-    REGULAR: "Regular",
+    PREPRE: "Pre-market",
+    REGULAR: "Regular / Intraday",
     POST: "After-hours",
     POSTPOST: "After-hours",
-    CLOSED: "Closed",
+    CLOSED: "Market closed",
   };
+
   return labels[session] || "N/A";
 }
 
@@ -654,6 +660,7 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
         percentGainRaw,
         volumeRaw,
         marketCapRaw,
+        averageAnalystRating: quote.averageAnalystRating,
       };
     })
     .filter((mover) => mover.symbol && Number.isFinite(mover.percentGainRaw))
@@ -922,10 +929,32 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return `<span style="display:inline-block;padding:2px 8px;background:${s.bg};color:${s.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${escapeHtml(status)}</span>`;
   };
 
+  const yahooRatingToKey = (rating?: string): string => {
+    const text = String(rating || "").toLowerCase();
+
+    if (text.includes("strong buy")) return "strong_buy";
+    if (text.includes("buy")) return "buy";
+    if (text.includes("hold")) return "hold";
+    if (text.includes("strong sell")) return "strong_sell";
+    if (text.includes("sell")) return "sell";
+
+    return "none";
+  };
+
   const analystSignal = (m: MarketGainer) => {
-    const a = m.analyst;
-    if (!a) return `<span style="color:#94a3b8;font-size:11px;font-style:italic;">No coverage</span>`;
-    const rec = recLabel(a.recommendationKey);
+    let key = "none";
+
+    if (m.analyst?.recommendationKey && m.analyst.recommendationKey !== "none") {
+      key = m.analyst.recommendationKey;
+    } else if (m.averageAnalystRating) {
+      key = yahooRatingToKey(m.averageAnalystRating);
+    }
+
+    if (key === "none") {
+      return `<span style="color:#94a3b8;font-size:11px;font-style:italic;">No coverage</span>`;
+    }
+
+    const rec = recLabel(key);
     return `<span style="display:inline-block;padding:2px 8px;background:${rec.bg};color:${rec.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${rec.label}</span>`;
   };
 
