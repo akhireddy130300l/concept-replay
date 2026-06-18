@@ -1012,8 +1012,8 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   const dataNote = result.largeCapWeekly.length === 0
     ? ""
     : intraday
-      ? `<p style="margin:8px 0 12px 0;padding:8px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;color:#92400e;font-size:12px;">⏱ Data is intraday and may change before market close.</p>`
-      : `<p style="margin:8px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-left:3px solid #64748b;border-radius:6px;color:#334155;font-size:12px;">📊 Data is based on latest available closing prices where available.</p>`;
+      ? `<p style="margin:8px 0 12px 0;padding:8px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;color:#92400e;font-size:12px;">⏱ 7-day performance uses the latest available price compared with recent historical closes. Intraday values may change before market close.</p>`
+      : `<p style="margin:8px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-left:3px solid #64748b;border-radius:6px;color:#334155;font-size:12px;">📊 7-day performance uses the latest available price compared with recent historical closes. Intraday values may change before market close.</p>`;
 
   const weeklyTable = renderWeeklyTable(result.largeCapWeekly);
 
