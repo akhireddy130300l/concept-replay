@@ -929,6 +929,9 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return `<span style="display:inline-block;padding:2px 8px;background:${rec.bg};color:${rec.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${rec.label}</span>`;
   };
 
+  const allCards = renderDailyTable(result.movers.slice(0, 10), "No top gainers available right now.");
+  const largeCapCards = renderDailyTable(result.largeCapMovers.slice(0, 10), "No large-cap (≥ $10B) stocks made today's top gainers list.");
+
   const renderWeeklyTable = (movers: MarketGainer[]) => {
     if (movers.length === 0) {
       return `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">7-day / latest-available large-cap performance data is unavailable right now.</p>`;
