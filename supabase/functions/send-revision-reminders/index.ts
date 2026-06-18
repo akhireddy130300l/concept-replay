@@ -219,9 +219,21 @@ async function fetchSevenDayChange(symbol: string): Promise<MarketGainer | null>
 
 
 async function fetchLargeCapWeeklyGainers(): Promise<MarketGainer[]> {
-  const results = await Promise.all(LARGE_CAP_UNIVERSE.map((s) => fetchSevenDayChange(s)));
-  return results
-    .filter((r): r is MarketGainer => r !== null && Number.isFinite(r.percentGainRaw))
+  const universe = await discoverLargeCapUniverse();
+  if (universe.length === 0) return [];
+  // Cap concurrency to avoid hammering Yahoo. Process in small chunks.
+  const CHUNK = 15;
+  const out: MarketGainer[] = [];
+  for (let i = 0; i < universe.length; i += CHUNK) {
+    const chunk = universe.slice(i, i + CHUNK);
+    const results = await Promise.all(chunk.map((s) => fetchSevenDayChange(s)));
+    for (const r of results) {
+      if (r && Number.isFinite(r.percentGainRaw) && r.marketCapRaw >= LARGE_CAP_THRESHOLD) {
+        out.push(r);
+      }
+    }
+  }
+  return out
     .sort((a, b) => b.percentGainRaw - a.percentGainRaw)
     .slice(0, 10);
 }
