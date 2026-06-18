@@ -853,9 +853,89 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   const largeCapCards = result.largeCapMovers.length > 0
     ? renderCards(result.largeCapMovers)
     : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">No large-cap (≥ $10B) stocks made today's top gainers list.</p>`;
-  const weeklyCards = result.largeCapWeekly.length > 0
-    ? renderCards(result.largeCapWeekly, { showToday: true })
-    : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">7-day large-cap performance data is unavailable right now.</p>`;
+
+  // Weekly table renderer (per spec) — uses screener-quote data + chart closes.
+  const fmtPL = (pctRaw: number | undefined, pctStr: string | undefined, suffix = "") => {
+    if (pctRaw === undefined || pctStr === undefined) return `<span style="color:#94a3b8;">N/A</span>`;
+    const sign = pctRaw > 0 ? "▲ +" : pctRaw < 0 ? "▼ " : "→ ";
+    const color = pctRaw > 0 ? "#047857" : pctRaw < 0 ? "#b91c1c" : "#475569";
+    const cleaned = pctStr.replace(/^[+\-]/, "");
+    const value = pctRaw === 0 ? "0.00%" : `${cleaned.startsWith("-") ? cleaned : cleaned}`;
+    return `<span style="color:${color};font-weight:700;">${sign}${value}${suffix ? ` <span style="color:#64748b;font-weight:500;font-size:11px;">${suffix}</span>` : ""}</span>`;
+  };
+
+  const statusBadge = (status: string | undefined) => {
+    if (!status) return `<span style="color:#94a3b8;">—</span>`;
+    const map: Record<string, { bg: string; color: string }> = {
+      "Pre-market":         { bg: "#fef3c7", color: "#92400e" },
+      "Regular / Intraday": { bg: "#dcfce7", color: "#047857" },
+      "After-hours":        { bg: "#e0e7ff", color: "#3730a3" },
+      "Market closed":      { bg: "#f1f5f9", color: "#475569" },
+      "Since-listing":      { bg: "#fae8ff", color: "#86198f" },
+    };
+    const s = map[status] || { bg: "#e2e8f0", color: "#475569" };
+    return `<span style="display:inline-block;padding:2px 8px;background:${s.bg};color:${s.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${escapeHtml(status)}</span>`;
+  };
+
+  const analystSignal = (m: MarketGainer) => {
+    const a = m.analyst;
+    if (!a) return `<span style="color:#94a3b8;font-size:11px;font-style:italic;">No coverage</span>`;
+    const rec = recLabel(a.recommendationKey);
+    return `<span style="display:inline-block;padding:2px 8px;background:${rec.bg};color:${rec.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${rec.label}</span>`;
+  };
+
+  const renderWeeklyTable = (movers: MarketGainer[]) => {
+    if (movers.length === 0) {
+      return `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">7-day / latest-available large-cap performance data is unavailable right now.</p>`;
+    }
+    const rows = movers.map((m, i) => {
+      const suffix = m.periodLabel === "since-listing" ? "since-listing" : "";
+      return `
+        <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"};">
+          <td style="padding:10px 8px;font-weight:700;color:#0f172a;">#${i + 1}</td>
+          <td style="padding:10px 8px;font-weight:700;color:#0f172a;">${escapeHtml(m.symbol)}</td>
+          <td style="padding:10px 8px;color:#334155;font-size:12px;">${escapeHtml(m.companyName)}</td>
+          <td style="padding:10px 8px;color:#0f172a;font-weight:600;">$${escapeHtml(m.price)}</td>
+          <td style="padding:10px 8px;">${fmtPL(m.percentGainRaw, m.percentGain, suffix)}</td>
+          <td style="padding:10px 8px;">${fmtPL(m.todayChangeRaw, m.todayChangePct)}</td>
+          <td style="padding:10px 8px;color:#334155;font-size:12px;">${escapeHtml(m.volume)}</td>
+          <td style="padding:10px 8px;color:#334155;font-size:12px;">${escapeHtml(m.marketCap)}</td>
+          <td style="padding:10px 8px;">${statusBadge(m.dataStatus)}</td>
+          <td style="padding:10px 8px;">${analystSignal(m)}</td>
+        </tr>`;
+    }).join("");
+    return `
+      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#0f172a;color:#ffffff;text-align:left;">
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">RANK</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">TICKER</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">COMPANY</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">PRICE</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">7-DAY / SINCE-LISTING P/L</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">TODAY P/L</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">VOLUME</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">MARKET CAP</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">DATA STATUS</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">ANALYST SIGNAL</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  };
+
+  // Determine intraday vs after-close note from the most common marketState in weekly movers.
+  const states = result.largeCapWeekly.map((m) => m.dataStatus).filter(Boolean) as string[];
+  const intraday = states.some((s) => s === "Pre-market" || s === "Regular / Intraday");
+  const dataNote = result.largeCapWeekly.length === 0
+    ? ""
+    : intraday
+      ? `<p style="margin:8px 0 12px 0;padding:8px 12px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:6px;color:#92400e;font-size:12px;">⏱ Data is intraday and may change before market close.</p>`
+      : `<p style="margin:8px 0 12px 0;padding:8px 12px;background:#f1f5f9;border-left:3px solid #64748b;border-radius:6px;color:#334155;font-size:12px;">📊 Data is based on latest available closing prices where available.</p>`;
+
+  const weeklyTable = renderWeeklyTable(result.largeCapWeekly);
 
   return `
     <div style="background:linear-gradient(135deg,#ecfeff,#f0f9ff);padding:18px 20px;border-radius:12px;margin:8px 0 20px 0;border:1px solid #bae6fd;">
@@ -870,8 +950,9 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🏛️ Top Large-Cap Gainers — Last 1 Day <span style="font-weight:400;color:#64748b;font-size:13px;">(market cap ≥ $10B)</span></h3>
     ${largeCapCards}
 
-    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">📅 Top Large-Cap Gainers — Last 7 Days <span style="font-weight:400;color:#64748b;font-size:13px;">(top weekly performers across the US market, market cap ≥ $10B)</span></h3>
-    ${weeklyCards}
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">📅 Top Large-Cap Movers — Last 7 Days / Latest Available <span style="font-weight:400;color:#64748b;font-size:13px;">(top weekly performers from Yahoo screener universe, market cap ≥ $10B)</span></h3>
+    ${dataNote}
+    ${weeklyTable}
 
 
     <div style="margin-top:20px;padding:14px 16px;background:#f8fafc;border-radius:10px;border-left:3px solid #0891b2;">
