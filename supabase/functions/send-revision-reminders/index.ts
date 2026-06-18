@@ -849,10 +849,56 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     .join("");
 
 
-  const allCards = renderCards(result.movers);
-  const largeCapCards = result.largeCapMovers.length > 0
-    ? renderCards(result.largeCapMovers)
-    : `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">No large-cap (≥ $10B) stocks made today's top gainers list.</p>`;
+  // --- Daily tables (Top 10 Overall + Top 10 Large-Cap) ---
+  const fmtDailyPL = (pctRaw: number | undefined) => {
+    if (pctRaw === undefined || !Number.isFinite(pctRaw)) {
+      return `<span style="color:#94a3b8;">N/A</span>`;
+    }
+    const arrow = pctRaw > 0 ? "▲ +" : pctRaw < 0 ? "▼ " : "→ ";
+    const color = pctRaw > 0 ? "#047857" : pctRaw < 0 ? "#b91c1c" : "#475569";
+    const value = `${pctRaw.toFixed(2)}%`;
+    return `<span style="color:${color};font-weight:700;white-space:nowrap;">${arrow}${value}</span>`;
+  };
+
+  const renderDailyTable = (movers: MarketGainer[], emptyMsg: string) => {
+    if (!movers || movers.length === 0) {
+      return `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">${escapeHtml(emptyMsg)}</p>`;
+    }
+    const rows = movers.map((m, i) => `
+      <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"};">
+        <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;">#${i + 1}</td>
+        <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;">${escapeHtml(m.symbol)}</td>
+        <td style="padding:10px 8px;color:#334155;font-size:12px;text-align:left;">${escapeHtml(m.companyName)}</td>
+        <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;">$${escapeHtml(m.price)}</td>
+        <td style="padding:10px 8px;text-align:right;">${fmtDailyPL(m.percentGainRaw)}</td>
+        <td style="padding:10px 8px;color:#334155;font-size:12px;text-align:right;white-space:nowrap;">${escapeHtml(m.volume)}</td>
+        <td style="padding:10px 8px;color:#334155;font-size:12px;text-align:right;white-space:nowrap;">${escapeHtml(m.marketCap)}</td>
+        <td style="padding:10px 8px;text-align:left;">${statusBadge(m.session)}</td>
+        <td style="padding:10px 8px;text-align:left;">${analystSignal(m)}</td>
+      </tr>`).join("");
+    return `
+      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#0f172a;color:#ffffff;">
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;">RANK</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;">TICKER</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;">COMPANY</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;">PRICE</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;">PROFIT/LOSS</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;">VOLUME</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;">MARKET CAP</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;">SESSION</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;">ANALYST SIGNAL</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  };
+
+  const allCards = renderDailyTable(result.movers.slice(0, 10), "No top gainers available right now.");
+  const largeCapCards = renderDailyTable(result.largeCapMovers.slice(0, 10), "No large-cap (≥ $10B) stocks made today's top gainers list.");
 
   // Weekly table renderer (per spec) — uses screener-quote data + chart closes.
   const fmtPL = (pctRaw: number | undefined, pctStr: string | undefined, suffix = "") => {
