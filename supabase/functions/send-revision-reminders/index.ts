@@ -971,33 +971,34 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       const suffix = m.periodLabel === "since-listing" ? "since-listing" : "";
       return `
         <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"};">
-          <td style="padding:10px 8px;font-weight:700;color:#0f172a;">#${i + 1}</td>
-          <td style="padding:10px 8px;font-weight:700;color:#0f172a;">${escapeHtml(m.symbol)}</td>
-          <td style="padding:10px 8px;color:#334155;font-size:12px;">${escapeHtml(m.companyName)}</td>
-          <td style="padding:10px 8px;color:#0f172a;font-weight:600;">$${escapeHtml(m.price)}</td>
-          <td style="padding:10px 8px;">${fmtPL(m.percentGainRaw, m.percentGain, suffix)}</td>
-          <td style="padding:10px 8px;">${fmtPL(m.todayChangeRaw, m.todayChangePct)}</td>
-          <td style="padding:10px 8px;color:#334155;font-size:12px;">${escapeHtml(m.volume)}</td>
-          <td style="padding:10px 8px;color:#334155;font-size:12px;">${escapeHtml(m.marketCap)}</td>
-          <td style="padding:10px 8px;">${statusBadge(m.dataStatus)}</td>
-          <td style="padding:10px 8px;">${analystSignal(m)}</td>
+          <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;white-space:nowrap;font-size:12px;">#${i + 1}</td>
+          <td style="padding:10px 8px;font-weight:800;color:#0f172a;text-align:left;white-space:nowrap;font-size:13px;">${escapeHtml(m.symbol)}</td>
+          <td style="padding:10px 8px;color:#334155;text-align:left;white-space:nowrap;font-size:12px;">${escapeHtml(m.companyName)}</td>
+          <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;font-size:12px;">$${escapeHtml(m.price)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPL(m.percentGainRaw, m.percentGain, suffix)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPL(m.todayChangeRaw, m.todayChangePct)}</td>
+          <td style="padding:10px 8px;color:#334155;text-align:right;white-space:nowrap;font-size:12px;">${escapeHtml(m.volume)}</td>
+          <td style="padding:10px 8px;color:#334155;text-align:right;white-space:nowrap;font-size:12px;">${escapeHtml(m.marketCap)}</td>
+          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${statusBadge(m.dataStatus)}</td>
+          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${analystSignal(m)}</td>
         </tr>`;
     }).join("");
     return `
-      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:13px;">
+      <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns.</p>
+      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;-webkit-overflow-scrolling:touch;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;min-width:700px;border-collapse:collapse;font-size:13px;">
           <thead>
-            <tr style="background:#0f172a;color:#ffffff;text-align:left;">
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">RANK</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">TICKER</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">COMPANY</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">PRICE</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">7-DAY / SINCE-LISTING P/L</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">TODAY P/L</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">VOLUME</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">MARKET CAP</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">DATA STATUS</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;">ANALYST SIGNAL</th>
+            <tr style="background:#0f172a;color:#ffffff;">
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RANK</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">TICKER</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">COMPANY</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">PRICE</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">7-DAY / SINCE-LISTING P/L</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">TODAY P/L</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">VOLUME</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">MARKET CAP</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">DATA STATUS</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">ANALYST SIGNAL</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
