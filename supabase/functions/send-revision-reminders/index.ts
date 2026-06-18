@@ -1344,17 +1344,20 @@ serve(async (req) => {
   }
 
   const cronSecret = Deno.env.get("CRON_SECRET");
-  if (cronSecret) {
-    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      console.warn("Unauthorized invocation of send-revision-reminders");
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-  } else {
-    console.warn("CRON_SECRET is not configured — endpoint is publicly callable. Set CRON_SECRET to require authentication.");
+  if (!cronSecret) {
+    console.error("CRON_SECRET is not configured — refusing to execute send-revision-reminders.");
+    return new Response(JSON.stringify({ error: "Server not configured" }), {
+      status: 503,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+  const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+  if (authHeader !== `Bearer ${cronSecret}`) {
+    console.warn("Unauthorized invocation of send-revision-reminders");
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {
