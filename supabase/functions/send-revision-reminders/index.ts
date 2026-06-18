@@ -1022,6 +1022,11 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       <p style="margin:8px 0 0 0;color:#475569;font-size:12px;">🕒 ${escapeHtml(fetchedAt)}</p>
     </div>
 
+    <div style="margin:14px 0 18px 0;padding:14px 16px;background:#fff7ed;border-radius:10px;border-left:4px solid #f97316;">
+      <p style="margin:0 0 8px 0;font-size:13px;color:#9a3412;font-weight:700;">⚠️ Caution: This email is informational only</p>
+      <p style="margin:0;font-size:12px;color:#7c2d12;line-height:1.6;">Stocks are risky. Top gainers can fall just as quickly as they rise, and you may lose money. This email is not investment advice, a recommendation to buy or sell, or a forecast. Always do your own research, check official SEC filings, and consult a licensed financial advisor before making any investment decisions.</p>
+    </div>
+
     <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🚀 Top 10 Overall Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(last 1 day · all market caps)</span></h3>
     ${allCards}
 
@@ -1032,10 +1037,14 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     ${dataNote}
     ${weeklyTable}
 
+    <div style="margin:28px 0 18px 0;padding:14px 16px;background:#fef2f2;border-radius:10px;border-left:4px solid #ef4444;">
+      <p style="margin:0 0 8px 0;font-size:13px;color:#991b1b;font-weight:700;">Risk Disclaimer</p>
+      <p style="margin:0;font-size:12px;color:#7f1d1d;line-height:1.6;">Market data is shown for informational purposes only. Past performance, including being on a “top gainers” list, does not guarantee future results. Prices can change rapidly, especially for volatile or recently listed stocks. You could lose some or all of any money invested. Do not trade based on this email alone.</p>
+    </div>
 
     <div style="margin-top:20px;padding:14px 16px;background:#f8fafc;border-radius:10px;border-left:3px solid #0891b2;">
       <p style="margin:0 0 8px 0;font-size:13px;color:#334155;"><strong>Source:</strong> <a href="${YAHOO_GAINERS_PAGE_URL}" style="color:#0891b2;text-decoration:none;">Yahoo Finance Top Gainers</a></p>
-      <p style="margin:0;font-size:12px;color:#64748b;line-height:1.6;">Market data can be delayed. Session reflects Yahoo's market-state value. Low-priced low-volume stocks are filtered. This is market information, not investment advice — always check the stock page, news, SEC filings, and risk before buying.</p>
+      <p style="margin:0;font-size:12px;color:#64748b;line-height:1.6;">Market data can be delayed. Session reflects Yahoo's market-state value. Low-priced low-volume stocks are filtered. Always check the stock page, news, SEC filings, and risk before buying.</p>
     </div>
   `;
 }
