@@ -373,7 +373,8 @@ type ChartOHLCV = {
 
 async function fetchChartOHLCV(symbol: string): Promise<ChartOHLCV | null> {
   try {
-    const url = `${YAHOO_CHART_ENDPOINT}/${encodeURIComponent(symbol)}?range=1mo&interval=1d`;
+    // Use 3mo range to guarantee >=21 daily closes so 20-session math is accurate.
+    const url = `${YAHOO_CHART_ENDPOINT}/${encodeURIComponent(symbol)}?range=3mo&interval=1d`;
     const res = await fetch(url, {
       headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0 LearnLoop/1.0" },
     });
