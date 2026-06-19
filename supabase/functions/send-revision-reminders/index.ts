@@ -1454,6 +1454,126 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
 
   const weeklyTable = renderWeeklyTable(result.largeCapWeekly);
 
+  // ----- Best Watchlist Candidates renderer -----
+  const fmtPctSimple = (v: number | undefined) => {
+    if (v === undefined || !Number.isFinite(v)) return `<span style="color:#94a3b8;">N/A</span>`;
+    const color = v > 0 ? "#047857" : v < 0 ? "#b91c1c" : "#475569";
+    const arrow = v > 0 ? "▲ +" : v < 0 ? "▼ " : "→ ";
+    return `<span style="color:${color};font-weight:700;white-space:nowrap;">${arrow}${v.toFixed(2)}%</span>`;
+  };
+  const trendBadge = (label: string) => {
+    const map: Record<string, { bg: string; color: string }> = {
+      "Strong uptrend": { bg: "#dcfce7", color: "#047857" },
+      "Uptrend":        { bg: "#ecfccb", color: "#3f6212" },
+      "Flat":           { bg: "#f1f5f9", color: "#475569" },
+      "Downtrend":      { bg: "#fee2e2", color: "#b91c1c" },
+      "Short history":  { bg: "#fae8ff", color: "#86198f" },
+      "N/A":            { bg: "#e2e8f0", color: "#94a3b8" },
+    };
+    const s = map[label] || map["N/A"];
+    return `<span style="display:inline-block;padding:2px 8px;background:${s.bg};color:${s.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${escapeHtml(label)}</span>`;
+  };
+  const volBadge = (r: number | undefined) => {
+    if (r === undefined || !Number.isFinite(r)) return `<span style="color:#94a3b8;">N/A</span>`;
+    const color = r >= 1.3 ? "#047857" : r >= 1 ? "#475569" : "#b45309";
+    return `<span style="color:${color};font-weight:700;">${r.toFixed(1)}x avg</span>`;
+  };
+  const rrCell = (c: WatchlistCandidate) => {
+    if (c.riskRewardIsBreakout) return `<span style="color:#7c3aed;font-weight:700;">Breakout</span>`;
+    if (c.riskRewardRaw === undefined) return `<span style="color:#94a3b8;">N/A</span>`;
+    if (c.riskRewardRaw < 1) return `<span style="color:#b45309;font-weight:700;">Weak</span>`;
+    return `<span style="color:#0f172a;font-weight:700;">${c.riskRewardRaw.toFixed(1)}R</span>`;
+  };
+  const resCell = (c: WatchlistCandidate) => {
+    if (c.resistanceIsBreakout) return `<span style="color:#7c3aed;font-weight:700;">Breakout</span>`;
+    if (c.resistanceRaw === undefined) return `<span style="color:#94a3b8;">N/A</span>`;
+    return `$${c.resistanceRaw.toFixed(2)}`;
+  };
+  const supCell = (v: number | undefined) =>
+    v === undefined ? `<span style="color:#94a3b8;">N/A</span>` : `$${v.toFixed(2)}`;
+  const catalystCell = (c: WatchlistCandidate) => {
+    if (!c.catalystHasNews) return `<span style="color:#94a3b8;font-style:italic;">Not confirmed</span>`;
+    return `${escapeHtml(c.catalystLabel)} <span style="color:#64748b;">— Yahoo Finance</span>`;
+  };
+  const analystCell = (c: WatchlistCandidate) => {
+    if (c.analystKey === "none") return `<span style="color:#94a3b8;font-style:italic;">No coverage</span>`;
+    const map: Record<string, { bg: string; color: string }> = {
+      strong_buy: { bg: "#dcfce7", color: "#047857" },
+      buy:        { bg: "#dcfce7", color: "#047857" },
+      hold:       { bg: "#fef3c7", color: "#92400e" },
+      sell:       { bg: "#fee2e2", color: "#b91c1c" },
+      strong_sell:{ bg: "#fee2e2", color: "#b91c1c" },
+    };
+    const s = map[c.analystKey] || { bg: "#e2e8f0", color: "#475569" };
+    return `<span style="display:inline-block;padding:2px 8px;background:${s.bg};color:${s.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${escapeHtml(c.analystLabel)}</span>`;
+  };
+  const flagsCell = (flags: string[]) => {
+    if (!flags.length) return `<span style="color:#94a3b8;">—</span>`;
+    return flags
+      .map((f) => `<span style="display:inline-block;margin:1px 3px 1px 0;padding:1px 6px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:6px;font-size:10px;font-weight:600;white-space:nowrap;">${escapeHtml(f)}</span>`)
+      .join("");
+  };
+  const scoreCell = (s: number) => {
+    const color = s >= 7.5 ? "#047857" : s >= 5 ? "#0f172a" : "#b45309";
+    return `<span style="color:${color};font-weight:800;">${s.toFixed(1)}/10</span>`;
+  };
+
+  const renderWatchlistTable = (cands: WatchlistCandidate[]) => {
+    if (!cands || cands.length === 0) {
+      return `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">Best Watchlist Candidates are unavailable right now.</p>`;
+    }
+    const rows = cands.map((c, i) => {
+      const sevenSuffix = c.sevenDaySinceListing ? `<span style="color:#64748b;font-weight:500;font-size:10px;"> since-listing</span>` : "";
+      return `
+        <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"};">
+          <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;white-space:nowrap;font-size:12px;">#${i + 1}</td>
+          <td style="padding:10px 8px;font-weight:800;color:#0f172a;text-align:left;white-space:nowrap;font-size:13px;">${escapeHtml(c.symbol)}</td>
+          <td style="padding:10px 8px;color:#334155;text-align:left;white-space:nowrap;font-size:12px;">${escapeHtml(c.companyName)}</td>
+          <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;font-size:12px;">$${escapeHtml(c.priceFmt)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPctSimple(c.oneDayPctRaw)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPctSimple(c.sevenDayPctRaw)}${sevenSuffix}</td>
+          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${trendBadge(c.twentyDayLabel)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${volBadge(c.volumeRatio)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${supCell(c.supportRaw)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${resCell(c)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${rrCell(c)}</td>
+          <td style="padding:10px 8px;text-align:left;font-size:12px;color:#334155;min-width:160px;">${catalystCell(c)}</td>
+          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${analystCell(c)}</td>
+          <td style="padding:10px 8px;text-align:left;font-size:12px;min-width:180px;">${flagsCell(c.riskFlags)}</td>
+          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:13px;">${scoreCell(c.score)}</td>
+        </tr>`;
+    }).join("");
+    return `
+      <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns.</p>
+      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;-webkit-overflow-scrolling:touch;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;min-width:1280px;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#0f172a;color:#ffffff;">
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RANK</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">TICKER</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">COMPANY</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">PRICE</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">1D</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">7D</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">20D TREND</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">VOL VS AVG</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">SUPPORT</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">RESISTANCE</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">RISK/REWARD</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">NEWS / CATALYST</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">ANALYST</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RISK FLAGS</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">SCORE</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  };
+
+  const watchlistTable = renderWatchlistTable(result.watchlist || []);
+
+
   return `
     <div style="background:linear-gradient(135deg,#ecfeff,#f0f9ff);padding:18px 20px;border-radius:12px;margin:8px 0 20px 0;border:1px solid #bae6fd;">
       <h2 style="margin:0 0 6px 0;color:#0c4a6e;font-size:20px;">📈 Top US Stock Market Gainers</h2>
