@@ -892,40 +892,38 @@ async function buildWatchlistCandidates(
   );
   const top = provisional.slice(0, 10);
 
-  // Fetch Finnhub company news (primary) for top 10
-  console.log(`[watchlist] Finnhub news fetch count: ${top.length}`);
+  // Fetch Gemini grounded company news for top 10 (one lookup per ticker).
+  console.log(`[watchlist] Gemini news fetch count: ${top.length}`);
   let newsOk = 0;
   let newsMiss = 0;
-  const newsLists = await Promise.all(
-    top.map((t) => fetchFinnhubCompanyNews(t.gainer.symbol, t.gainer.companyName)),
+  const newsResults = await Promise.all(
+    top.map((t) => fetchGeminiGroundedNews(t.gainer.symbol, t.gainer.companyName)),
   );
 
   const final: WatchlistCandidate[] = top.map((t, idx) => {
-    const items = newsLists[idx];
-    console.log(`[watchlist] ${t.gainer.symbol} Finnhub relevant news count: ${items.length}`);
-    const hasNews = items.length > 0;
+    const news = newsResults[idx];
+    const hasNews = news.relevant === true;
     if (hasNews) {
       newsOk++;
-      console.log(`[watchlist] ${t.gainer.symbol} selected Finnhub headline: ${items[0].headline}`);
+      console.log(`[watchlist] ${t.gainer.symbol} Gemini relevant news: ${news.headline} (${news.source})`);
     } else {
       newsMiss++;
+      console.log(`[watchlist] ${t.gainer.symbol} Gemini news: no clear company news`);
     }
-    const catalystLabel = hasNews
-      ? classifyCatalystFromText(items[0].headline, items[0].summary)
-      : "Not confirmed";
+    const catalystLabel = hasNews ? (news.catalystType || "Other") : "Not confirmed";
     const { flags, score } = computeRiskFlagsAndScore(t.pre, hasNews, catalystLabel, t.chart);
     return {
       ...t.pre,
       catalystLabel,
       catalystHasNews: hasNews,
-      newsHeadline: hasNews ? items[0].headline : "",
-      newsSource: hasNews ? "Finnhub" : "",
-      newsLink: hasNews ? items[0].url : "",
+      newsHeadline: hasNews ? (news.summary ? `${news.headline} — ${news.summary}` : news.headline) : "",
+      newsSource: hasNews ? (news.source || "Gemini grounded search") : "",
+      newsLink: hasNews ? news.url : "",
       riskFlags: flags,
       score,
     };
   });
-  console.log(`[watchlist] Finnhub news success count: ${newsOk}`);
+  console.log(`[watchlist] Gemini news success count: ${newsOk}`);
   console.log(`[watchlist] No clear news count: ${newsMiss}`);
 
   // Final re-sort with updated scores
