@@ -799,6 +799,9 @@ async function buildWatchlistCandidates(
       ...t.pre,
       catalystLabel,
       catalystHasNews: hasNews,
+      newsHeadline: hasNews ? items[0].title : "",
+      newsSource: hasNews ? "Yahoo Finance" : "",
+      newsLink: hasNews ? items[0].link : "",
       riskFlags: flags,
       score,
     };
