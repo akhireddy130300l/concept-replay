@@ -1850,7 +1850,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">LOWER WATCH AREA</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">UPPER WATCH AREA</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">UPSIDE VS RISK</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:center;white-space:nowrap;">NEWS</th>
+              
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">ANALYST</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RISK FLAGS</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">SCORE</th>
