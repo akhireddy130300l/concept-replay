@@ -88,10 +88,36 @@ type ScreenerQuote = {
   averageAnalystRating?: string;
 };
 
+type WatchlistCandidate = {
+  symbol: string;
+  companyName: string;
+  priceRaw: number;
+  priceFmt: string;
+  oneDayPctRaw: number | undefined;
+  sevenDayPctRaw: number | undefined;
+  sevenDaySinceListing: boolean;
+  twentyDayPctRaw: number | undefined;
+  twentyDayLabel: string;
+  volumeRatio: number | undefined;
+  supportRaw: number | undefined;
+  resistanceRaw: number | undefined;
+  resistanceIsBreakout: boolean;
+  riskRewardRaw: number | undefined;
+  riskRewardIsBreakout: boolean;
+  marketCapRaw: number;
+  analystKey: string;
+  analystLabel: string;
+  catalystLabel: string;
+  catalystHasNews: boolean;
+  riskFlags: string[];
+  score: number;
+};
+
 type MarketGainersResult = {
   movers: MarketGainer[];
   largeCapMovers: MarketGainer[];
   largeCapWeekly: MarketGainer[];
+  watchlist: WatchlistCandidate[];
   fetchedAtIso: string;
   sourceUrl: string;
 };
