@@ -1549,7 +1549,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
           <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;font-size:12px;">$${escapeHtml(c.priceFmt)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPctSimple(c.oneDayPctRaw)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPctSimple(c.sevenDayPctRaw)}${sevenSuffix}</td>
-          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${trendBadge(c.twentyDayLabel)}</td>
+          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${trendBadge(c.twentyDayLabel)}${c.twentyDayPctRaw !== undefined && Number.isFinite(c.twentyDayPctRaw) ? ` <span style="color:#475569;font-weight:600;font-size:11px;">(${c.twentyDayPctRaw >= 0 ? "+" : ""}${c.twentyDayPctRaw.toFixed(2)}%)</span>` : ""}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${volBadge(c.volumeRatio)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${supCell(c.supportRaw)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${resCell(c)}</td>
