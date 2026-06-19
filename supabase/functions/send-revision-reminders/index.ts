@@ -874,7 +874,7 @@ function computeRiskFlagsAndScore(
   if (c.supportRaw !== undefined && c.priceRaw > 0) {
     if ((c.priceRaw - c.supportRaw) / c.priceRaw > 0.15) flags.push("Far above support");
   }
-  if (!catalystHasNews) flags.push("News not confirmed");
+  
   if (dailyVolPct > 5) flags.push("High volatility");
   if (todayRange?.dayHigh && todayRange?.dayLow && c.priceRaw > 0) {
     const range = todayRange.dayHigh - todayRange.dayLow;
