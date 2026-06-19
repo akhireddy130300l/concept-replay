@@ -824,32 +824,41 @@ async function buildWatchlistCandidates(
   );
   const top = provisional.slice(0, 10);
 
-  // Fetch Yahoo news ONLY for top 10 (deduped by symbol — already unique)
-  console.log(`[watchlist] Yahoo news fetch count: ${top.length}`);
+  // Fetch Finnhub company news (primary) for top 10
+  console.log(`[watchlist] Finnhub news fetch count: ${top.length}`);
   let newsOk = 0;
   let newsMiss = 0;
-  const news = await Promise.all(top.map((t) => fetchYahooNews(t.gainer.symbol, t.gainer.companyName)));
+  const newsLists = await Promise.all(
+    top.map((t) => fetchFinnhubCompanyNews(t.gainer.symbol, t.gainer.companyName)),
+  );
 
-  // Recompute final flags/score with catalyst info
   const final: WatchlistCandidate[] = top.map((t, idx) => {
-    const items = news[idx];
+    const items = newsLists[idx];
+    console.log(`[watchlist] ${t.gainer.symbol} Finnhub relevant news count: ${items.length}`);
     const hasNews = items.length > 0;
-    if (hasNews) newsOk++; else newsMiss++;
-    const catalystLabel = hasNews ? classifyCatalystFromTitle(items[0].title) : "Not confirmed";
+    if (hasNews) {
+      newsOk++;
+      console.log(`[watchlist] ${t.gainer.symbol} selected Finnhub headline: ${items[0].headline}`);
+    } else {
+      newsMiss++;
+    }
+    const catalystLabel = hasNews
+      ? classifyCatalystFromText(items[0].headline, items[0].summary)
+      : "Not confirmed";
     const { flags, score } = computeRiskFlagsAndScore(t.pre, hasNews, catalystLabel, t.chart);
     return {
       ...t.pre,
       catalystLabel,
       catalystHasNews: hasNews,
-      newsHeadline: hasNews ? items[0].title : "",
-      newsSource: hasNews ? "Yahoo Finance" : "",
-      newsLink: hasNews ? items[0].link : "",
+      newsHeadline: hasNews ? items[0].headline : "",
+      newsSource: hasNews ? "Finnhub" : "",
+      newsLink: hasNews ? items[0].url : "",
       riskFlags: flags,
       score,
     };
   });
-  console.log(`[watchlist] Yahoo news success count: ${newsOk}`);
-  console.log(`[watchlist] Yahoo news not found count: ${newsMiss}`);
+  console.log(`[watchlist] Finnhub news success count: ${newsOk}`);
+  console.log(`[watchlist] No clear news count: ${newsMiss}`);
 
   // Final re-sort with updated scores
   final.sort((a, b) =>
