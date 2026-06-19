@@ -109,6 +109,9 @@ type WatchlistCandidate = {
   analystLabel: string;
   catalystLabel: string;
   catalystHasNews: boolean;
+  newsHeadline: string;
+  newsSource: string;
+  newsLink: string;
   riskFlags: string[];
   score: number;
 };
@@ -362,6 +365,10 @@ type ChartOHLCV = {
   lows: number[];
   volumes: number[];
   metaPrice?: number;
+  metaDayHigh?: number;
+  metaDayLow?: number;
+  meta52wHigh?: number;
+  meta52wLow?: number;
 };
 
 async function fetchChartOHLCV(symbol: string): Promise<ChartOHLCV | null> {
@@ -374,12 +381,37 @@ async function fetchChartOHLCV(symbol: string): Promise<ChartOHLCV | null> {
     const data = await res.json();
     const result = data?.chart?.result?.[0];
     const q = result?.indicators?.quote?.[0];
-    const closes: number[] = (q?.close ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v));
-    const highs: number[] = (q?.high ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v));
-    const lows: number[] = (q?.low ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v));
-    const volumes: number[] = (q?.volume ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v) && v > 0);
-    const metaPrice = Number(result?.meta?.regularMarketPrice);
-    return { closes, highs, lows, volumes, metaPrice: Number.isFinite(metaPrice) ? metaPrice : undefined };
+    // Keep arrays index-aligned: drop only rows where close is invalid.
+    const rawC: any[] = q?.close ?? [];
+    const rawH: any[] = q?.high ?? [];
+    const rawL: any[] = q?.low ?? [];
+    const rawV: any[] = q?.volume ?? [];
+    const closes: number[] = [];
+    const highs: number[] = [];
+    const lows: number[] = [];
+    const volumes: number[] = [];
+    for (let i = 0; i < rawC.length; i++) {
+      const c = rawC[i];
+      if (typeof c !== "number" || !Number.isFinite(c)) continue;
+      closes.push(c);
+      highs.push(typeof rawH[i] === "number" && Number.isFinite(rawH[i]) ? rawH[i] : c);
+      lows.push(typeof rawL[i] === "number" && Number.isFinite(rawL[i]) ? rawL[i] : c);
+      volumes.push(typeof rawV[i] === "number" && Number.isFinite(rawV[i]) && rawV[i] > 0 ? rawV[i] : 0);
+    }
+    const meta = result?.meta || {};
+    const metaPrice = Number(meta.regularMarketPrice);
+    const metaDayHigh = Number(meta.regularMarketDayHigh);
+    const metaDayLow = Number(meta.regularMarketDayLow);
+    const meta52wHigh = Number(meta.fiftyTwoWeekHigh);
+    const meta52wLow = Number(meta.fiftyTwoWeekLow);
+    return {
+      closes, highs, lows, volumes,
+      metaPrice: Number.isFinite(metaPrice) ? metaPrice : undefined,
+      metaDayHigh: Number.isFinite(metaDayHigh) ? metaDayHigh : undefined,
+      metaDayLow: Number.isFinite(metaDayLow) ? metaDayLow : undefined,
+      meta52wHigh: Number.isFinite(meta52wHigh) ? meta52wHigh : undefined,
+      meta52wLow: Number.isFinite(meta52wLow) ? meta52wLow : undefined,
+    };
   } catch {
     return null;
   }
@@ -438,7 +470,7 @@ function analystLabelForKey(key: string): string {
 function computeWatchlistMetrics(
   gainer: MarketGainer,
   chart: ChartOHLCV,
-): Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "riskFlags" | "score"> | null {
+): Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "newsHeadline" | "newsSource" | "newsLink" | "riskFlags" | "score"> | null {
   const closes = chart.closes;
   if (closes.length < 2) return null;
 
@@ -491,38 +523,74 @@ function computeWatchlistMetrics(
     twentyDayLabel = "Short history";
   }
 
-  // Volume ratio (avg from chart volumes last 10, fallback 20)
+  // ---- VOLUME STRENGTH ----
+  // currentVolume = screener regularMarketVolume, else latest chart volume.
+  // averageVolume = previous 10 completed sessions (exclude latest bar).
+  // Fallback to previous 20 completed sessions. Else N/A.
   let volumeRatio: number | undefined;
-  if (Number.isFinite(gainer.volumeRaw) && gainer.volumeRaw > 0 && chart.volumes.length >= 2) {
-    const window = chart.volumes.slice(-10).length >= 5 ? chart.volumes.slice(-10) : chart.volumes.slice(-20);
-    const avg = window.reduce((a, b) => a + b, 0) / window.length;
-    if (avg > 0) volumeRatio = gainer.volumeRaw / avg;
+  const vols = chart.volumes;
+  const lastVolIdx = sameDayBar ? vols.length - 1 : -1; // index to exclude (today's bar)
+  const prevVols: number[] = [];
+  for (let i = vols.length - 1; i >= 0; i--) {
+    if (i === lastVolIdx) continue;
+    if (vols[i] > 0) prevVols.push(vols[i]);
   }
-
-  // Support: min low from last 10-20 days
-  let supportRaw: number | undefined;
-  const lowsWindow = chart.lows.slice(-20);
-  if (lowsWindow.length >= 3) {
-    const below = lowsWindow.filter((l) => l < latestPrice);
-    supportRaw = below.length ? Math.max(...below.filter((l) => l <= latestPrice)) : Math.min(...lowsWindow);
-    // Prefer max-of-recent-lows-below-price (closest support); fallback to min
-    if (!below.length) supportRaw = Math.min(...lowsWindow);
-  }
-
-  // Resistance: nearest recent high above current price (or 52w high fallback handled via chart highs)
-  let resistanceRaw: number | undefined;
-  let resistanceIsBreakout = false;
-  const highsWindow = chart.highs.slice(-20);
-  if (highsWindow.length >= 3) {
-    const above = highsWindow.filter((h) => h > latestPrice);
-    if (above.length) {
-      resistanceRaw = Math.min(...above);
-    } else {
-      resistanceIsBreakout = true;
+  // prevVols is most-recent-first of completed sessions
+  let currentVolume: number | undefined;
+  if (Number.isFinite(gainer.volumeRaw) && gainer.volumeRaw > 0) currentVolume = gainer.volumeRaw;
+  else if (vols.length > 0 && vols[vols.length - 1] > 0) currentVolume = vols[vols.length - 1];
+  if (currentVolume !== undefined) {
+    let window: number[] | undefined;
+    if (prevVols.length >= 10) window = prevVols.slice(0, 10);
+    else if (prevVols.length >= 5) window = prevVols.slice(0, Math.min(prevVols.length, 20));
+    if (window && window.length > 0) {
+      const avg = window.reduce((a, b) => a + b, 0) / window.length;
+      if (avg > 0) volumeRatio = currentVolume / avg;
     }
   }
 
-  // Risk/Reward
+  // ---- LOWER WATCH AREA (support) ----
+  // Exclude today's candle. Look at previous 10–20 completed lows.
+  // Pick the nearest low BELOW current price (max of lows-below-price). Else N/A.
+  let supportRaw: number | undefined;
+  const lowsAll = chart.lows;
+  const lastLowExcludeIdx = sameDayBar ? lowsAll.length - 1 : -1;
+  const prevLows: number[] = [];
+  for (let i = lowsAll.length - 1; i >= 0; i--) {
+    if (i === lastLowExcludeIdx) continue;
+    if (Number.isFinite(lowsAll[i]) && lowsAll[i] > 0) prevLows.push(lowsAll[i]);
+    if (prevLows.length >= 20) break;
+  }
+  if (prevLows.length >= 3) {
+    const below = prevLows.filter((l) => l < latestPrice);
+    if (below.length) supportRaw = Math.max(...below);
+  }
+
+  // ---- UPPER WATCH AREA (resistance) ----
+  // Prefer nearest previous completed high ABOVE current price.
+  // Fallback to 52-week high. If above both, mark Breakout.
+  let resistanceRaw: number | undefined;
+  let resistanceIsBreakout = false;
+  const highsAll = chart.highs;
+  const lastHighExcludeIdx = sameDayBar ? highsAll.length - 1 : -1;
+  const prevHighs: number[] = [];
+  for (let i = highsAll.length - 1; i >= 0; i--) {
+    if (i === lastHighExcludeIdx) continue;
+    if (Number.isFinite(highsAll[i]) && highsAll[i] > 0) prevHighs.push(highsAll[i]);
+    if (prevHighs.length >= 20) break;
+  }
+  const highsAbove = prevHighs.filter((h) => h > latestPrice);
+  if (highsAbove.length) {
+    resistanceRaw = Math.min(...highsAbove);
+  } else if (Number.isFinite(chart.meta52wHigh as number) && (chart.meta52wHigh as number) > latestPrice) {
+    resistanceRaw = chart.meta52wHigh as number;
+  } else if (Number.isFinite(chart.meta52wHigh as number) && (chart.meta52wHigh as number) <= latestPrice) {
+    resistanceIsBreakout = true;
+  } else if (prevHighs.length > 0) {
+    resistanceIsBreakout = true;
+  }
+
+  // ---- UPSIDE VS RISK ----
   let riskRewardRaw: number | undefined;
   let riskRewardIsBreakout = false;
   if (resistanceIsBreakout) {
@@ -556,7 +624,7 @@ function computeWatchlistMetrics(
 }
 
 function computeRiskFlagsAndScore(
-  c: Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "riskFlags" | "score">,
+  c: Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "newsHeadline" | "newsSource" | "newsLink" | "riskFlags" | "score">,
   catalystHasNews: boolean,
   catalystLabel: string,
   chart: ChartOHLCV,
@@ -731,6 +799,9 @@ async function buildWatchlistCandidates(
       ...t.pre,
       catalystLabel,
       catalystHasNews: hasNews,
+      newsHeadline: hasNews ? items[0].title : "",
+      newsSource: hasNews ? "Yahoo Finance" : "",
+      newsLink: hasNews ? items[0].link : "",
       riskFlags: flags,
       score,
     };
@@ -1498,8 +1569,14 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   const rrCell = (c: WatchlistCandidate) => {
     if (c.riskRewardIsBreakout) return `<span style="color:#7c3aed;font-weight:700;">Breakout</span>`;
     if (c.riskRewardRaw === undefined) return `<span style="color:#94a3b8;">N/A</span>`;
-    if (c.riskRewardRaw < 1) return `<span style="color:#b45309;font-weight:700;">Weak</span>`;
-    return `<span style="color:#0f172a;font-weight:700;">${c.riskRewardRaw.toFixed(1)}R</span>`;
+    const r = c.riskRewardRaw;
+    let label: string;
+    let color: string;
+    if (r >= 3) { label = "Strong"; color = "#047857"; }
+    else if (r >= 2) { label = "Good"; color = "#0f766e"; }
+    else if (r >= 1.5) { label = "Okay"; color = "#475569"; }
+    else { label = "Weak"; color = "#b45309"; }
+    return `<span style="color:${color};font-weight:700;">${label} <span style="color:#64748b;font-weight:600;font-size:11px;">(${r.toFixed(2)}R)</span></span>`;
   };
   const resCell = (c: WatchlistCandidate) => {
     if (c.resistanceIsBreakout) return `<span style="color:#7c3aed;font-weight:700;">Breakout</span>`;
@@ -1508,9 +1585,10 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   };
   const supCell = (v: number | undefined) =>
     v === undefined ? `<span style="color:#94a3b8;">N/A</span>` : `$${v.toFixed(2)}`;
-  const catalystCell = (c: WatchlistCandidate) => {
-    if (!c.catalystHasNews) return `<span style="color:#94a3b8;font-style:italic;">Not confirmed</span>`;
-    return `${escapeHtml(c.catalystLabel)} <span style="color:#64748b;">— Yahoo Finance</span>`;
+  const newsCell = (c: WatchlistCandidate) => {
+    if (!c.catalystHasNews) return `<span style="color:#94a3b8;">—</span>`;
+    const anchor = `news-${c.symbol}`;
+    return `<a href="#${anchor}" style="text-decoration:none;color:#0f172a;font-size:14px;" title="${escapeHtml(c.catalystLabel)}">📰</a>`;
   };
   const analystCell = (c: WatchlistCandidate) => {
     if (c.analystKey === "none") return `<span style="color:#94a3b8;font-style:italic;">No coverage</span>`;
@@ -1526,9 +1604,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   };
   const flagsCell = (flags: string[]) => {
     if (!flags.length) return `<span style="color:#94a3b8;">—</span>`;
-    return flags
-      .map((f) => `<span style="display:inline-block;margin:1px 3px 1px 0;padding:1px 6px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:6px;font-size:10px;font-weight:600;white-space:nowrap;">${escapeHtml(f)}</span>`)
-      .join("");
+    return `<span style="color:#991b1b;font-size:11px;font-weight:600;">${escapeHtml(flags.join(" · "))}</span>`;
   };
   const scoreCell = (s: number) => {
     const color = s >= 7.5 ? "#047857" : s >= 5 ? "#0f172a" : "#b45309";
@@ -1553,8 +1629,8 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${volBadge(c.volumeRatio)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${supCell(c.supportRaw)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${resCell(c)}</td>
-          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${rrCell(c)}</td>
-          <td style="padding:10px 8px;text-align:left;font-size:12px;color:#334155;min-width:160px;">${catalystCell(c)}</td>
+          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${rrCell(c)}</td>
+          <td style="padding:10px 8px;text-align:center;font-size:14px;">${newsCell(c)}</td>
           <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${analystCell(c)}</td>
           <td style="padding:10px 8px;text-align:left;font-size:12px;min-width:180px;">${flagsCell(c.riskFlags)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:13px;">${scoreCell(c.score)}</td>
@@ -1570,14 +1646,14 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">TICKER</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">COMPANY</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">PRICE</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">1D</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">7D</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">20D TREND</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">VOL VS AVG</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">SUPPORT</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">RESISTANCE</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">RISK/REWARD</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">NEWS / CATALYST</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">1 SESSION</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">7 SESSIONS</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">20 SESSIONS</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">VOLUME STRENGTH</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">LOWER WATCH AREA</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">UPPER WATCH AREA</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">UPSIDE VS RISK</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:center;white-space:nowrap;">NEWS</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">ANALYST</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RISK FLAGS</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">SCORE</th>
@@ -1588,7 +1664,34 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       </div>`;
   };
 
+  const renderNewsDetails = (cands: WatchlistCandidate[]) => {
+    if (!cands || cands.length === 0) return "";
+    const items = cands.map((c) => {
+      const anchor = `news-${c.symbol}`;
+      const catalyst = c.catalystHasNews ? escapeHtml(c.catalystLabel) : "No clear news";
+      const headline = c.catalystHasNews && c.newsHeadline
+        ? `<div style="margin:4px 0 0 0;color:#334155;font-size:13px;line-height:1.5;">${escapeHtml(c.newsHeadline)}</div>`
+        : "";
+      const source = c.catalystHasNews && c.newsSource
+        ? `<div style="margin:4px 0 0 0;color:#64748b;font-size:11px;">Source: ${escapeHtml(c.newsSource)}${c.newsLink ? ` · <a href="${escapeHtml(c.newsLink)}" style="color:#0369a1;text-decoration:none;">Open</a>` : ""}</div>`
+        : "";
+      return `
+        <div id="${anchor}" style="padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;margin:0 0 10px 0;">
+          <div style="font-weight:800;color:#0f172a;font-size:13px;">${escapeHtml(c.symbol)} — <span style="font-weight:600;color:#334155;">${escapeHtml(c.companyName)}</span></div>
+          <div style="margin:4px 0 0 0;color:${c.catalystHasNews ? "#0f766e" : "#94a3b8"};font-size:12px;font-weight:700;">${catalyst}${c.catalystHasNews && c.newsSource ? ` <span style="color:#64748b;font-weight:500;">— ${escapeHtml(c.newsSource)}</span>` : ""}</div>
+          ${headline}
+          ${source}
+        </div>`;
+    }).join("");
+    return `
+      <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:15px;">📰 News Details</h3>
+      <p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">Full news context for each watchlist candidate. Always verify on the source before acting.</p>
+      ${items}`;
+  };
+
+
   const watchlistTable = renderWatchlistTable(result.watchlist || []);
+  const newsDetails = renderNewsDetails(result.watchlist || []);
 
 
   return `
@@ -1606,6 +1709,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(real-time research priority · Yahoo data + Yahoo news)</span></h3>
     <p style="margin:0 0 10px 0;font-size:12px;color:#475569;">Calculated live from Yahoo screener + chart data. Score is research priority only — not a buy or sell recommendation. Always verify news, filings, fundamentals, and risk before making any investment decision.</p>
     ${watchlistTable}
+    ${newsDetails}
 
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🚀 Top 10 Overall Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(last 1 day · all market caps)</span></h3>
     ${allCards}
