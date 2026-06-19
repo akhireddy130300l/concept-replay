@@ -655,7 +655,8 @@ async function buildWatchlistCandidates(
   // Fetch charts in chunks
   const entries = Array.from(dedup.entries());
   const CHUNK = 12;
-  const initial: Array<{ pre: ReturnType<typeof computeWatchlistMetrics>; chart: ChartOHLCV; gainer: MarketGainer }> = [];
+  type PreMetrics = NonNullable<ReturnType<typeof computeWatchlistMetrics>>;
+  const initial: Array<{ pre: PreMetrics; chart: ChartOHLCV; gainer: MarketGainer }> = [];
   let chartCount = 0;
   let supResCount = 0;
 
