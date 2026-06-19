@@ -624,7 +624,7 @@ function computeWatchlistMetrics(
 }
 
 function computeRiskFlagsAndScore(
-  c: Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "riskFlags" | "score">,
+  c: Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "newsHeadline" | "newsSource" | "newsLink" | "riskFlags" | "score">,
   catalystHasNews: boolean,
   catalystLabel: string,
   chart: ChartOHLCV,
