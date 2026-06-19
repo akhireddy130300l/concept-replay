@@ -1827,7 +1827,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${supCell(c.supportRaw)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${resCell(c)}</td>
           <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${rrCell(c)}</td>
-          <td style="padding:10px 8px;text-align:center;font-size:14px;">${newsCell(c)}</td>
+          
           <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${analystCell(c)}</td>
           <td style="padding:10px 8px;text-align:left;font-size:12px;min-width:180px;">${flagsCell(c.riskFlags)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:13px;">${scoreCell(c.score)}</td>
