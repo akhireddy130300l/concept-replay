@@ -109,9 +109,12 @@ type WatchlistCandidate = {
   analystLabel: string;
   catalystLabel: string;
   catalystHasNews: boolean;
+  catalystConfirmed: boolean;
   newsHeadline: string;
+  newsSummary: string;
   newsSource: string;
   newsLink: string;
+  newsPublishedDate: string | null;
   riskFlags: string[];
   score: number;
 };
@@ -373,7 +376,8 @@ type ChartOHLCV = {
 
 async function fetchChartOHLCV(symbol: string): Promise<ChartOHLCV | null> {
   try {
-    const url = `${YAHOO_CHART_ENDPOINT}/${encodeURIComponent(symbol)}?range=1mo&interval=1d`;
+    // Use 3mo range to guarantee >=21 daily closes so 20-session math is accurate.
+    const url = `${YAHOO_CHART_ENDPOINT}/${encodeURIComponent(symbol)}?range=3mo&interval=1d`;
     const res = await fetch(url, {
       headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0 LearnLoop/1.0" },
     });
@@ -457,6 +461,7 @@ function classifyCatalystFromText(headline: string, summary = ""): string {
 
 type GeminiNewsResult = {
   relevant: boolean;
+  confirmedCatalyst: boolean;
   ticker: string;
   company: string;
   headline: string;
@@ -464,13 +469,21 @@ type GeminiNewsResult = {
   url: string;
   publishedDate: string | null;
   catalystType: string;
+  sentiment: "Positive" | "Negative" | "Neutral";
+  explainsMove: boolean;
   summary: string;
 };
 
-async function fetchGeminiGroundedNews(symbol: string, company: string): Promise<GeminiNewsResult> {
+async function fetchGeminiGroundedNews(
+  symbol: string,
+  company: string,
+  ctx: { latestPrice?: number; oneDayPctRaw?: number; sevenDayPctRaw?: number } = {},
+): Promise<GeminiNewsResult> {
   const empty: GeminiNewsResult = {
-    relevant: false, ticker: symbol, company, headline: "", source: "", url: "",
+    relevant: false, confirmedCatalyst: false, ticker: symbol, company,
+    headline: "", source: "", url: "",
     publishedDate: null, catalystType: "No clear company news",
+    sentiment: "Neutral", explainsMove: false,
     summary: "No clear company-specific news found in the last 7 days.",
   };
   const key = Deno.env.get("LOVABLE_API_KEY");
@@ -478,26 +491,39 @@ async function fetchGeminiGroundedNews(symbol: string, company: string): Promise
     console.log(`[watchlist] ${symbol} Gemini news skipped: missing LOVABLE_API_KEY`);
     return empty;
   }
-  const prompt = `Find the latest company-specific news for this exact stock.
+  const fmtPct = (v?: number) => (v === undefined || !Number.isFinite(v)) ? "N/A" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const moveContext = `Current move context: latest price ${ctx.latestPrice !== undefined ? "$" + ctx.latestPrice.toFixed(2) : "N/A"}, 1-session change ${fmtPct(ctx.oneDayPctRaw)}, 7-session change ${fmtPct(ctx.sevenDayPctRaw)}.`;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const prompt = `Today is ${today}.
+Find the latest company-specific news for this exact stock.
 
 Ticker: ${symbol}
 Company: ${company}
+${moveContext}
 
 Rules:
-- Return only news directly about this company or ticker.
-- Reject broad market news unless the headline clearly mentions this company.
-- Reject unrelated companies.
-- Reject generic market-wrap articles unless this company is a main subject.
-- Prefer news from the last 7 calendar days.
-- If there is no clear company-specific news, return relevant=false.
-- Do not invent news.
+- Find current company-specific news for this exact stock.
+- Prefer articles published in the last 7 calendar days.
+- Prefer news that clearly explains the latest price move shown above.
+- Reject broad market / index / macro news unless this company is a main subject.
+- Reject old articles (more than 14 days old).
+- Reject articles about other companies, even within the same sector.
+- Reject articles that are only loosely related.
+- If the article is relevant to the company but does NOT clearly explain the latest move, mark it as "company news only" (confirmedCatalyst=false), not a confirmed catalyst.
+- Do not invent news. Use only real, verifiable articles you found via search grounding.
 - Return JSON only, no markdown fences, no commentary.
 
-Required JSON schema:
-{"relevant": true, "ticker": "${symbol}", "company": "${company}", "headline": "short headline", "source": "publisher name", "url": "exact article URL", "publishedDate": "YYYY-MM-DD or null", "catalystType": "Earnings | Analyst action | Product / sector news | M&A | Partnership / contract | Legal / regulatory | Market news | Other", "summary": "one short sentence explaining why this matters"}
+Required JSON schemas — return exactly ONE:
 
-If no company-specific news exists, return:
-{"relevant": false, "ticker": "${symbol}", "company": "${company}", "headline": "", "source": "", "url": "", "publishedDate": null, "catalystType": "No clear company news", "summary": "No clear company-specific news found in the last 7 days."}`;
+If a confirmed catalyst that explains the latest move exists:
+{"relevant": true, "confirmedCatalyst": true, "ticker": "${symbol}", "company": "${company}", "headline": "headline", "source": "publisher", "url": "exact article URL", "publishedDate": "YYYY-MM-DD or null", "catalystType": "Earnings | Analyst action | Product / sector news | M&A | Partnership / contract | Legal / regulatory | Other", "sentiment": "Positive | Negative | Neutral", "explainsMove": true, "summary": "one short sentence"}
+
+If company-specific news exists but does NOT clearly explain the latest move:
+{"relevant": true, "confirmedCatalyst": false, "ticker": "${symbol}", "company": "${company}", "headline": "headline", "source": "publisher", "url": "exact article URL", "publishedDate": "YYYY-MM-DD or null", "catalystType": "Company news only", "sentiment": "Positive | Negative | Neutral", "explainsMove": false, "summary": "Company-specific news found, but it is not confirmed as the reason for the latest stock move."}
+
+If no clear company-specific news exists:
+{"relevant": false, "confirmedCatalyst": false, "ticker": "${symbol}", "company": "${company}", "headline": "", "source": "", "url": "", "publishedDate": null, "catalystType": "No clear company news", "sentiment": "Neutral", "explainsMove": false, "summary": "No clear company-specific news found in the last 7 days."}`;
 
   try {
     const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -518,46 +544,70 @@ If no company-specific news exists, return:
     }
     const data = await res.json();
     const text: string = data?.choices?.[0]?.message?.content ?? "";
-    // Extract JSON object from text (strip fences if any)
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) {
       console.log(`[watchlist] ${symbol} Gemini news parse failed: no JSON found`);
       return empty;
     }
     let parsed: any;
-    try {
-      parsed = JSON.parse(match[0]);
-    } catch (e) {
-      console.log(`[watchlist] ${symbol} Gemini news JSON parse error`);
+    try { parsed = JSON.parse(match[0]); }
+    catch { console.log(`[watchlist] ${symbol} Gemini news JSON parse error`); return empty; }
+
+    const relevant = parsed?.relevant === true;
+    if (!relevant) {
+      console.log(`[watchlist] ${symbol} Gemini: relevant=false`);
       return empty;
     }
     const url = String(parsed?.url || "").trim();
     const headline = String(parsed?.headline || "").trim();
     const summary = String(parsed?.summary || "").trim();
-    const relevant = parsed?.relevant === true && !!url && !!headline;
-    // Safety: require headline or summary to mention ticker or first company token
-    if (relevant) {
-      const compToken = company.toLowerCase().split(/\s+/).find((w) => w.length >= 4) || "";
-      const hay = `${headline} ${summary}`.toLowerCase();
-      const symU = symbol.toLowerCase();
-      const mentioned = hay.includes(symU) || (compToken && hay.includes(compToken));
-      if (!mentioned) {
-        console.log(`[watchlist] ${symbol} Gemini news rejected: no ticker/company mention`);
-        return empty;
+    if (!url || !headline) {
+      console.log(`[watchlist] ${symbol} Gemini rejected: missing url/headline`);
+      return empty;
+    }
+    // Safety: require ticker or first significant company token to appear
+    const compToken = company.toLowerCase().split(/\s+/).find((w) => w.length >= 4) || "";
+    const hay = `${headline} ${summary}`.toLowerCase();
+    const symU = symbol.toLowerCase();
+    if (!(hay.includes(symU) || (compToken && hay.includes(compToken)))) {
+      console.log(`[watchlist] ${symbol} Gemini rejected: no ticker/company mention`);
+      return empty;
+    }
+    // Reject articles older than 14 days when a date is provided
+    if (parsed?.publishedDate) {
+      const d = new Date(String(parsed.publishedDate));
+      if (!isNaN(d.getTime())) {
+        const ageDays = (Date.now() - d.getTime()) / (1000 * 60 * 60 * 24);
+        if (ageDays > 14) {
+          console.log(`[watchlist] ${symbol} Gemini rejected: article ${ageDays.toFixed(0)}d old`);
+          return empty;
+        }
       }
     }
+    const sentimentRaw = String(parsed?.sentiment || "Neutral").trim();
+    const sentiment: "Positive" | "Negative" | "Neutral" =
+      sentimentRaw === "Positive" || sentimentRaw === "Negative" ? sentimentRaw : "Neutral";
+    const explainsMove = parsed?.explainsMove === true;
+    const confirmedCatalyst = parsed?.confirmedCatalyst === true && explainsMove;
+    const catalystType = confirmedCatalyst
+      ? String(parsed?.catalystType || "Other").trim()
+      : "Company news only";
+
     return {
-      relevant,
+      relevant: true,
+      confirmedCatalyst,
       ticker: symbol,
       company,
-      headline: relevant ? headline : "",
-      source: relevant ? String(parsed?.source || "").trim() : "",
-      url: relevant ? url : "",
+      headline,
+      source: String(parsed?.source || "").trim(),
+      url,
       publishedDate: parsed?.publishedDate ? String(parsed.publishedDate) : null,
-      catalystType: relevant ? String(parsed?.catalystType || "Other").trim() : "No clear company news",
-      summary: relevant
-        ? (summary || "Company-specific news found.")
-        : "No clear company-specific news found in the last 7 days.",
+      catalystType,
+      sentiment,
+      explainsMove,
+      summary: summary || (confirmedCatalyst
+        ? "Company-specific catalyst found."
+        : "Company-specific news found, but it is not confirmed as the reason for the latest stock move."),
     };
   } catch (e) {
     console.log(`[watchlist] ${symbol} Gemini news error: ${(e as Error).message}`);
@@ -582,7 +632,7 @@ function analystLabelForKey(key: string): string {
 function computeWatchlistMetrics(
   gainer: MarketGainer,
   chart: ChartOHLCV,
-): Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "newsHeadline" | "newsSource" | "newsLink" | "riskFlags" | "score"> | null {
+): Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "catalystConfirmed" | "newsHeadline" | "newsSummary" | "newsSource" | "newsLink" | "newsPublishedDate" | "riskFlags" | "score"> | null {
   const closes = chart.closes;
   if (closes.length < 2) return null;
 
@@ -734,7 +784,7 @@ function computeWatchlistMetrics(
 }
 
 function computeRiskFlagsAndScore(
-  c: Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "newsHeadline" | "newsSource" | "newsLink" | "riskFlags" | "score">,
+  c: Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "catalystConfirmed" | "newsHeadline" | "newsSummary" | "newsSource" | "newsLink" | "newsPublishedDate" | "riskFlags" | "score">,
   catalystHasNews: boolean,
   catalystLabel: string,
   chart: ChartOHLCV,
@@ -894,37 +944,56 @@ async function buildWatchlistCandidates(
 
   // Fetch Gemini grounded company news for top 10 (one lookup per ticker).
   console.log(`[watchlist] Gemini news fetch count: ${top.length}`);
-  let newsOk = 0;
-  let newsMiss = 0;
   const newsResults = await Promise.all(
-    top.map((t) => fetchGeminiGroundedNews(t.gainer.symbol, t.gainer.companyName)),
+    top.map((t) => fetchGeminiGroundedNews(t.gainer.symbol, t.gainer.companyName, {
+      latestPrice: t.pre.priceRaw,
+      oneDayPctRaw: t.pre.oneDayPctRaw,
+      sevenDayPctRaw: t.pre.sevenDayPctRaw,
+    })),
   );
+
+  let confirmedCount = 0;
+  let companyOnlyCount = 0;
+  let noNewsCount = 0;
 
   const final: WatchlistCandidate[] = top.map((t, idx) => {
     const news = newsResults[idx];
     const hasNews = news.relevant === true;
-    if (hasNews) {
-      newsOk++;
-      console.log(`[watchlist] ${t.gainer.symbol} Gemini relevant news: ${news.headline} (${news.source})`);
+    const confirmed = hasNews && news.confirmedCatalyst === true;
+    if (confirmed) {
+      confirmedCount++;
+      console.log(`[watchlist] ${t.gainer.symbol} Gemini CONFIRMED catalyst: ${news.headline} (${news.source}, ${news.publishedDate || "no date"})`);
+    } else if (hasNews) {
+      companyOnlyCount++;
+      console.log(`[watchlist] ${t.gainer.symbol} Gemini company-only news: ${news.headline} (${news.source}, ${news.publishedDate || "no date"})`);
     } else {
-      newsMiss++;
-      console.log(`[watchlist] ${t.gainer.symbol} Gemini news: no clear company news`);
+      noNewsCount++;
+      console.log(`[watchlist] ${t.gainer.symbol} Gemini: no clear company news`);
     }
-    const catalystLabel = hasNews ? (news.catalystType || "Other") : "Not confirmed";
-    const { flags, score } = computeRiskFlagsAndScore(t.pre, hasNews, catalystLabel, t.chart);
+    const catalystLabel = confirmed
+      ? (news.catalystType || "Other")
+      : hasNews
+        ? "Company news only"
+        : "No clear company news";
+    // Only confirmed catalyst boosts the score
+    const { flags, score } = computeRiskFlagsAndScore(t.pre, confirmed, catalystLabel, t.chart);
     return {
       ...t.pre,
       catalystLabel,
       catalystHasNews: hasNews,
-      newsHeadline: hasNews ? (news.summary ? `${news.headline} — ${news.summary}` : news.headline) : "",
+      catalystConfirmed: confirmed,
+      newsHeadline: hasNews ? news.headline : "",
+      newsSummary: hasNews ? news.summary : "",
       newsSource: hasNews ? (news.source || "Gemini grounded search") : "",
       newsLink: hasNews ? news.url : "",
+      newsPublishedDate: hasNews ? news.publishedDate : null,
       riskFlags: flags,
       score,
     };
   });
-  console.log(`[watchlist] Gemini news success count: ${newsOk}`);
-  console.log(`[watchlist] No clear news count: ${newsMiss}`);
+  console.log(`[watchlist] confirmed catalyst count: ${confirmedCount}`);
+  console.log(`[watchlist] company-only news count: ${companyOnlyCount}`);
+  console.log(`[watchlist] no clear news count: ${noNewsCount}`);
 
   // Final re-sort with updated scores
   final.sort((a, b) =>
@@ -1705,7 +1774,10 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   const newsCell = (c: WatchlistCandidate) => {
     if (!c.catalystHasNews) return `<span style="color:#94a3b8;">—</span>`;
     const anchor = `news-${c.symbol}`;
-    return `<a href="#${anchor}" style="text-decoration:none;color:#0f172a;font-size:14px;" title="${escapeHtml(c.catalystLabel)}">📰</a>`;
+    if (c.catalystConfirmed) {
+      return `<a href="#${anchor}" style="text-decoration:none;color:#0f172a;font-size:14px;" title="${escapeHtml(c.catalystLabel)}">📰</a>`;
+    }
+    return `<a href="#${anchor}" style="text-decoration:none;color:#475569;font-size:14px;" title="Company news only — not confirmed as reason for latest move">◐</a>`;
   };
   const analystCell = (c: WatchlistCandidate) => {
     if (c.analystKey === "none") return `<span style="color:#94a3b8;font-style:italic;">No coverage</span>`;
@@ -1785,24 +1857,39 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     if (!cands || cands.length === 0) return "";
     const items = cands.map((c) => {
       const anchor = `news-${c.symbol}`;
-      const catalyst = c.catalystHasNews ? escapeHtml(c.catalystLabel) : "No clear news";
-      const headline = c.catalystHasNews && c.newsHeadline
-        ? `<div style="margin:4px 0 0 0;color:#334155;font-size:13px;line-height:1.5;">${escapeHtml(c.newsHeadline)}</div>`
+      const sourceLine = c.newsSource
+        ? `<div style="margin:4px 0 0 0;color:#64748b;font-size:11px;">Source: ${escapeHtml(c.newsSource)}${c.newsLink ? ` · <a href="${escapeHtml(c.newsLink)}" style="color:#0369a1;text-decoration:none;">Open</a>` : ""}${c.newsPublishedDate ? ` · ${escapeHtml(c.newsPublishedDate)}` : ""}</div>`
         : "";
-      const source = c.catalystHasNews && c.newsSource
-        ? `<div style="margin:4px 0 0 0;color:#64748b;font-size:11px;">Source: ${escapeHtml(c.newsSource)}${c.newsLink ? ` · <a href="${escapeHtml(c.newsLink)}" style="color:#0369a1;text-decoration:none;">Open</a>` : ""}</div>`
-        : "";
+
+      let badge = "";
+      let body = "";
+
+      if (c.catalystConfirmed) {
+        badge = `<div style="margin:4px 0 0 0;color:#0f766e;font-size:12px;font-weight:700;">${escapeHtml(c.catalystLabel)} — <span style="color:#64748b;font-weight:500;">${escapeHtml(c.newsSource || "Gemini grounded search")}</span></div>`;
+        body = `
+          ${c.newsHeadline ? `<div style="margin:4px 0 0 0;color:#0f172a;font-size:13px;line-height:1.5;font-weight:600;">${escapeHtml(c.newsHeadline)}</div>` : ""}
+          ${c.newsSummary ? `<div style="margin:4px 0 0 0;color:#334155;font-size:12px;line-height:1.5;">${escapeHtml(c.newsSummary)}</div>` : ""}
+          ${sourceLine}`;
+      } else if (c.catalystHasNews) {
+        badge = `<div style="margin:4px 0 0 0;color:#b45309;font-size:12px;font-weight:700;">Company news only — <span style="color:#64748b;font-weight:500;">${escapeHtml(c.newsSource || "Gemini grounded search")}</span></div>`;
+        body = `
+          ${c.newsHeadline ? `<div style="margin:4px 0 0 0;color:#0f172a;font-size:13px;line-height:1.5;font-weight:600;">${escapeHtml(c.newsHeadline)}</div>` : ""}
+          <div style="margin:4px 0 0 0;color:#475569;font-size:12px;line-height:1.5;font-style:italic;">Not confirmed as reason for latest move.</div>
+          ${sourceLine}`;
+      } else {
+        badge = `<div style="margin:4px 0 0 0;color:#94a3b8;font-size:12px;font-weight:700;">No clear company news</div>`;
+      }
+
       return `
         <div id="${anchor}" style="padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;margin:0 0 10px 0;">
           <div style="font-weight:800;color:#0f172a;font-size:13px;">${escapeHtml(c.symbol)} — <span style="font-weight:600;color:#334155;">${escapeHtml(c.companyName)}</span></div>
-          <div style="margin:4px 0 0 0;color:${c.catalystHasNews ? "#0f766e" : "#94a3b8"};font-size:12px;font-weight:700;">${catalyst}${c.catalystHasNews && c.newsSource ? ` <span style="color:#64748b;font-weight:500;">— ${escapeHtml(c.newsSource)}</span>` : ""}</div>
-          ${headline}
-          ${source}
+          ${badge}
+          ${body}
         </div>`;
     }).join("");
     return `
       <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:15px;">📰 News Details</h3>
-      <p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">Full news context for each watchlist candidate. Always verify on the source before acting.</p>
+      <p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">📰 = confirmed catalyst explaining the latest move · ◐ = company news only (not confirmed as reason) · — = no clear news. Always verify on the source before acting.</p>
       ${items}`;
   };
 
