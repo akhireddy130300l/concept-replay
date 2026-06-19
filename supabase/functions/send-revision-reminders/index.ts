@@ -1119,10 +1119,22 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
   }
 
 
+  // Build Best Watchlist Candidates (real-time research table) — best effort.
+  let watchlist: WatchlistCandidate[] = [];
+  try {
+    watchlist = await buildWatchlistCandidates(
+      [...movers, ...largeCapMovers, ...largeCapWeekly],
+      yahooRatingToKeyLocal,
+    );
+  } catch (err) {
+    console.error("Failed to build watchlist candidates:", err);
+  }
+
   return {
     movers,
     largeCapMovers,
     largeCapWeekly,
+    watchlist,
     fetchedAtIso: new Date().toISOString(),
     sourceUrl: YAHOO_GAINERS_PAGE_URL,
   };
