@@ -911,12 +911,6 @@ function computeRiskFlagsAndScore(
   } else {
     score -= 0.25;
   }
-  if (catalystHasNews) {
-    score += 0.75;
-    if (["Earnings", "Analyst action", "FDA / clinical", "M&A"].includes(catalystLabel)) score += 0.5;
-  } else {
-    score -= 0.75;
-  }
   if (c.analystKey === "strong_buy") score += 1;
   else if (c.analystKey === "buy") score += 0.5;
   else if (c.analystKey === "hold") score -= 0;
