@@ -986,58 +986,22 @@ async function buildWatchlistCandidates(
   );
   const top = provisional.slice(0, 10);
 
-  // Fetch Gemini grounded company news for top 10 (one lookup per ticker).
-  console.log(`[watchlist] Gemini news fetch count: ${top.length}`);
-  const newsResults = await Promise.all(
-    top.map((t) => fetchGeminiGroundedNews(t.gainer.symbol, t.gainer.companyName, {
-      latestPrice: t.pre.priceRaw,
-      oneDayPctRaw: t.pre.oneDayPctRaw,
-      sevenDayPctRaw: t.pre.sevenDayPctRaw,
-    })),
-  );
-
-  let confirmedCount = 0;
-  let companyOnlyCount = 0;
-  let noNewsCount = 0;
-
-  const final: WatchlistCandidate[] = top.map((t, idx) => {
-    const news = newsResults[idx];
-    const hasNews = news.relevant === true;
-    const confirmed = hasNews && news.confirmedCatalyst === true;
-    if (confirmed) {
-      confirmedCount++;
-      console.log(`[watchlist] ${t.gainer.symbol} Gemini CONFIRMED catalyst: ${news.headline} (${news.source}, ${news.publishedDate || "no date"})`);
-    } else if (hasNews) {
-      companyOnlyCount++;
-      console.log(`[watchlist] ${t.gainer.symbol} Gemini company-only news: ${news.headline} (${news.source}, ${news.publishedDate || "no date"})`);
-    } else {
-      noNewsCount++;
-      console.log(`[watchlist] ${t.gainer.symbol} Gemini: no clear company news`);
-    }
-    const catalystLabel = confirmed
-      ? (news.catalystType || "Other")
-      : hasNews
-        ? "Company news only"
-        : "No clear company news";
-    // Only confirmed catalyst boosts the score
-    const { flags, score } = computeRiskFlagsAndScore(t.pre, confirmed, catalystLabel, t.chart);
+  const final: WatchlistCandidate[] = top.map((t) => {
+    const { flags, score } = computeRiskFlagsAndScore(t.pre, false, "No clear company news", t.chart);
     return {
       ...t.pre,
-      catalystLabel,
-      catalystHasNews: hasNews,
-      catalystConfirmed: confirmed,
-      newsHeadline: hasNews ? news.headline : "",
-      newsSummary: hasNews ? news.summary : "",
-      newsSource: hasNews ? (news.source || "Gemini grounded search") : "",
-      newsLink: hasNews ? news.url : "",
-      newsPublishedDate: hasNews ? news.publishedDate : null,
+      catalystLabel: "",
+      catalystHasNews: false,
+      catalystConfirmed: false,
+      newsHeadline: "",
+      newsSummary: "",
+      newsSource: "",
+      newsLink: "",
+      newsPublishedDate: null,
       riskFlags: flags,
       score,
     };
   });
-  console.log(`[watchlist] confirmed catalyst count: ${confirmedCount}`);
-  console.log(`[watchlist] company-only news count: ${companyOnlyCount}`);
-  console.log(`[watchlist] no clear news count: ${noNewsCount}`);
 
   // Final re-sort with updated scores
   final.sort((a, b) =>
