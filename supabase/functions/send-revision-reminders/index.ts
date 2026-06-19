@@ -1823,8 +1823,8 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       <p style="margin:0;font-size:12px;color:#7c2d12;line-height:1.6;">Stocks are risky. Top gainers can fall just as quickly as they rise, and you may lose money. This email is not investment advice, a recommendation to buy or sell, or a forecast. Always do your own research, check official SEC filings, and consult a licensed financial advisor before making any investment decisions.</p>
     </div>
 
-    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(real-time research priority · Yahoo price data + Finnhub news)</span></h3>
-    <p style="margin:0 0 10px 0;font-size:12px;color:#475569;">Calculated live from Yahoo screener + chart data. Score is research priority only — not a buy or sell recommendation. Always verify news, filings, fundamentals, and risk before making any investment decision.</p>
+    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(real-time research priority · Yahoo price data + Gemini grounded news)</span></h3>
+    <p style="margin:0 0 10px 0;font-size:12px;color:#475569;">Calculated live from Yahoo screener + chart data. News is selected using Gemini with live search grounding. Score is research priority only — not a buy or sell recommendation. Always verify sources, filings, fundamentals, and risk before making any investment decision.</p>
     ${watchlistTable}
     ${newsDetails}
 
