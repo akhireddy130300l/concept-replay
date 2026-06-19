@@ -874,7 +874,7 @@ function computeRiskFlagsAndScore(
   if (c.supportRaw !== undefined && c.priceRaw > 0) {
     if ((c.priceRaw - c.supportRaw) / c.priceRaw > 0.15) flags.push("Far above support");
   }
-  if (!catalystHasNews) flags.push("News not confirmed");
+  
   if (dailyVolPct > 5) flags.push("High volatility");
   if (todayRange?.dayHigh && todayRange?.dayLow && c.priceRaw > 0) {
     const range = todayRange.dayHigh - todayRange.dayLow;
@@ -910,12 +910,6 @@ function computeRiskFlagsAndScore(
     else if (c.riskRewardRaw < 0.8) score -= 1;
   } else {
     score -= 0.25;
-  }
-  if (catalystHasNews) {
-    score += 0.75;
-    if (["Earnings", "Analyst action", "FDA / clinical", "M&A"].includes(catalystLabel)) score += 0.5;
-  } else {
-    score -= 0.75;
   }
   if (c.analystKey === "strong_buy") score += 1;
   else if (c.analystKey === "buy") score += 0.5;
@@ -992,58 +986,22 @@ async function buildWatchlistCandidates(
   );
   const top = provisional.slice(0, 10);
 
-  // Fetch Gemini grounded company news for top 10 (one lookup per ticker).
-  console.log(`[watchlist] Gemini news fetch count: ${top.length}`);
-  const newsResults = await Promise.all(
-    top.map((t) => fetchGeminiGroundedNews(t.gainer.symbol, t.gainer.companyName, {
-      latestPrice: t.pre.priceRaw,
-      oneDayPctRaw: t.pre.oneDayPctRaw,
-      sevenDayPctRaw: t.pre.sevenDayPctRaw,
-    })),
-  );
-
-  let confirmedCount = 0;
-  let companyOnlyCount = 0;
-  let noNewsCount = 0;
-
-  const final: WatchlistCandidate[] = top.map((t, idx) => {
-    const news = newsResults[idx];
-    const hasNews = news.relevant === true;
-    const confirmed = hasNews && news.confirmedCatalyst === true;
-    if (confirmed) {
-      confirmedCount++;
-      console.log(`[watchlist] ${t.gainer.symbol} Gemini CONFIRMED catalyst: ${news.headline} (${news.source}, ${news.publishedDate || "no date"})`);
-    } else if (hasNews) {
-      companyOnlyCount++;
-      console.log(`[watchlist] ${t.gainer.symbol} Gemini company-only news: ${news.headline} (${news.source}, ${news.publishedDate || "no date"})`);
-    } else {
-      noNewsCount++;
-      console.log(`[watchlist] ${t.gainer.symbol} Gemini: no clear company news`);
-    }
-    const catalystLabel = confirmed
-      ? (news.catalystType || "Other")
-      : hasNews
-        ? "Company news only"
-        : "No clear company news";
-    // Only confirmed catalyst boosts the score
-    const { flags, score } = computeRiskFlagsAndScore(t.pre, confirmed, catalystLabel, t.chart);
+  const final: WatchlistCandidate[] = top.map((t) => {
+    const { flags, score } = computeRiskFlagsAndScore(t.pre, false, "No clear company news", t.chart);
     return {
       ...t.pre,
-      catalystLabel,
-      catalystHasNews: hasNews,
-      catalystConfirmed: confirmed,
-      newsHeadline: hasNews ? news.headline : "",
-      newsSummary: hasNews ? news.summary : "",
-      newsSource: hasNews ? (news.source || "Gemini grounded search") : "",
-      newsLink: hasNews ? news.url : "",
-      newsPublishedDate: hasNews ? news.publishedDate : null,
+      catalystLabel: "",
+      catalystHasNews: false,
+      catalystConfirmed: false,
+      newsHeadline: "",
+      newsSummary: "",
+      newsSource: "",
+      newsLink: "",
+      newsPublishedDate: null,
       riskFlags: flags,
       score,
     };
   });
-  console.log(`[watchlist] confirmed catalyst count: ${confirmedCount}`);
-  console.log(`[watchlist] company-only news count: ${companyOnlyCount}`);
-  console.log(`[watchlist] no clear news count: ${noNewsCount}`);
 
   // Final re-sort with updated scores
   final.sort((a, b) =>
@@ -1869,7 +1827,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${supCell(c.supportRaw)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${resCell(c)}</td>
           <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${rrCell(c)}</td>
-          <td style="padding:10px 8px;text-align:center;font-size:14px;">${newsCell(c)}</td>
+          
           <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${analystCell(c)}</td>
           <td style="padding:10px 8px;text-align:left;font-size:12px;min-width:180px;">${flagsCell(c.riskFlags)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:13px;">${scoreCell(c.score)}</td>
@@ -1892,7 +1850,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">LOWER WATCH AREA</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">UPPER WATCH AREA</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">UPSIDE VS RISK</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:center;white-space:nowrap;">NEWS</th>
+              
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">ANALYST</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RISK FLAGS</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">SCORE</th>
@@ -1903,49 +1861,9 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       </div>`;
   };
 
-  const renderNewsDetails = (cands: WatchlistCandidate[]) => {
-    if (!cands || cands.length === 0) return "";
-    const items = cands.map((c) => {
-      const anchor = `news-${c.symbol}`;
-      const sourceLine = c.newsSource
-        ? `<div style="margin:4px 0 0 0;color:#64748b;font-size:11px;">Source: ${escapeHtml(c.newsSource)}${c.newsLink ? ` · <a href="${escapeHtml(c.newsLink)}" style="color:#0369a1;text-decoration:none;">Open</a>` : ""}${c.newsPublishedDate ? ` · ${escapeHtml(c.newsPublishedDate)}` : ""}</div>`
-        : "";
-
-      let badge = "";
-      let body = "";
-
-      if (c.catalystConfirmed) {
-        badge = `<div style="margin:4px 0 0 0;color:#0f766e;font-size:12px;font-weight:700;">${escapeHtml(c.catalystLabel)} — <span style="color:#64748b;font-weight:500;">${escapeHtml(c.newsSource || "Gemini grounded search")}</span></div>`;
-        body = `
-          ${c.newsHeadline ? `<div style="margin:4px 0 0 0;color:#0f172a;font-size:13px;line-height:1.5;font-weight:600;">${escapeHtml(c.newsHeadline)}</div>` : ""}
-          ${c.newsSummary ? `<div style="margin:4px 0 0 0;color:#334155;font-size:12px;line-height:1.5;">${escapeHtml(c.newsSummary)}</div>` : ""}
-          ${sourceLine}`;
-      } else if (c.catalystHasNews) {
-        badge = `<div style="margin:4px 0 0 0;color:#b45309;font-size:12px;font-weight:700;">Company news only — <span style="color:#64748b;font-weight:500;">${escapeHtml(c.newsSource || "Gemini grounded search")}</span></div>`;
-        body = `
-          ${c.newsHeadline ? `<div style="margin:4px 0 0 0;color:#0f172a;font-size:13px;line-height:1.5;font-weight:600;">${escapeHtml(c.newsHeadline)}</div>` : ""}
-          <div style="margin:4px 0 0 0;color:#475569;font-size:12px;line-height:1.5;font-style:italic;">Not confirmed as reason for latest move.</div>
-          ${sourceLine}`;
-      } else {
-        badge = `<div style="margin:4px 0 0 0;color:#94a3b8;font-size:12px;font-weight:700;">No clear company news</div>`;
-      }
-
-      return `
-        <div id="${anchor}" style="padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;margin:0 0 10px 0;">
-          <div style="font-weight:800;color:#0f172a;font-size:13px;">${escapeHtml(c.symbol)} — <span style="font-weight:600;color:#334155;">${escapeHtml(c.companyName)}</span></div>
-          ${badge}
-          ${body}
-        </div>`;
-    }).join("");
-    return `
-      <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:15px;">📰 News Details</h3>
-      <p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">📰 = confirmed catalyst explaining the latest move · ◐ = company news only (not confirmed as reason) · — = no clear news. Always verify on the source before acting.</p>
-      ${items}`;
-  };
 
 
   const watchlistTable = renderWatchlistTable(result.watchlist || []);
-  const newsDetails = renderNewsDetails(result.watchlist || []);
 
 
   return `
@@ -1960,10 +1878,9 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       <p style="margin:0;font-size:12px;color:#7c2d12;line-height:1.6;">Stocks are risky. Top gainers can fall just as quickly as they rise, and you may lose money. This email is not investment advice, a recommendation to buy or sell, or a forecast. Always do your own research, check official SEC filings, and consult a licensed financial advisor before making any investment decisions.</p>
     </div>
 
-    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(real-time research priority · Yahoo price data + Gemini grounded news)</span></h3>
-    <p style="margin:0 0 10px 0;font-size:12px;color:#475569;">Calculated live from Yahoo screener + chart data. News is selected using Gemini with live search grounding. Score is research priority only — not a buy or sell recommendation. Always verify sources, filings, fundamentals, and risk before making any investment decision.</p>
+    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(research priority · Yahoo price + chart data)</span></h3>
+    <p style="margin:0 0 10px 0;font-size:12px;color:#475569;">Calculated live from Yahoo screener + chart data. Score is research priority only — not a buy or sell recommendation. Always verify filings, fundamentals, company news, and risk before making any investment decision.</p>
     ${watchlistTable}
-    ${newsDetails}
 
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🚀 Top 10 Overall Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(last 1 day · all market caps)</span></h3>
     ${allCards}
