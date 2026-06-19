@@ -523,38 +523,74 @@ function computeWatchlistMetrics(
     twentyDayLabel = "Short history";
   }
 
-  // Volume ratio (avg from chart volumes last 10, fallback 20)
+  // ---- VOLUME STRENGTH ----
+  // currentVolume = screener regularMarketVolume, else latest chart volume.
+  // averageVolume = previous 10 completed sessions (exclude latest bar).
+  // Fallback to previous 20 completed sessions. Else N/A.
   let volumeRatio: number | undefined;
-  if (Number.isFinite(gainer.volumeRaw) && gainer.volumeRaw > 0 && chart.volumes.length >= 2) {
-    const window = chart.volumes.slice(-10).length >= 5 ? chart.volumes.slice(-10) : chart.volumes.slice(-20);
-    const avg = window.reduce((a, b) => a + b, 0) / window.length;
-    if (avg > 0) volumeRatio = gainer.volumeRaw / avg;
+  const vols = chart.volumes;
+  const lastVolIdx = sameDayBar ? vols.length - 1 : -1; // index to exclude (today's bar)
+  const prevVols: number[] = [];
+  for (let i = vols.length - 1; i >= 0; i--) {
+    if (i === lastVolIdx) continue;
+    if (vols[i] > 0) prevVols.push(vols[i]);
   }
-
-  // Support: min low from last 10-20 days
-  let supportRaw: number | undefined;
-  const lowsWindow = chart.lows.slice(-20);
-  if (lowsWindow.length >= 3) {
-    const below = lowsWindow.filter((l) => l < latestPrice);
-    supportRaw = below.length ? Math.max(...below.filter((l) => l <= latestPrice)) : Math.min(...lowsWindow);
-    // Prefer max-of-recent-lows-below-price (closest support); fallback to min
-    if (!below.length) supportRaw = Math.min(...lowsWindow);
-  }
-
-  // Resistance: nearest recent high above current price (or 52w high fallback handled via chart highs)
-  let resistanceRaw: number | undefined;
-  let resistanceIsBreakout = false;
-  const highsWindow = chart.highs.slice(-20);
-  if (highsWindow.length >= 3) {
-    const above = highsWindow.filter((h) => h > latestPrice);
-    if (above.length) {
-      resistanceRaw = Math.min(...above);
-    } else {
-      resistanceIsBreakout = true;
+  // prevVols is most-recent-first of completed sessions
+  let currentVolume: number | undefined;
+  if (Number.isFinite(gainer.volumeRaw) && gainer.volumeRaw > 0) currentVolume = gainer.volumeRaw;
+  else if (vols.length > 0 && vols[vols.length - 1] > 0) currentVolume = vols[vols.length - 1];
+  if (currentVolume !== undefined) {
+    let window: number[] | undefined;
+    if (prevVols.length >= 10) window = prevVols.slice(0, 10);
+    else if (prevVols.length >= 5) window = prevVols.slice(0, Math.min(prevVols.length, 20));
+    if (window && window.length > 0) {
+      const avg = window.reduce((a, b) => a + b, 0) / window.length;
+      if (avg > 0) volumeRatio = currentVolume / avg;
     }
   }
 
-  // Risk/Reward
+  // ---- LOWER WATCH AREA (support) ----
+  // Exclude today's candle. Look at previous 10–20 completed lows.
+  // Pick the nearest low BELOW current price (max of lows-below-price). Else N/A.
+  let supportRaw: number | undefined;
+  const lowsAll = chart.lows;
+  const lastLowExcludeIdx = sameDayBar ? lowsAll.length - 1 : -1;
+  const prevLows: number[] = [];
+  for (let i = lowsAll.length - 1; i >= 0; i--) {
+    if (i === lastLowExcludeIdx) continue;
+    if (Number.isFinite(lowsAll[i]) && lowsAll[i] > 0) prevLows.push(lowsAll[i]);
+    if (prevLows.length >= 20) break;
+  }
+  if (prevLows.length >= 3) {
+    const below = prevLows.filter((l) => l < latestPrice);
+    if (below.length) supportRaw = Math.max(...below);
+  }
+
+  // ---- UPPER WATCH AREA (resistance) ----
+  // Prefer nearest previous completed high ABOVE current price.
+  // Fallback to 52-week high. If above both, mark Breakout.
+  let resistanceRaw: number | undefined;
+  let resistanceIsBreakout = false;
+  const highsAll = chart.highs;
+  const lastHighExcludeIdx = sameDayBar ? highsAll.length - 1 : -1;
+  const prevHighs: number[] = [];
+  for (let i = highsAll.length - 1; i >= 0; i--) {
+    if (i === lastHighExcludeIdx) continue;
+    if (Number.isFinite(highsAll[i]) && highsAll[i] > 0) prevHighs.push(highsAll[i]);
+    if (prevHighs.length >= 20) break;
+  }
+  const highsAbove = prevHighs.filter((h) => h > latestPrice);
+  if (highsAbove.length) {
+    resistanceRaw = Math.min(...highsAbove);
+  } else if (Number.isFinite(chart.meta52wHigh as number) && (chart.meta52wHigh as number) > latestPrice) {
+    resistanceRaw = chart.meta52wHigh as number;
+  } else if (Number.isFinite(chart.meta52wHigh as number) && (chart.meta52wHigh as number) <= latestPrice) {
+    resistanceIsBreakout = true;
+  } else if (prevHighs.length > 0) {
+    resistanceIsBreakout = true;
+  }
+
+  // ---- UPSIDE VS RISK ----
   let riskRewardRaw: number | undefined;
   let riskRewardIsBreakout = false;
   if (resistanceIsBreakout) {
