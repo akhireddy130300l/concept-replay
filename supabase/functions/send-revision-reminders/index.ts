@@ -1774,7 +1774,10 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   const newsCell = (c: WatchlistCandidate) => {
     if (!c.catalystHasNews) return `<span style="color:#94a3b8;">—</span>`;
     const anchor = `news-${c.symbol}`;
-    return `<a href="#${anchor}" style="text-decoration:none;color:#0f172a;font-size:14px;" title="${escapeHtml(c.catalystLabel)}">📰</a>`;
+    if (c.catalystConfirmed) {
+      return `<a href="#${anchor}" style="text-decoration:none;color:#0f172a;font-size:14px;" title="${escapeHtml(c.catalystLabel)}">📰</a>`;
+    }
+    return `<a href="#${anchor}" style="text-decoration:none;color:#475569;font-size:14px;" title="Company news only — not confirmed as reason for latest move">◐</a>`;
   };
   const analystCell = (c: WatchlistCandidate) => {
     if (c.analystKey === "none") return `<span style="color:#94a3b8;font-style:italic;">No coverage</span>`;
