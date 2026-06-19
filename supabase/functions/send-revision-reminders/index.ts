@@ -538,7 +538,7 @@ function computeWatchlistMetrics(
     companyName: gainer.companyName,
     priceRaw: latestPrice,
     priceFmt: latestPrice.toFixed(2),
-    oneDayPctRaw: Number.isFinite(gainer.percentGainRaw) ? gainer.percentGainRaw : undefined,
+    oneDayPctRaw,
     sevenDayPctRaw,
     sevenDaySinceListing,
     twentyDayPctRaw,
