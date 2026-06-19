@@ -351,6 +351,405 @@ async function fetchLargeCapWeeklyGainers(): Promise<MarketGainer[]> {
 }
 
 
+// ============================================================
+// Watchlist Candidates — real-time research table
+// ============================================================
+const YAHOO_NEWS_SEARCH = "https://query1.finance.yahoo.com/v1/finance/search";
+
+type ChartOHLCV = {
+  closes: number[];
+  highs: number[];
+  lows: number[];
+  volumes: number[];
+  metaPrice?: number;
+};
+
+async function fetchChartOHLCV(symbol: string): Promise<ChartOHLCV | null> {
+  try {
+    const url = `${YAHOO_CHART_ENDPOINT}/${encodeURIComponent(symbol)}?range=1mo&interval=1d`;
+    const res = await fetch(url, {
+      headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0 LearnLoop/1.0" },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const result = data?.chart?.result?.[0];
+    const q = result?.indicators?.quote?.[0];
+    const closes: number[] = (q?.close ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v));
+    const highs: number[] = (q?.high ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v));
+    const lows: number[] = (q?.low ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v));
+    const volumes: number[] = (q?.volume ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v) && v > 0);
+    const metaPrice = Number(result?.meta?.regularMarketPrice);
+    return { closes, highs, lows, volumes, metaPrice: Number.isFinite(metaPrice) ? metaPrice : undefined };
+  } catch {
+    return null;
+  }
+}
+
+type YahooNewsItem = { title: string; publisher: string; link: string; time: number };
+
+async function fetchYahooNews(symbol: string, company: string): Promise<YahooNewsItem[]> {
+  try {
+    const q = encodeURIComponent(`${symbol} ${company}`);
+    const url = `${YAHOO_NEWS_SEARCH}?q=${q}&newsCount=3&quotesCount=0`;
+    const res = await fetch(url, {
+      headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0 LearnLoop/1.0" },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const news = data?.news ?? [];
+    return news
+      .map((n: any) => ({
+        title: String(n?.title || "").trim(),
+        publisher: String(n?.publisher || "").trim(),
+        link: String(n?.link || "").trim(),
+        time: Number(n?.providerPublishTime) || 0,
+      }))
+      .filter((n: YahooNewsItem) => n.title);
+  } catch {
+    return [];
+  }
+}
+
+function classifyCatalystFromTitle(title: string): string {
+  const t = title.toLowerCase();
+  if (/\b(earnings|revenue|profit|eps|guidance)\b/.test(t)) return "Earnings";
+  if (/\b(upgrade|downgrade|price target|analyst)\b/.test(t)) return "Analyst action";
+  if (/\b(fda|trial|clinical|approval|drug|vaccine)\b/.test(t)) return "FDA / clinical";
+  if (/\b(acquisition|merger|buyout)\b/.test(t)) return "M&A";
+  if (/\b(partnership|contract|deal)\b/.test(t)) return "Partnership / contract";
+  if (/\b(launch|product)\b/.test(t)) return "Product news";
+  return "News found";
+}
+
+function analystKeyForGainer(m: MarketGainer, yahooRatingToKey: (r?: string) => string): string {
+  if (m.analyst?.recommendationKey && m.analyst.recommendationKey !== "none") return m.analyst.recommendationKey;
+  if (m.averageAnalystRating) return yahooRatingToKey(m.averageAnalystRating);
+  return "none";
+}
+
+function analystLabelForKey(key: string): string {
+  const map: Record<string, string> = {
+    strong_buy: "Strong Buy", buy: "Buy", hold: "Hold",
+    underperform: "Underperform", sell: "Sell", strong_sell: "Strong Sell",
+  };
+  return map[key] || "No coverage";
+}
+
+function computeWatchlistMetrics(
+  gainer: MarketGainer,
+  chart: ChartOHLCV,
+): Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "riskFlags" | "score"> | null {
+  const closes = chart.closes;
+  if (closes.length < 2) return null;
+
+  // Latest price: screener -> chart meta -> last close
+  const latestPrice = Number.isFinite(gainer.priceRaw) && gainer.priceRaw > 0
+    ? gainer.priceRaw
+    : (chart.metaPrice ?? closes[closes.length - 1]);
+  if (!Number.isFinite(latestPrice) || latestPrice <= 0) return null;
+
+  // 7D
+  let sevenDayPctRaw: number | undefined;
+  let sevenDaySinceListing = false;
+  if (closes.length >= 6) {
+    const c = closes[closes.length - 6];
+    if (c > 0) sevenDayPctRaw = ((latestPrice - c) / c) * 100;
+  } else if (closes.length >= 2) {
+    const c = closes[0];
+    if (c > 0) {
+      sevenDayPctRaw = ((latestPrice - c) / c) * 100;
+      sevenDaySinceListing = true;
+    }
+  }
+
+  // 20D trend
+  const window20 = closes.slice(-20);
+  let twentyDayPctRaw: number | undefined;
+  let twentyDayLabel = "N/A";
+  if (window20.length >= 2 && window20[0] > 0) {
+    twentyDayPctRaw = ((latestPrice - window20[0]) / window20[0]) * 100;
+    if (window20.length < 6) twentyDayLabel = "Short history";
+    else if (twentyDayPctRaw >= 10) twentyDayLabel = "Strong uptrend";
+    else if (twentyDayPctRaw >= 3) twentyDayLabel = "Uptrend";
+    else if (twentyDayPctRaw > -3) twentyDayLabel = "Flat";
+    else twentyDayLabel = "Downtrend";
+  }
+
+  // Volume ratio (avg from chart volumes last 10, fallback 20)
+  let volumeRatio: number | undefined;
+  if (Number.isFinite(gainer.volumeRaw) && gainer.volumeRaw > 0 && chart.volumes.length >= 2) {
+    const window = chart.volumes.slice(-10).length >= 5 ? chart.volumes.slice(-10) : chart.volumes.slice(-20);
+    const avg = window.reduce((a, b) => a + b, 0) / window.length;
+    if (avg > 0) volumeRatio = gainer.volumeRaw / avg;
+  }
+
+  // Support: min low from last 10-20 days
+  let supportRaw: number | undefined;
+  const lowsWindow = chart.lows.slice(-20);
+  if (lowsWindow.length >= 3) {
+    const below = lowsWindow.filter((l) => l < latestPrice);
+    supportRaw = below.length ? Math.max(...below.filter((l) => l <= latestPrice)) : Math.min(...lowsWindow);
+    // Prefer max-of-recent-lows-below-price (closest support); fallback to min
+    if (!below.length) supportRaw = Math.min(...lowsWindow);
+  }
+
+  // Resistance: nearest recent high above current price (or 52w high fallback handled via chart highs)
+  let resistanceRaw: number | undefined;
+  let resistanceIsBreakout = false;
+  const highsWindow = chart.highs.slice(-20);
+  if (highsWindow.length >= 3) {
+    const above = highsWindow.filter((h) => h > latestPrice);
+    if (above.length) {
+      resistanceRaw = Math.min(...above);
+    } else {
+      resistanceIsBreakout = true;
+    }
+  }
+
+  // Risk/Reward
+  let riskRewardRaw: number | undefined;
+  let riskRewardIsBreakout = false;
+  if (resistanceIsBreakout) {
+    riskRewardIsBreakout = true;
+  } else if (supportRaw !== undefined && resistanceRaw !== undefined) {
+    const downside = latestPrice - supportRaw;
+    const upside = resistanceRaw - latestPrice;
+    if (downside > 0 && upside > 0) riskRewardRaw = upside / downside;
+  }
+
+  return {
+    symbol: gainer.symbol,
+    companyName: gainer.companyName,
+    priceRaw: latestPrice,
+    priceFmt: latestPrice.toFixed(2),
+    oneDayPctRaw: Number.isFinite(gainer.percentGainRaw) ? gainer.percentGainRaw : undefined,
+    sevenDayPctRaw,
+    sevenDaySinceListing,
+    twentyDayPctRaw,
+    twentyDayLabel,
+    volumeRatio,
+    supportRaw,
+    resistanceRaw,
+    resistanceIsBreakout,
+    riskRewardRaw,
+    riskRewardIsBreakout,
+    marketCapRaw: gainer.marketCapRaw,
+    analystKey: "none",
+    analystLabel: "No coverage",
+  };
+}
+
+function computeRiskFlagsAndScore(
+  c: Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "riskFlags" | "score">,
+  catalystHasNews: boolean,
+  catalystLabel: string,
+  chart: ChartOHLCV,
+  todayRange?: { dayHigh?: number; dayLow?: number },
+): { flags: string[]; score: number } {
+  const flags: string[] = [];
+
+  // Volatility proxy: std-dev of last 20 daily % moves
+  const closes = chart.closes;
+  let dailyVolPct = 0;
+  if (closes.length >= 6) {
+    const rets: number[] = [];
+    for (let i = 1; i < closes.length; i++) {
+      if (closes[i - 1] > 0) rets.push(((closes[i] - closes[i - 1]) / closes[i - 1]) * 100);
+    }
+    if (rets.length) {
+      const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+      const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length;
+      dailyVolPct = Math.sqrt(variance);
+    }
+  }
+
+  if (c.oneDayPctRaw !== undefined && dailyVolPct > 0 && Math.abs(c.oneDayPctRaw) > dailyVolPct * 2.5) {
+    flags.push("Big one-day move");
+  }
+  if (c.sevenDayPctRaw !== undefined && c.twentyDayPctRaw !== undefined &&
+      Math.abs(c.sevenDayPctRaw) > Math.abs(c.twentyDayPctRaw) * 1.5 && Math.abs(c.sevenDayPctRaw) >= 15) {
+    flags.push("Very large 7D move");
+  }
+  if (c.volumeRatio !== undefined && c.volumeRatio < 1.0) flags.push("Weak volume");
+  if (c.analystKey === "none") flags.push("No analyst coverage");
+  if (c.marketCapRaw > 0 && c.marketCapRaw < 2_000_000_000) flags.push("Small cap");
+  if (c.sevenDaySinceListing) flags.push("Since-listing data");
+  if (c.resistanceRaw !== undefined && c.priceRaw > 0) {
+    if ((c.resistanceRaw - c.priceRaw) / c.priceRaw < 0.03) flags.push("Near resistance");
+  }
+  if (c.supportRaw !== undefined && c.priceRaw > 0) {
+    if ((c.priceRaw - c.supportRaw) / c.priceRaw > 0.15) flags.push("Far above support");
+  }
+  if (!catalystHasNews) flags.push("News not confirmed");
+  if (dailyVolPct > 5) flags.push("High volatility");
+  if (todayRange?.dayHigh && todayRange?.dayLow && c.priceRaw > 0) {
+    const range = todayRange.dayHigh - todayRange.dayLow;
+    if (range > 0) {
+      const posInRange = (c.priceRaw - todayRange.dayLow) / range;
+      if (posInRange < 0.25 && c.oneDayPctRaw !== undefined && c.oneDayPctRaw > 0) {
+        flags.push("Fading from high");
+      }
+    }
+  }
+
+  // Scoring: start at 5, adjust
+  let score = 5;
+  if (c.sevenDayPctRaw !== undefined) {
+    if (c.sevenDayPctRaw >= 15) score += 1.5;
+    else if (c.sevenDayPctRaw >= 5) score += 1;
+    else if (c.sevenDayPctRaw <= -10) score -= 1;
+  }
+  if (c.twentyDayPctRaw !== undefined) {
+    if (c.twentyDayPctRaw >= 15) score += 1.5;
+    else if (c.twentyDayPctRaw >= 5) score += 0.75;
+    else if (c.twentyDayPctRaw <= -10) score -= 1;
+  }
+  if (c.volumeRatio !== undefined) {
+    if (c.volumeRatio >= 2) score += 1.5;
+    else if (c.volumeRatio >= 1.3) score += 0.75;
+    else if (c.volumeRatio < 1) score -= 0.75;
+  }
+  if (c.riskRewardIsBreakout) score += 0.5;
+  else if (c.riskRewardRaw !== undefined) {
+    if (c.riskRewardRaw >= 2) score += 1.5;
+    else if (c.riskRewardRaw >= 1.2) score += 0.75;
+    else if (c.riskRewardRaw < 0.8) score -= 1;
+  } else {
+    score -= 0.25;
+  }
+  if (catalystHasNews) {
+    score += 0.75;
+    if (["Earnings", "Analyst action", "FDA / clinical", "M&A"].includes(catalystLabel)) score += 0.5;
+  } else {
+    score -= 0.75;
+  }
+  if (c.analystKey === "strong_buy") score += 1;
+  else if (c.analystKey === "buy") score += 0.5;
+  else if (c.analystKey === "hold") score -= 0;
+  else if (c.analystKey === "sell" || c.analystKey === "strong_sell") score -= 1;
+  else if (c.analystKey === "none") score -= 0.5;
+
+  if (flags.includes("Near resistance")) score -= 0.5;
+  if (flags.includes("Far above support")) score -= 0.5;
+  if (flags.includes("High volatility")) score -= 0.25;
+  if (flags.includes("Fading from high")) score -= 0.5;
+
+  score = Math.max(0, Math.min(10, score));
+  return { flags, score: Math.round(score * 10) / 10 };
+}
+
+async function buildWatchlistCandidates(
+  allMovers: MarketGainer[],
+  yahooRatingToKey: (r?: string) => string,
+): Promise<WatchlistCandidate[]> {
+  // Deduplicate by ticker
+  const dedup = new Map<string, MarketGainer>();
+  for (const m of allMovers) {
+    if (!m.symbol) continue;
+    const prev = dedup.get(m.symbol);
+    if (!prev || (m.analyst && !prev.analyst)) dedup.set(m.symbol, m);
+  }
+  console.log(`[watchlist] candidate universe count: ${allMovers.length}`);
+  console.log(`[watchlist] deduplicated symbol count: ${dedup.size}`);
+
+  // Fetch charts in chunks
+  const entries = Array.from(dedup.entries());
+  const CHUNK = 12;
+  const initial: Array<{ pre: ReturnType<typeof computeWatchlistMetrics>; chart: ChartOHLCV; gainer: MarketGainer }> = [];
+  let chartCount = 0;
+  let supResCount = 0;
+
+  for (let i = 0; i < entries.length; i += CHUNK) {
+    const slice = entries.slice(i, i + CHUNK);
+    const results = await Promise.all(slice.map(async ([sym, g]) => {
+      const chart = await fetchChartOHLCV(sym);
+      return { sym, g, chart };
+    }));
+    for (const { g, chart } of results) {
+      if (!chart) continue;
+      chartCount++;
+      const pre = computeWatchlistMetrics(g, chart);
+      if (!pre) continue;
+      if (pre.supportRaw !== undefined || pre.resistanceRaw !== undefined || pre.resistanceIsBreakout) supResCount++;
+      // Attach analyst
+      const key = analystKeyForGainer(g, yahooRatingToKey);
+      pre.analystKey = key;
+      pre.analystLabel = analystLabelForKey(key);
+      initial.push({ pre, chart, gainer: g });
+    }
+  }
+  console.log(`[watchlist] Yahoo chart fetch count: ${chartCount}`);
+  console.log(`[watchlist] support/resistance calculation count: ${supResCount}`);
+
+  // Score WITHOUT news first to pick top 10
+  const provisional = initial.map(({ pre, chart, gainer }) => {
+    const { flags, score } = computeRiskFlagsAndScore(pre, false, "Not confirmed", chart);
+    return { pre, chart, gainer, flags, score };
+  });
+
+  // Sort and pick top 10 candidates for news lookup
+  provisional.sort((a, b) =>
+    b.score - a.score ||
+    (b.pre.riskRewardRaw ?? 0) - (a.pre.riskRewardRaw ?? 0) ||
+    (b.pre.sevenDayPctRaw ?? -999) - (a.pre.sevenDayPctRaw ?? -999) ||
+    (b.pre.volumeRatio ?? 0) - (a.pre.volumeRatio ?? 0) ||
+    b.pre.marketCapRaw - a.pre.marketCapRaw
+  );
+  const top = provisional.slice(0, 10);
+
+  // Fetch Yahoo news ONLY for top 10 (deduped by symbol — already unique)
+  console.log(`[watchlist] Yahoo news fetch count: ${top.length}`);
+  let newsOk = 0;
+  let newsMiss = 0;
+  const news = await Promise.all(top.map((t) => fetchYahooNews(t.gainer.symbol, t.gainer.companyName)));
+
+  // Recompute final flags/score with catalyst info
+  const final: WatchlistCandidate[] = top.map((t, idx) => {
+    const items = news[idx];
+    const hasNews = items.length > 0;
+    if (hasNews) newsOk++; else newsMiss++;
+    const catalystLabel = hasNews ? classifyCatalystFromTitle(items[0].title) : "Not confirmed";
+    const { flags, score } = computeRiskFlagsAndScore(t.pre, hasNews, catalystLabel, t.chart);
+    return {
+      ...t.pre,
+      catalystLabel,
+      catalystHasNews: hasNews,
+      riskFlags: flags,
+      score,
+    };
+  });
+  console.log(`[watchlist] Yahoo news success count: ${newsOk}`);
+  console.log(`[watchlist] Yahoo news not found count: ${newsMiss}`);
+
+  // Final re-sort with updated scores
+  final.sort((a, b) =>
+    b.score - a.score ||
+    (b.riskRewardRaw ?? 0) - (a.riskRewardRaw ?? 0) ||
+    (b.sevenDayPctRaw ?? -999) - (a.sevenDayPctRaw ?? -999) ||
+    (b.volumeRatio ?? 0) - (a.volumeRatio ?? 0) ||
+    b.marketCapRaw - a.marketCapRaw
+  );
+
+  console.log(`[watchlist] score calculation count: ${final.length}`);
+  console.log(`[watchlist] final Best Watchlist Candidates count: ${final.length}`);
+  return final;
+}
+
+// Local copy of analyst-key helper for use during watchlist build (mirrors renderer logic).
+function yahooRatingToKeyLocal(rating?: string): string {
+  const text = String(rating || "").toLowerCase();
+  if (text.includes("strong buy")) return "strong_buy";
+  if (text.includes("buy")) return "buy";
+  if (text.includes("hold")) return "hold";
+  if (text.includes("strong sell")) return "strong_sell";
+  if (text.includes("sell")) return "sell";
+  return "none";
+}
+
+
+
+
+
 
 const YAHOO_QUOTE_SUMMARY = "https://query1.finance.yahoo.com/v10/finance/quoteSummary";
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
