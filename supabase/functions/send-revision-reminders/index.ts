@@ -1857,24 +1857,39 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     if (!cands || cands.length === 0) return "";
     const items = cands.map((c) => {
       const anchor = `news-${c.symbol}`;
-      const catalyst = c.catalystHasNews ? escapeHtml(c.catalystLabel) : "No clear news";
-      const headline = c.catalystHasNews && c.newsHeadline
-        ? `<div style="margin:4px 0 0 0;color:#334155;font-size:13px;line-height:1.5;">${escapeHtml(c.newsHeadline)}</div>`
+      const sourceLine = c.newsSource
+        ? `<div style="margin:4px 0 0 0;color:#64748b;font-size:11px;">Source: ${escapeHtml(c.newsSource)}${c.newsLink ? ` · <a href="${escapeHtml(c.newsLink)}" style="color:#0369a1;text-decoration:none;">Open</a>` : ""}${c.newsPublishedDate ? ` · ${escapeHtml(c.newsPublishedDate)}` : ""}</div>`
         : "";
-      const source = c.catalystHasNews && c.newsSource
-        ? `<div style="margin:4px 0 0 0;color:#64748b;font-size:11px;">Source: ${escapeHtml(c.newsSource)}${c.newsLink ? ` · <a href="${escapeHtml(c.newsLink)}" style="color:#0369a1;text-decoration:none;">Open</a>` : ""}</div>`
-        : "";
+
+      let badge = "";
+      let body = "";
+
+      if (c.catalystConfirmed) {
+        badge = `<div style="margin:4px 0 0 0;color:#0f766e;font-size:12px;font-weight:700;">${escapeHtml(c.catalystLabel)} — <span style="color:#64748b;font-weight:500;">${escapeHtml(c.newsSource || "Gemini grounded search")}</span></div>`;
+        body = `
+          ${c.newsHeadline ? `<div style="margin:4px 0 0 0;color:#0f172a;font-size:13px;line-height:1.5;font-weight:600;">${escapeHtml(c.newsHeadline)}</div>` : ""}
+          ${c.newsSummary ? `<div style="margin:4px 0 0 0;color:#334155;font-size:12px;line-height:1.5;">${escapeHtml(c.newsSummary)}</div>` : ""}
+          ${sourceLine}`;
+      } else if (c.catalystHasNews) {
+        badge = `<div style="margin:4px 0 0 0;color:#b45309;font-size:12px;font-weight:700;">Company news only — <span style="color:#64748b;font-weight:500;">${escapeHtml(c.newsSource || "Gemini grounded search")}</span></div>`;
+        body = `
+          ${c.newsHeadline ? `<div style="margin:4px 0 0 0;color:#0f172a;font-size:13px;line-height:1.5;font-weight:600;">${escapeHtml(c.newsHeadline)}</div>` : ""}
+          <div style="margin:4px 0 0 0;color:#475569;font-size:12px;line-height:1.5;font-style:italic;">Not confirmed as reason for latest move.</div>
+          ${sourceLine}`;
+      } else {
+        badge = `<div style="margin:4px 0 0 0;color:#94a3b8;font-size:12px;font-weight:700;">No clear company news</div>`;
+      }
+
       return `
         <div id="${anchor}" style="padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;margin:0 0 10px 0;">
           <div style="font-weight:800;color:#0f172a;font-size:13px;">${escapeHtml(c.symbol)} — <span style="font-weight:600;color:#334155;">${escapeHtml(c.companyName)}</span></div>
-          <div style="margin:4px 0 0 0;color:${c.catalystHasNews ? "#0f766e" : "#94a3b8"};font-size:12px;font-weight:700;">${catalyst}${c.catalystHasNews && c.newsSource ? ` <span style="color:#64748b;font-weight:500;">— ${escapeHtml(c.newsSource)}</span>` : ""}</div>
-          ${headline}
-          ${source}
+          ${badge}
+          ${body}
         </div>`;
     }).join("");
     return `
       <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:15px;">📰 News Details</h3>
-      <p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">Full news context for each watchlist candidate. Always verify on the source before acting.</p>
+      <p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">📰 = confirmed catalyst explaining the latest move · ◐ = company news only (not confirmed as reason) · — = no clear news. Always verify on the source before acting.</p>
       ${items}`;
   };
 
