@@ -1691,6 +1691,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
 
 
   const watchlistTable = renderWatchlistTable(result.watchlist || []);
+  const newsDetails = renderNewsDetails(result.watchlist || []);
 
 
   return `
