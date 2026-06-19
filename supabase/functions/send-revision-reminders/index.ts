@@ -550,19 +550,17 @@ function computeWatchlistMetrics(
     sevenDaySinceListing = true;
   }
 
-  // 20D trend — closes[len-21] when ≥21 sessions available; else oldest with "Short history"; else N/A.
+  // 20D trend — exact 20 completed sessions back: comparisonIndex = closes.length - 21.
+  // Do NOT fall back to the oldest close (would inflate %). Show N/A when insufficient.
   let twentyDayPctRaw: number | undefined;
   let twentyDayLabel = "N/A";
-  const twentyRefIdx = prevCloseIdx - 20; // 21 indices back from latest reference
-  if (twentyRefIdx >= 0 && closes[twentyRefIdx] > 0) {
-    twentyDayPctRaw = ((latestPrice - closes[twentyRefIdx]) / closes[twentyRefIdx]) * 100;
+  const twentyComparisonIdx = closes.length - 21;
+  if (twentyComparisonIdx >= 0 && closes[twentyComparisonIdx] > 0) {
+    twentyDayPctRaw = ((latestPrice - closes[twentyComparisonIdx]) / closes[twentyComparisonIdx]) * 100;
     if (twentyDayPctRaw >= 15) twentyDayLabel = "Strong uptrend";
     else if (twentyDayPctRaw >= 5) twentyDayLabel = "Uptrend";
     else if (twentyDayPctRaw > -5) twentyDayLabel = "Flat";
     else twentyDayLabel = "Downtrend";
-  } else if (closes.length >= 6 && closes[0] > 0) {
-    twentyDayPctRaw = ((latestPrice - closes[0]) / closes[0]) * 100;
-    twentyDayLabel = "Short history";
   }
 
   // ---- VOLUME STRENGTH ----
