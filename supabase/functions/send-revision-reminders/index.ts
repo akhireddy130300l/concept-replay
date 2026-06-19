@@ -365,6 +365,10 @@ type ChartOHLCV = {
   lows: number[];
   volumes: number[];
   metaPrice?: number;
+  metaDayHigh?: number;
+  metaDayLow?: number;
+  meta52wHigh?: number;
+  meta52wLow?: number;
 };
 
 async function fetchChartOHLCV(symbol: string): Promise<ChartOHLCV | null> {
@@ -377,12 +381,37 @@ async function fetchChartOHLCV(symbol: string): Promise<ChartOHLCV | null> {
     const data = await res.json();
     const result = data?.chart?.result?.[0];
     const q = result?.indicators?.quote?.[0];
-    const closes: number[] = (q?.close ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v));
-    const highs: number[] = (q?.high ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v));
-    const lows: number[] = (q?.low ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v));
-    const volumes: number[] = (q?.volume ?? []).filter((v: any) => typeof v === "number" && Number.isFinite(v) && v > 0);
-    const metaPrice = Number(result?.meta?.regularMarketPrice);
-    return { closes, highs, lows, volumes, metaPrice: Number.isFinite(metaPrice) ? metaPrice : undefined };
+    // Keep arrays index-aligned: drop only rows where close is invalid.
+    const rawC: any[] = q?.close ?? [];
+    const rawH: any[] = q?.high ?? [];
+    const rawL: any[] = q?.low ?? [];
+    const rawV: any[] = q?.volume ?? [];
+    const closes: number[] = [];
+    const highs: number[] = [];
+    const lows: number[] = [];
+    const volumes: number[] = [];
+    for (let i = 0; i < rawC.length; i++) {
+      const c = rawC[i];
+      if (typeof c !== "number" || !Number.isFinite(c)) continue;
+      closes.push(c);
+      highs.push(typeof rawH[i] === "number" && Number.isFinite(rawH[i]) ? rawH[i] : c);
+      lows.push(typeof rawL[i] === "number" && Number.isFinite(rawL[i]) ? rawL[i] : c);
+      volumes.push(typeof rawV[i] === "number" && Number.isFinite(rawV[i]) && rawV[i] > 0 ? rawV[i] : 0);
+    }
+    const meta = result?.meta || {};
+    const metaPrice = Number(meta.regularMarketPrice);
+    const metaDayHigh = Number(meta.regularMarketDayHigh);
+    const metaDayLow = Number(meta.regularMarketDayLow);
+    const meta52wHigh = Number(meta.fiftyTwoWeekHigh);
+    const meta52wLow = Number(meta.fiftyTwoWeekLow);
+    return {
+      closes, highs, lows, volumes,
+      metaPrice: Number.isFinite(metaPrice) ? metaPrice : undefined,
+      metaDayHigh: Number.isFinite(metaDayHigh) ? metaDayHigh : undefined,
+      metaDayLow: Number.isFinite(metaDayLow) ? metaDayLow : undefined,
+      meta52wHigh: Number.isFinite(meta52wHigh) ? meta52wHigh : undefined,
+      meta52wLow: Number.isFinite(meta52wLow) ? meta52wLow : undefined,
+    };
   } catch {
     return null;
   }
