@@ -1709,6 +1709,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(real-time research priority · Yahoo data + Yahoo news)</span></h3>
     <p style="margin:0 0 10px 0;font-size:12px;color:#475569;">Calculated live from Yahoo screener + chart data. Score is research priority only — not a buy or sell recommendation. Always verify news, filings, fundamentals, and risk before making any investment decision.</p>
     ${watchlistTable}
+    ${newsDetails}
 
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🚀 Top 10 Overall Gainers <span style="font-weight:400;color:#64748b;font-size:13px;">(last 1 day · all market caps)</span></h3>
     ${allCards}
