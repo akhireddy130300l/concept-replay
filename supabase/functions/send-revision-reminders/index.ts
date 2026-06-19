@@ -487,6 +487,16 @@ const TICKER_SEARCH_HINTS: Record<string, string> = {
   CIFR: "Cipher Mining bitcoin, data center, HPC, AI hosting, crypto mining, analyst rating",
 };
 
+function getNYDateString(daysAgo = 0): string {
+  const now = new Date();
+  const nyDate = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  nyDate.setDate(nyDate.getDate() - daysAgo);
+  const year = nyDate.getFullYear();
+  const month = String(nyDate.getMonth() + 1).padStart(2, "0");
+  const day = String(nyDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 async function fetchGeminiGroundedNews(
   symbol: string,
   company: string,
@@ -505,14 +515,30 @@ async function fetchGeminiGroundedNews(
     return empty;
   }
 
+  const today = getNYDateString(0);
+  const catalystFrom = getNYDateString(7);
+  const companyNewsFrom = getNYDateString(30);
+
+  console.log(`[watchlist] ${symbol} date window: today=${today} catalystFrom=${catalystFrom} companyNewsFrom=${companyNewsFrom}`);
+
   const sectorHints = TICKER_SEARCH_HINTS[symbol.toUpperCase()] || `${company} latest news, ${symbol} stock catalyst, ${symbol} analyst rating, ${symbol} earnings`;
 
   const prompt = `Find the latest company-specific news or catalyst for this exact stock.
+
+Today's date is ${today}.
 
 Ticker: ${symbol}
 Company: ${company}
 
 Use live Google Search grounding.
+
+Important date rules:
+- For confirmedCatalyst=true, the article must be published between ${catalystFrom} and ${today}.
+- For company-news-only, the article must be published between ${companyNewsFrom} and ${today}.
+- Reject any article before ${companyNewsFrom}.
+- Do not return old articles outside this date range.
+- Do not invent dates.
+- Return exactly one JSON object only.
 
 Search terms:
 ${symbol}
@@ -522,26 +548,24 @@ ${company} stock
 ${sectorHints}
 
 Rules:
-- Prefer company-specific catalyst news from the last 7 calendar days.
-- If no catalyst exists, return latest company-specific news from the last 30 days.
+- Prefer company-specific catalyst news from ${catalystFrom} to ${today}.
+- If no catalyst exists, return latest company-specific news from ${companyNewsFrom} to ${today}.
 - Accept articles that directly mention the ticker or company.
 - Accept articles that explain movement using earnings, analyst price-target changes, index inclusion, product demand, sector demand, contracts, partnerships, M&A, legal/regulatory updates, or company press releases.
 - Reject broad market news unless this company is a main subject.
 - Reject articles about another company unless this company is directly mentioned as part of the same catalyst.
+- Reject all old articles before ${companyNewsFrom}.
 - Do not invent news.
-- Accept valid sources like Barchart, TradingView, StockStory, MarketWatch, FXLeaders, Zacks, StreetInsider, Reuters, CNBC, Bloomberg, Yahoo Finance, Seeking Alpha, Benzinga, Investor's Business Daily, or official company press releases. Do not reject valid news just because the source is not Yahoo or Finnhub.
-- Return JSON only. Return exactly one JSON object. No markdown fences.
+- Return JSON only. No markdown fences.
 
-Case 1 — confirmed company catalyst (last 7 days, explains the move):
-{"relevant": true, "confirmedCatalyst": true, "ticker": "${symbol}", "company": "${company}", "headline": "", "source": "", "url": "", "publishedDate": "YYYY-MM-DD or null", "catalystType": "Earnings | Analyst action | Index inclusion | Product / sector news | M&A | Partnership / contract | Legal / regulatory | Other", "summary": "", "whyAccepted": ""}
+Case 1 — confirmed company catalyst:
+{"relevant": true, "confirmedCatalyst": true, "ticker": "${symbol}", "company": "${company}", "headline": "", "source": "", "url": "", "publishedDate": "YYYY-MM-DD", "catalystType": "Earnings | Analyst action | Index inclusion | Product / sector news | M&A | Partnership / contract | Legal / regulatory | Other", "summary": "", "whyAccepted": ""}
 
-Case 2 — company news only, not confirmed reason for move:
-{"relevant": true, "confirmedCatalyst": false, "ticker": "${symbol}", "company": "${company}", "headline": "", "source": "", "url": "", "publishedDate": "YYYY-MM-DD or null", "catalystType": "Company news only", "summary": "Latest company-specific news found, but not confirmed as the reason for latest move.", "whyAccepted": ""}
+Case 2 — company news only:
+{"relevant": true, "confirmedCatalyst": false, "ticker": "${symbol}", "company": "${company}", "headline": "", "source": "", "url": "", "publishedDate": "YYYY-MM-DD", "catalystType": "Company news only", "summary": "Latest company-specific news found, but not confirmed as the reason for latest move.", "whyAccepted": ""}
 
-Case 3 — no company-specific news:
-{"relevant": false, "confirmedCatalyst": false, "ticker": "${symbol}", "company": "${company}", "headline": "", "source": "", "url": "", "publishedDate": null, "catalystType": "No clear company news", "summary": "No clear company-specific news found.", "whyAccepted": ""}
-
-Important: If relevant=true, headline and url must NOT be empty.`;
+Case 3 — no current company-specific news:
+{"relevant": false, "confirmedCatalyst": false, "ticker": "${symbol}", "company": "${company}", "headline": "", "source": "", "url": "", "publishedDate": null, "catalystType": "No clear company news", "summary": "No current company-specific news found.", "whyAccepted": ""}`;
 
   console.log(`[watchlist] ${symbol} Gemini prompt sent (${prompt.length} chars)`);
 
@@ -567,47 +591,57 @@ Important: If relevant=true, headline and url must NOT be empty.`;
     const text: string = data?.choices?.[0]?.message?.content ?? "";
     console.log(`[watchlist] ${symbol} Gemini raw response: ${text.slice(0, 800)}`);
 
-    // Strip markdown fences if present, then extract JSON object
     const cleaned = text.replace(/```json|```/g, "").trim();
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) {
-      console.log(`[watchlist] ${symbol} Gemini REJECTED: no JSON found in response`);
+      console.log(`[watchlist] ${symbol} Gemini REJECTED rejectionReason="Gemini JSON parsing failed" (no JSON found)`);
       return empty;
     }
     let parsed: any;
     try { parsed = JSON.parse(match[0]); }
     catch (e) {
-      console.log(`[watchlist] ${symbol} Gemini REJECTED: JSON parse error: ${(e as Error).message}`);
+      console.log(`[watchlist] ${symbol} Gemini REJECTED rejectionReason="Gemini JSON parsing failed" error=${(e as Error).message}`);
       return empty;
     }
     console.log(`[watchlist] ${symbol} Gemini parsed JSON: ${JSON.stringify(parsed).slice(0, 500)}`);
 
     const relevant = parsed?.relevant === true;
     if (!relevant) {
-      console.log(`[watchlist] ${symbol} Gemini result: relevant=false (no clear company news)`);
+      console.log(`[watchlist] ${symbol} Gemini final status: no clear news (relevant=false)`);
       return empty;
     }
+
+    let confirmedCatalyst = parsed?.confirmedCatalyst === true;
     const url = String(parsed?.url || "").trim();
     const headline = String(parsed?.headline || "").trim();
     const source = String(parsed?.source || "").trim();
     const summary = String(parsed?.summary || "").trim();
-    const publishedDate = parsed?.publishedDate ? String(parsed.publishedDate) : null;
+    const publishedDate: string | null = parsed?.publishedDate ? String(parsed.publishedDate).trim() : null;
+    let catalystType = String(parsed?.catalystType || "").trim();
 
-    if (!url) {
-      console.log(`[watchlist] ${symbol} Gemini REJECTED: missing url`);
+    const dateOk = publishedDate && /^\d{4}-\d{2}-\d{2}$/.test(publishedDate) && !isNaN(new Date(publishedDate).getTime());
+    console.log(`[watchlist] ${symbol} parsed publishedDate=${publishedDate} dateOk=${dateOk}`);
+    if (!dateOk) {
+      console.log(`[watchlist] ${symbol} Gemini REJECTED rejectionReason="missing or invalid publishedDate"`);
       return empty;
     }
-    if (!headline) {
-      console.log(`[watchlist] ${symbol} Gemini REJECTED: missing headline`);
+    if (publishedDate! < companyNewsFrom) {
+      console.log(`[watchlist] ${symbol} Gemini REJECTED rejectionReason="article too old" publishedDate=${publishedDate} companyNewsFrom=${companyNewsFrom}`);
       return empty;
     }
+    if (confirmedCatalyst && publishedDate! < catalystFrom) {
+      console.log(`[watchlist] ${symbol} Gemini DOWNGRADED rejectionReason="outside catalyst window, downgraded to company news only" publishedDate=${publishedDate} catalystFrom=${catalystFrom}`);
+      confirmedCatalyst = false;
+      catalystType = "Company news only";
+    }
+    if (!headline || !url) {
+      console.log(`[watchlist] ${symbol} Gemini REJECTED rejectionReason="missing headline or url"`);
+      return empty;
+    }
+    if (!catalystType) catalystType = confirmedCatalyst ? "Other" : "Company news only";
 
-    const confirmedCatalyst = parsed?.confirmedCatalyst === true;
-    const catalystType = confirmedCatalyst
-      ? String(parsed?.catalystType || "Other").trim()
-      : "Company news only";
-
-    console.log(`[watchlist] ${symbol} Gemini ACCEPTED: relevant=true confirmedCatalyst=${confirmedCatalyst} headline="${headline}" source="${source}" url="${url}" publishedDate=${publishedDate || "null"}`);
+    const finalStatus = confirmedCatalyst ? "confirmed catalyst" : "company news only";
+    console.log(`[watchlist] ${symbol} Gemini final status: ${finalStatus} headline="${headline}" source="${source}" publishedDate=${publishedDate}`);
 
     return {
       relevant: true,
