@@ -1569,8 +1569,14 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   const rrCell = (c: WatchlistCandidate) => {
     if (c.riskRewardIsBreakout) return `<span style="color:#7c3aed;font-weight:700;">Breakout</span>`;
     if (c.riskRewardRaw === undefined) return `<span style="color:#94a3b8;">N/A</span>`;
-    if (c.riskRewardRaw < 1) return `<span style="color:#b45309;font-weight:700;">Weak</span>`;
-    return `<span style="color:#0f172a;font-weight:700;">${c.riskRewardRaw.toFixed(1)}R</span>`;
+    const r = c.riskRewardRaw;
+    let label: string;
+    let color: string;
+    if (r >= 3) { label = "Strong"; color = "#047857"; }
+    else if (r >= 2) { label = "Good"; color = "#0f766e"; }
+    else if (r >= 1.5) { label = "Okay"; color = "#475569"; }
+    else { label = "Weak"; color = "#b45309"; }
+    return `<span style="color:${color};font-weight:700;">${label} <span style="color:#64748b;font-weight:600;font-size:11px;">(${r.toFixed(2)}R)</span></span>`;
   };
   const resCell = (c: WatchlistCandidate) => {
     if (c.resistanceIsBreakout) return `<span style="color:#7c3aed;font-weight:700;">Breakout</span>`;
@@ -1579,9 +1585,10 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   };
   const supCell = (v: number | undefined) =>
     v === undefined ? `<span style="color:#94a3b8;">N/A</span>` : `$${v.toFixed(2)}`;
-  const catalystCell = (c: WatchlistCandidate) => {
-    if (!c.catalystHasNews) return `<span style="color:#94a3b8;font-style:italic;">Not confirmed</span>`;
-    return `${escapeHtml(c.catalystLabel)} <span style="color:#64748b;">— Yahoo Finance</span>`;
+  const newsCell = (c: WatchlistCandidate) => {
+    if (!c.catalystHasNews) return `<span style="color:#94a3b8;">—</span>`;
+    const anchor = `news-${c.symbol}`;
+    return `<a href="#${anchor}" style="text-decoration:none;color:#0f172a;font-size:14px;" title="${escapeHtml(c.catalystLabel)}">📰</a>`;
   };
   const analystCell = (c: WatchlistCandidate) => {
     if (c.analystKey === "none") return `<span style="color:#94a3b8;font-style:italic;">No coverage</span>`;
@@ -1597,9 +1604,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   };
   const flagsCell = (flags: string[]) => {
     if (!flags.length) return `<span style="color:#94a3b8;">—</span>`;
-    return flags
-      .map((f) => `<span style="display:inline-block;margin:1px 3px 1px 0;padding:1px 6px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:6px;font-size:10px;font-weight:600;white-space:nowrap;">${escapeHtml(f)}</span>`)
-      .join("");
+    return `<span style="color:#991b1b;font-size:11px;font-weight:600;">${escapeHtml(flags.join(" · "))}</span>`;
   };
   const scoreCell = (s: number) => {
     const color = s >= 7.5 ? "#047857" : s >= 5 ? "#0f172a" : "#b45309";
@@ -1624,8 +1629,8 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${volBadge(c.volumeRatio)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${supCell(c.supportRaw)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${resCell(c)}</td>
-          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${rrCell(c)}</td>
-          <td style="padding:10px 8px;text-align:left;font-size:12px;color:#334155;min-width:160px;">${catalystCell(c)}</td>
+          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${rrCell(c)}</td>
+          <td style="padding:10px 8px;text-align:center;font-size:14px;">${newsCell(c)}</td>
           <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${analystCell(c)}</td>
           <td style="padding:10px 8px;text-align:left;font-size:12px;min-width:180px;">${flagsCell(c.riskFlags)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:13px;">${scoreCell(c.score)}</td>
@@ -1641,14 +1646,14 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">TICKER</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">COMPANY</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">PRICE</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">1D</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">7D</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">20D TREND</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">VOL VS AVG</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">SUPPORT</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">RESISTANCE</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">RISK/REWARD</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">NEWS / CATALYST</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">1 SESSION</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">7 SESSIONS</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">20 SESSIONS</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">VOLUME STRENGTH</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">LOWER WATCH AREA</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">UPPER WATCH AREA</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">UPSIDE VS RISK</th>
+              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:center;white-space:nowrap;">NEWS</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">ANALYST</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RISK FLAGS</th>
               <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">SCORE</th>
@@ -1658,6 +1663,32 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
         </table>
       </div>`;
   };
+
+  const renderNewsDetails = (cands: WatchlistCandidate[]) => {
+    if (!cands || cands.length === 0) return "";
+    const items = cands.map((c) => {
+      const anchor = `news-${c.symbol}`;
+      const catalyst = c.catalystHasNews ? escapeHtml(c.catalystLabel) : "No clear news";
+      const headline = c.catalystHasNews && c.newsHeadline
+        ? `<div style="margin:4px 0 0 0;color:#334155;font-size:13px;line-height:1.5;">${escapeHtml(c.newsHeadline)}</div>`
+        : "";
+      const source = c.catalystHasNews && c.newsSource
+        ? `<div style="margin:4px 0 0 0;color:#64748b;font-size:11px;">Source: ${escapeHtml(c.newsSource)}${c.newsLink ? ` · <a href="${escapeHtml(c.newsLink)}" style="color:#0369a1;text-decoration:none;">Open</a>` : ""}</div>`
+        : "";
+      return `
+        <div id="${anchor}" style="padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;margin:0 0 10px 0;">
+          <div style="font-weight:800;color:#0f172a;font-size:13px;">${escapeHtml(c.symbol)} — <span style="font-weight:600;color:#334155;">${escapeHtml(c.companyName)}</span></div>
+          <div style="margin:4px 0 0 0;color:${c.catalystHasNews ? "#0f766e" : "#94a3b8"};font-size:12px;font-weight:700;">${catalyst}${c.catalystHasNews && c.newsSource ? ` <span style="color:#64748b;font-weight:500;">— ${escapeHtml(c.newsSource)}</span>` : ""}</div>
+          ${headline}
+          ${source}
+        </div>`;
+    }).join("");
+    return `
+      <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:15px;">📰 News Details</h3>
+      <p style="margin:0 0 10px 0;font-size:12px;color:#64748b;">Full news context for each watchlist candidate. Always verify on the source before acting.</p>
+      ${items}`;
+  };
+
 
   const watchlistTable = renderWatchlistTable(result.watchlist || []);
 
