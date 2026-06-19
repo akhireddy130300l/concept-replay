@@ -442,15 +442,57 @@ async function fetchYahooNews(symbol: string, company: string): Promise<YahooNew
   }
 }
 
-function classifyCatalystFromTitle(title: string): string {
-  const t = title.toLowerCase();
-  if (/\b(earnings|revenue|profit|eps|guidance)\b/.test(t)) return "Earnings";
-  if (/\b(upgrade|downgrade|price target|analyst)\b/.test(t)) return "Analyst action";
-  if (/\b(fda|trial|clinical|approval|drug|vaccine)\b/.test(t)) return "FDA / clinical";
-  if (/\b(acquisition|merger|buyout)\b/.test(t)) return "M&A";
-  if (/\b(partnership|contract|deal)\b/.test(t)) return "Partnership / contract";
-  if (/\b(launch|product)\b/.test(t)) return "Product news";
-  return "News found";
+function classifyCatalystFromText(headline: string, summary = ""): string {
+  const t = `${headline} ${summary}`.toLowerCase();
+  if (/\b(earnings|revenue|eps|profit|guidance|results)\b/.test(t)) return "Earnings";
+  if (/\b(upgrade|downgrade|price target|analyst|rating)\b/.test(t)) return "Analyst action";
+  if (/\b(fda|clinical|trial|approval|drug|vaccine)\b/.test(t)) return "FDA / clinical";
+  if (/\b(acquisition|merger|buyout|takeover)\b/.test(t)) return "M&A";
+  if (/\b(partnership|contract|deal|agreement)\b/.test(t)) return "Partnership / contract";
+  if (/\b(launch|product|chip|ai|data center|storage|demand)\b/.test(t)) return "Product / sector news";
+  if (/\b(lawsuit|investigation|sec|probe)\b/.test(t)) return "Legal / regulatory";
+  const short = headline.length > 80 ? headline.slice(0, 77) + "…" : headline;
+  return short || "News found";
+}
+
+type FinnhubNewsItem = { headline: string; summary: string; source: string; url: string; datetime: number; related: string };
+
+async function fetchFinnhubCompanyNews(symbol: string, company: string): Promise<FinnhubNewsItem[]> {
+  const token = Deno.env.get("FINNHUB_API_KEY");
+  if (!token) return [];
+  try {
+    const now = new Date();
+    const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const sym = symbol.replace("-", ".");
+    const url = `${FINNHUB_BASE}/company-news?symbol=${encodeURIComponent(sym)}&from=${fmt(from)}&to=${fmt(now)}&token=${token}`;
+    const res = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    const symU = symbol.toUpperCase();
+    const compTokens = company.toLowerCase().split(/\s+/).filter((w) => w.length >= 4).slice(0, 3);
+    const items: FinnhubNewsItem[] = data.map((n: any) => ({
+      headline: String(n?.headline || "").trim(),
+      summary: String(n?.summary || "").trim(),
+      source: String(n?.source || "").trim(),
+      url: String(n?.url || "").trim(),
+      datetime: Number(n?.datetime) || 0,
+      related: String(n?.related || "").toUpperCase(),
+    })).filter((n) => n.headline);
+    // Relevance: related contains symbol, OR headline/summary mentions symbol or company name token
+    const relevant = items.filter((n) => {
+      if (n.related.split(/[,\s]+/).includes(symU)) return true;
+      const text = `${n.headline} ${n.summary}`.toLowerCase();
+      if (new RegExp(`\\b${symU}\\b`, "i").test(text)) return true;
+      if (compTokens.some((w) => text.includes(w))) return true;
+      return false;
+    });
+    relevant.sort((a, b) => b.datetime - a.datetime);
+    return relevant;
+  } catch {
+    return [];
+  }
 }
 
 function analystKeyForGainer(m: MarketGainer, yahooRatingToKey: (r?: string) => string): string {
