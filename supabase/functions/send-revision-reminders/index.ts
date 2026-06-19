@@ -944,8 +944,6 @@ async function buildWatchlistCandidates(
 
   // Fetch Gemini grounded company news for top 10 (one lookup per ticker).
   console.log(`[watchlist] Gemini news fetch count: ${top.length}`);
-  let newsOk = 0;
-  let newsMiss = 0;
   const newsResults = await Promise.all(
     top.map((t) => fetchGeminiGroundedNews(t.gainer.symbol, t.gainer.companyName, {
       latestPrice: t.pre.priceRaw,
