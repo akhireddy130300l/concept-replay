@@ -442,15 +442,57 @@ async function fetchYahooNews(symbol: string, company: string): Promise<YahooNew
   }
 }
 
-function classifyCatalystFromTitle(title: string): string {
-  const t = title.toLowerCase();
-  if (/\b(earnings|revenue|profit|eps|guidance)\b/.test(t)) return "Earnings";
-  if (/\b(upgrade|downgrade|price target|analyst)\b/.test(t)) return "Analyst action";
-  if (/\b(fda|trial|clinical|approval|drug|vaccine)\b/.test(t)) return "FDA / clinical";
-  if (/\b(acquisition|merger|buyout)\b/.test(t)) return "M&A";
-  if (/\b(partnership|contract|deal)\b/.test(t)) return "Partnership / contract";
-  if (/\b(launch|product)\b/.test(t)) return "Product news";
-  return "News found";
+function classifyCatalystFromText(headline: string, summary = ""): string {
+  const t = `${headline} ${summary}`.toLowerCase();
+  if (/\b(earnings|revenue|eps|profit|guidance|results)\b/.test(t)) return "Earnings";
+  if (/\b(upgrade|downgrade|price target|analyst|rating)\b/.test(t)) return "Analyst action";
+  if (/\b(fda|clinical|trial|approval|drug|vaccine)\b/.test(t)) return "FDA / clinical";
+  if (/\b(acquisition|merger|buyout|takeover)\b/.test(t)) return "M&A";
+  if (/\b(partnership|contract|deal|agreement)\b/.test(t)) return "Partnership / contract";
+  if (/\b(launch|product|chip|ai|data center|storage|demand)\b/.test(t)) return "Product / sector news";
+  if (/\b(lawsuit|investigation|sec|probe)\b/.test(t)) return "Legal / regulatory";
+  const short = headline.length > 80 ? headline.slice(0, 77) + "…" : headline;
+  return short || "News found";
+}
+
+type FinnhubNewsItem = { headline: string; summary: string; source: string; url: string; datetime: number; related: string };
+
+async function fetchFinnhubCompanyNews(symbol: string, company: string): Promise<FinnhubNewsItem[]> {
+  const token = Deno.env.get("FINNHUB_API_KEY");
+  if (!token) return [];
+  try {
+    const now = new Date();
+    const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const sym = symbol.replace("-", ".");
+    const url = `${FINNHUB_BASE}/company-news?symbol=${encodeURIComponent(sym)}&from=${fmt(from)}&to=${fmt(now)}&token=${token}`;
+    const res = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    const symU = symbol.toUpperCase();
+    const compTokens = company.toLowerCase().split(/\s+/).filter((w) => w.length >= 4).slice(0, 3);
+    const items: FinnhubNewsItem[] = data.map((n: any) => ({
+      headline: String(n?.headline || "").trim(),
+      summary: String(n?.summary || "").trim(),
+      source: String(n?.source || "").trim(),
+      url: String(n?.url || "").trim(),
+      datetime: Number(n?.datetime) || 0,
+      related: String(n?.related || "").toUpperCase(),
+    })).filter((n) => n.headline);
+    // Relevance: related contains symbol, OR headline/summary mentions symbol or company name token
+    const relevant = items.filter((n) => {
+      if (n.related.split(/[,\s]+/).includes(symU)) return true;
+      const text = `${n.headline} ${n.summary}`.toLowerCase();
+      if (new RegExp(`\\b${symU}\\b`, "i").test(text)) return true;
+      if (compTokens.some((w) => text.includes(w))) return true;
+      return false;
+    });
+    relevant.sort((a, b) => b.datetime - a.datetime);
+    return relevant;
+  } catch {
+    return [];
+  }
 }
 
 function analystKeyForGainer(m: MarketGainer, yahooRatingToKey: (r?: string) => string): string {
@@ -782,32 +824,41 @@ async function buildWatchlistCandidates(
   );
   const top = provisional.slice(0, 10);
 
-  // Fetch Yahoo news ONLY for top 10 (deduped by symbol — already unique)
-  console.log(`[watchlist] Yahoo news fetch count: ${top.length}`);
+  // Fetch Finnhub company news (primary) for top 10
+  console.log(`[watchlist] Finnhub news fetch count: ${top.length}`);
   let newsOk = 0;
   let newsMiss = 0;
-  const news = await Promise.all(top.map((t) => fetchYahooNews(t.gainer.symbol, t.gainer.companyName)));
+  const newsLists = await Promise.all(
+    top.map((t) => fetchFinnhubCompanyNews(t.gainer.symbol, t.gainer.companyName)),
+  );
 
-  // Recompute final flags/score with catalyst info
   const final: WatchlistCandidate[] = top.map((t, idx) => {
-    const items = news[idx];
+    const items = newsLists[idx];
+    console.log(`[watchlist] ${t.gainer.symbol} Finnhub relevant news count: ${items.length}`);
     const hasNews = items.length > 0;
-    if (hasNews) newsOk++; else newsMiss++;
-    const catalystLabel = hasNews ? classifyCatalystFromTitle(items[0].title) : "Not confirmed";
+    if (hasNews) {
+      newsOk++;
+      console.log(`[watchlist] ${t.gainer.symbol} selected Finnhub headline: ${items[0].headline}`);
+    } else {
+      newsMiss++;
+    }
+    const catalystLabel = hasNews
+      ? classifyCatalystFromText(items[0].headline, items[0].summary)
+      : "Not confirmed";
     const { flags, score } = computeRiskFlagsAndScore(t.pre, hasNews, catalystLabel, t.chart);
     return {
       ...t.pre,
       catalystLabel,
       catalystHasNews: hasNews,
-      newsHeadline: hasNews ? items[0].title : "",
-      newsSource: hasNews ? "Yahoo Finance" : "",
-      newsLink: hasNews ? items[0].link : "",
+      newsHeadline: hasNews ? items[0].headline : "",
+      newsSource: hasNews ? "Finnhub" : "",
+      newsLink: hasNews ? items[0].url : "",
       riskFlags: flags,
       score,
     };
   });
-  console.log(`[watchlist] Yahoo news success count: ${newsOk}`);
-  console.log(`[watchlist] Yahoo news not found count: ${newsMiss}`);
+  console.log(`[watchlist] Finnhub news success count: ${newsOk}`);
+  console.log(`[watchlist] No clear news count: ${newsMiss}`);
 
   // Final re-sort with updated scores
   final.sort((a, b) =>
@@ -1706,7 +1757,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       <p style="margin:0;font-size:12px;color:#7c2d12;line-height:1.6;">Stocks are risky. Top gainers can fall just as quickly as they rise, and you may lose money. This email is not investment advice, a recommendation to buy or sell, or a forecast. Always do your own research, check official SEC filings, and consult a licensed financial advisor before making any investment decisions.</p>
     </div>
 
-    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(real-time research priority · Yahoo data + Yahoo news)</span></h3>
+    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(real-time research priority · Yahoo price data + Finnhub news)</span></h3>
     <p style="margin:0 0 10px 0;font-size:12px;color:#475569;">Calculated live from Yahoo screener + chart data. Score is research priority only — not a buy or sell recommendation. Always verify news, filings, fundamentals, and risk before making any investment decision.</p>
     ${watchlistTable}
     ${newsDetails}
