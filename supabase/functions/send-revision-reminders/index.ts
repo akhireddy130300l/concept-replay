@@ -455,43 +455,113 @@ function classifyCatalystFromText(headline: string, summary = ""): string {
   return short || "News found";
 }
 
-type FinnhubNewsItem = { headline: string; summary: string; source: string; url: string; datetime: number; related: string };
+type GeminiNewsResult = {
+  relevant: boolean;
+  ticker: string;
+  company: string;
+  headline: string;
+  source: string;
+  url: string;
+  publishedDate: string | null;
+  catalystType: string;
+  summary: string;
+};
 
-async function fetchFinnhubCompanyNews(symbol: string, company: string): Promise<FinnhubNewsItem[]> {
-  const token = Deno.env.get("FINNHUB_API_KEY");
-  if (!token) return [];
+async function fetchGeminiGroundedNews(symbol: string, company: string): Promise<GeminiNewsResult> {
+  const empty: GeminiNewsResult = {
+    relevant: false, ticker: symbol, company, headline: "", source: "", url: "",
+    publishedDate: null, catalystType: "No clear company news",
+    summary: "No clear company-specific news found in the last 7 days.",
+  };
+  const key = Deno.env.get("LOVABLE_API_KEY");
+  if (!key) {
+    console.log(`[watchlist] ${symbol} Gemini news skipped: missing LOVABLE_API_KEY`);
+    return empty;
+  }
+  const prompt = `Find the latest company-specific news for this exact stock.
+
+Ticker: ${symbol}
+Company: ${company}
+
+Rules:
+- Return only news directly about this company or ticker.
+- Reject broad market news unless the headline clearly mentions this company.
+- Reject unrelated companies.
+- Reject generic market-wrap articles unless this company is a main subject.
+- Prefer news from the last 7 calendar days.
+- If there is no clear company-specific news, return relevant=false.
+- Do not invent news.
+- Return JSON only, no markdown fences, no commentary.
+
+Required JSON schema:
+{"relevant": true, "ticker": "${symbol}", "company": "${company}", "headline": "short headline", "source": "publisher name", "url": "exact article URL", "publishedDate": "YYYY-MM-DD or null", "catalystType": "Earnings | Analyst action | Product / sector news | M&A | Partnership / contract | Legal / regulatory | Market news | Other", "summary": "one short sentence explaining why this matters"}
+
+If no company-specific news exists, return:
+{"relevant": false, "ticker": "${symbol}", "company": "${company}", "headline": "", "source": "", "url": "", "publishedDate": null, "catalystType": "No clear company news", "summary": "No clear company-specific news found in the last 7 days."}`;
+
   try {
-    const now = new Date();
-    const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    const sym = symbol.replace("-", ".");
-    const url = `${FINNHUB_BASE}/company-news?symbol=${encodeURIComponent(sym)}&from=${fmt(from)}&to=${fmt(now)}&token=${token}`;
-    const res = await fetch(url, { headers: { "Accept": "application/json" } });
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!Array.isArray(data)) return [];
-    const symU = symbol.toUpperCase();
-    const compTokens = company.toLowerCase().split(/\s+/).filter((w) => w.length >= 4).slice(0, 3);
-    const items: FinnhubNewsItem[] = data.map((n: any) => ({
-      headline: String(n?.headline || "").trim(),
-      summary: String(n?.summary || "").trim(),
-      source: String(n?.source || "").trim(),
-      url: String(n?.url || "").trim(),
-      datetime: Number(n?.datetime) || 0,
-      related: String(n?.related || "").toUpperCase(),
-    })).filter((n) => n.headline);
-    // Relevance: related contains symbol, OR headline/summary mentions symbol or company name token
-    const relevant = items.filter((n) => {
-      if (n.related.split(/[,\s]+/).includes(symU)) return true;
-      const text = `${n.headline} ${n.summary}`.toLowerCase();
-      if (new RegExp(`\\b${symU}\\b`, "i").test(text)) return true;
-      if (compTokens.some((w) => text.includes(w))) return true;
-      return false;
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [{ role: "user", content: prompt }],
+        tools: [{ google_search: {} }],
+      }),
     });
-    relevant.sort((a, b) => b.datetime - a.datetime);
-    return relevant;
-  } catch {
-    return [];
+    if (!res.ok) {
+      console.log(`[watchlist] ${symbol} Gemini news HTTP ${res.status}`);
+      return empty;
+    }
+    const data = await res.json();
+    const text: string = data?.choices?.[0]?.message?.content ?? "";
+    // Extract JSON object from text (strip fences if any)
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) {
+      console.log(`[watchlist] ${symbol} Gemini news parse failed: no JSON found`);
+      return empty;
+    }
+    let parsed: any;
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch (e) {
+      console.log(`[watchlist] ${symbol} Gemini news JSON parse error`);
+      return empty;
+    }
+    const url = String(parsed?.url || "").trim();
+    const headline = String(parsed?.headline || "").trim();
+    const summary = String(parsed?.summary || "").trim();
+    const relevant = parsed?.relevant === true && !!url && !!headline;
+    // Safety: require headline or summary to mention ticker or first company token
+    if (relevant) {
+      const compToken = company.toLowerCase().split(/\s+/).find((w) => w.length >= 4) || "";
+      const hay = `${headline} ${summary}`.toLowerCase();
+      const symU = symbol.toLowerCase();
+      const mentioned = hay.includes(symU) || (compToken && hay.includes(compToken));
+      if (!mentioned) {
+        console.log(`[watchlist] ${symbol} Gemini news rejected: no ticker/company mention`);
+        return empty;
+      }
+    }
+    return {
+      relevant,
+      ticker: symbol,
+      company,
+      headline: relevant ? headline : "",
+      source: relevant ? String(parsed?.source || "").trim() : "",
+      url: relevant ? url : "",
+      publishedDate: parsed?.publishedDate ? String(parsed.publishedDate) : null,
+      catalystType: relevant ? String(parsed?.catalystType || "Other").trim() : "No clear company news",
+      summary: relevant
+        ? (summary || "Company-specific news found.")
+        : "No clear company-specific news found in the last 7 days.",
+    };
+  } catch (e) {
+    console.log(`[watchlist] ${symbol} Gemini news error: ${(e as Error).message}`);
+    return empty;
   }
 }
 
@@ -550,19 +620,17 @@ function computeWatchlistMetrics(
     sevenDaySinceListing = true;
   }
 
-  // 20D trend — closes[len-21] when ≥21 sessions available; else oldest with "Short history"; else N/A.
+  // 20D trend — exact 20 completed sessions back: comparisonIndex = closes.length - 21.
+  // Do NOT fall back to the oldest close (would inflate %). Show N/A when insufficient.
   let twentyDayPctRaw: number | undefined;
   let twentyDayLabel = "N/A";
-  const twentyRefIdx = prevCloseIdx - 20; // 21 indices back from latest reference
-  if (twentyRefIdx >= 0 && closes[twentyRefIdx] > 0) {
-    twentyDayPctRaw = ((latestPrice - closes[twentyRefIdx]) / closes[twentyRefIdx]) * 100;
+  const twentyComparisonIdx = closes.length - 21;
+  if (twentyComparisonIdx >= 0 && closes[twentyComparisonIdx] > 0) {
+    twentyDayPctRaw = ((latestPrice - closes[twentyComparisonIdx]) / closes[twentyComparisonIdx]) * 100;
     if (twentyDayPctRaw >= 15) twentyDayLabel = "Strong uptrend";
     else if (twentyDayPctRaw >= 5) twentyDayLabel = "Uptrend";
     else if (twentyDayPctRaw > -5) twentyDayLabel = "Flat";
     else twentyDayLabel = "Downtrend";
-  } else if (closes.length >= 6 && closes[0] > 0) {
-    twentyDayPctRaw = ((latestPrice - closes[0]) / closes[0]) * 100;
-    twentyDayLabel = "Short history";
   }
 
   // ---- VOLUME STRENGTH ----
@@ -824,40 +892,38 @@ async function buildWatchlistCandidates(
   );
   const top = provisional.slice(0, 10);
 
-  // Fetch Finnhub company news (primary) for top 10
-  console.log(`[watchlist] Finnhub news fetch count: ${top.length}`);
+  // Fetch Gemini grounded company news for top 10 (one lookup per ticker).
+  console.log(`[watchlist] Gemini news fetch count: ${top.length}`);
   let newsOk = 0;
   let newsMiss = 0;
-  const newsLists = await Promise.all(
-    top.map((t) => fetchFinnhubCompanyNews(t.gainer.symbol, t.gainer.companyName)),
+  const newsResults = await Promise.all(
+    top.map((t) => fetchGeminiGroundedNews(t.gainer.symbol, t.gainer.companyName)),
   );
 
   const final: WatchlistCandidate[] = top.map((t, idx) => {
-    const items = newsLists[idx];
-    console.log(`[watchlist] ${t.gainer.symbol} Finnhub relevant news count: ${items.length}`);
-    const hasNews = items.length > 0;
+    const news = newsResults[idx];
+    const hasNews = news.relevant === true;
     if (hasNews) {
       newsOk++;
-      console.log(`[watchlist] ${t.gainer.symbol} selected Finnhub headline: ${items[0].headline}`);
+      console.log(`[watchlist] ${t.gainer.symbol} Gemini relevant news: ${news.headline} (${news.source})`);
     } else {
       newsMiss++;
+      console.log(`[watchlist] ${t.gainer.symbol} Gemini news: no clear company news`);
     }
-    const catalystLabel = hasNews
-      ? classifyCatalystFromText(items[0].headline, items[0].summary)
-      : "Not confirmed";
+    const catalystLabel = hasNews ? (news.catalystType || "Other") : "Not confirmed";
     const { flags, score } = computeRiskFlagsAndScore(t.pre, hasNews, catalystLabel, t.chart);
     return {
       ...t.pre,
       catalystLabel,
       catalystHasNews: hasNews,
-      newsHeadline: hasNews ? items[0].headline : "",
-      newsSource: hasNews ? "Finnhub" : "",
-      newsLink: hasNews ? items[0].url : "",
+      newsHeadline: hasNews ? (news.summary ? `${news.headline} — ${news.summary}` : news.headline) : "",
+      newsSource: hasNews ? (news.source || "Gemini grounded search") : "",
+      newsLink: hasNews ? news.url : "",
       riskFlags: flags,
       score,
     };
   });
-  console.log(`[watchlist] Finnhub news success count: ${newsOk}`);
+  console.log(`[watchlist] Gemini news success count: ${newsOk}`);
   console.log(`[watchlist] No clear news count: ${newsMiss}`);
 
   // Final re-sort with updated scores
@@ -1757,8 +1823,8 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       <p style="margin:0;font-size:12px;color:#7c2d12;line-height:1.6;">Stocks are risky. Top gainers can fall just as quickly as they rise, and you may lose money. This email is not investment advice, a recommendation to buy or sell, or a forecast. Always do your own research, check official SEC filings, and consult a licensed financial advisor before making any investment decisions.</p>
     </div>
 
-    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(real-time research priority · Yahoo price data + Finnhub news)</span></h3>
-    <p style="margin:0 0 10px 0;font-size:12px;color:#475569;">Calculated live from Yahoo screener + chart data. Score is research priority only — not a buy or sell recommendation. Always verify news, filings, fundamentals, and risk before making any investment decision.</p>
+    <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(real-time research priority · Yahoo price data + Gemini grounded news)</span></h3>
+    <p style="margin:0 0 10px 0;font-size:12px;color:#475569;">Calculated live from Yahoo screener + chart data. News is selected using Gemini with live search grounding. Score is research priority only — not a buy or sell recommendation. Always verify sources, filings, fundamentals, and risk before making any investment decision.</p>
     ${watchlistTable}
     ${newsDetails}
 
