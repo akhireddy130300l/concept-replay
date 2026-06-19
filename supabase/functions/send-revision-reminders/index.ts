@@ -109,6 +109,9 @@ type WatchlistCandidate = {
   analystLabel: string;
   catalystLabel: string;
   catalystHasNews: boolean;
+  newsHeadline: string;
+  newsSource: string;
+  newsLink: string;
   riskFlags: string[];
   score: number;
 };
