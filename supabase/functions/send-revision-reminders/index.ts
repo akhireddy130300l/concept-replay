@@ -632,7 +632,7 @@ function analystLabelForKey(key: string): string {
 function computeWatchlistMetrics(
   gainer: MarketGainer,
   chart: ChartOHLCV,
-): Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "newsHeadline" | "newsSource" | "newsLink" | "riskFlags" | "score"> | null {
+): Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "catalystConfirmed" | "newsHeadline" | "newsSummary" | "newsSource" | "newsLink" | "newsPublishedDate" | "riskFlags" | "score"> | null {
   const closes = chart.closes;
   if (closes.length < 2) return null;
 
