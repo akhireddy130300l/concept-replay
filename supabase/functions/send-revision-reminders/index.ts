@@ -442,37 +442,53 @@ function computeWatchlistMetrics(
   const closes = chart.closes;
   if (closes.length < 2) return null;
 
-  // Latest price: screener -> chart meta -> last close
-  const latestPrice = Number.isFinite(gainer.priceRaw) && gainer.priceRaw > 0
-    ? gainer.priceRaw
-    : (chart.metaPrice ?? closes[closes.length - 1]);
+  // Latest price: prefer chart meta (live regularMarketPrice), else last valid close.
+  // Avoids using a stale gainer.priceRaw when chart already contains today's bar.
+  const lastClose = closes[closes.length - 1];
+  const latestPrice = (Number.isFinite(chart.metaPrice) && (chart.metaPrice as number) > 0)
+    ? (chart.metaPrice as number)
+    : lastClose;
   if (!Number.isFinite(latestPrice) || latestPrice <= 0) return null;
 
-  // 7D
-  let sevenDayPctRaw: number | undefined;
-  let sevenDaySinceListing = false;
-  if (closes.length >= 6) {
-    const c = closes[closes.length - 6];
-    if (c > 0) sevenDayPctRaw = ((latestPrice - c) / c) * 100;
-  } else if (closes.length >= 2) {
-    const c = closes[0];
-    if (c > 0) {
-      sevenDayPctRaw = ((latestPrice - c) / c) * 100;
-      sevenDaySinceListing = true;
-    }
+  // Determine previous trading close: if chart's last close already equals latestPrice
+  // (meta == last bar close, today's bar finalized), prev = closes[len-2]; otherwise prev = last close.
+  const lastIdx = closes.length - 1;
+  const sameDayBar = Math.abs(lastClose - latestPrice) / latestPrice < 0.0005;
+  const prevCloseIdx = sameDayBar ? lastIdx - 1 : lastIdx;
+  const previousTradingClose = prevCloseIdx >= 0 ? closes[prevCloseIdx] : undefined;
+
+  // 1D — always compute from chart for accuracy; fall back to screener if chart insufficient.
+  let oneDayPctRaw: number | undefined;
+  if (previousTradingClose !== undefined && previousTradingClose > 0) {
+    oneDayPctRaw = ((latestPrice - previousTradingClose) / previousTradingClose) * 100;
+  } else if (Number.isFinite(gainer.percentGainRaw)) {
+    oneDayPctRaw = gainer.percentGainRaw;
   }
 
-  // 20D trend
-  const window20 = closes.slice(-20);
+  // 7D — use close 7 indices back from latest price reference (~5 trading sessions ago).
+  let sevenDayPctRaw: number | undefined;
+  let sevenDaySinceListing = false;
+  const sevenRefIdx = prevCloseIdx - 6; // 7 indices back from latest reference
+  if (sevenRefIdx >= 0 && closes[sevenRefIdx] > 0) {
+    sevenDayPctRaw = ((latestPrice - closes[sevenRefIdx]) / closes[sevenRefIdx]) * 100;
+  } else if (closes.length >= 2 && closes[0] > 0) {
+    sevenDayPctRaw = ((latestPrice - closes[0]) / closes[0]) * 100;
+    sevenDaySinceListing = true;
+  }
+
+  // 20D trend — closes[len-21] when ≥21 sessions available; else oldest with "Short history"; else N/A.
   let twentyDayPctRaw: number | undefined;
   let twentyDayLabel = "N/A";
-  if (window20.length >= 2 && window20[0] > 0) {
-    twentyDayPctRaw = ((latestPrice - window20[0]) / window20[0]) * 100;
-    if (window20.length < 6) twentyDayLabel = "Short history";
-    else if (twentyDayPctRaw >= 10) twentyDayLabel = "Strong uptrend";
-    else if (twentyDayPctRaw >= 3) twentyDayLabel = "Uptrend";
-    else if (twentyDayPctRaw > -3) twentyDayLabel = "Flat";
+  const twentyRefIdx = prevCloseIdx - 20; // 21 indices back from latest reference
+  if (twentyRefIdx >= 0 && closes[twentyRefIdx] > 0) {
+    twentyDayPctRaw = ((latestPrice - closes[twentyRefIdx]) / closes[twentyRefIdx]) * 100;
+    if (twentyDayPctRaw >= 15) twentyDayLabel = "Strong uptrend";
+    else if (twentyDayPctRaw >= 5) twentyDayLabel = "Uptrend";
+    else if (twentyDayPctRaw > -5) twentyDayLabel = "Flat";
     else twentyDayLabel = "Downtrend";
+  } else if (closes.length >= 6 && closes[0] > 0) {
+    twentyDayPctRaw = ((latestPrice - closes[0]) / closes[0]) * 100;
+    twentyDayLabel = "Short history";
   }
 
   // Volume ratio (avg from chart volumes last 10, fallback 20)
@@ -522,7 +538,7 @@ function computeWatchlistMetrics(
     companyName: gainer.companyName,
     priceRaw: latestPrice,
     priceFmt: latestPrice.toFixed(2),
-    oneDayPctRaw: Number.isFinite(gainer.percentGainRaw) ? gainer.percentGainRaw : undefined,
+    oneDayPctRaw,
     sevenDayPctRaw,
     sevenDaySinceListing,
     twentyDayPctRaw,
@@ -1533,7 +1549,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
           <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;font-size:12px;">$${escapeHtml(c.priceFmt)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPctSimple(c.oneDayPctRaw)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPctSimple(c.sevenDayPctRaw)}${sevenSuffix}</td>
-          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${trendBadge(c.twentyDayLabel)}</td>
+          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${trendBadge(c.twentyDayLabel)}${c.twentyDayPctRaw !== undefined && Number.isFinite(c.twentyDayPctRaw) ? ` <span style="color:#475569;font-weight:600;font-size:11px;">(${c.twentyDayPctRaw >= 0 ? "+" : ""}${c.twentyDayPctRaw.toFixed(2)}%)</span>` : ""}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${volBadge(c.volumeRatio)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${supCell(c.supportRaw)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${resCell(c)}</td>
