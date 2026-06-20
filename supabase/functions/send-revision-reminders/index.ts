@@ -1989,17 +1989,26 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     if (!cands || cands.length === 0) {
       return `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">Best Watchlist Candidates are unavailable right now.</p>`;
     }
-    const tdBase = "padding:10px 14px;border-right:1px solid #e2e8f0;border-bottom:1px solid #eef2f7;text-align:center;vertical-align:middle;white-space:nowrap;font-size:12px;color:#0f172a;";
-    const tdCompany = "padding:10px 14px;border-right:1px solid #e2e8f0;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:middle;white-space:normal;font-size:12px;color:#334155;";
-    const tdFlags = "padding:10px 14px;border-right:1px solid #e2e8f0;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:middle;white-space:normal;font-size:12px;";
-    const rows = cands.map((c, i) => {
+    // Shared cell metrics so left ticker rows and right main rows align row-for-row.
+    const cellCommon = "padding:10px 14px;line-height:1.25;vertical-align:middle;white-space:nowrap;border-bottom:1px solid #eef2f7;";
+    const tdBase = `${cellCommon}border-right:1px solid #e2e8f0;text-align:center;font-size:12px;color:#0f172a;`;
+    const tdCompany = `${cellCommon}border-right:1px solid #e2e8f0;text-align:left;font-size:12px;color:#334155;`;
+    const tdFlags = `${cellCommon}border-right:1px solid #e2e8f0;text-align:left;font-size:12px;`;
+    const tdTicker = `${cellCommon}text-align:center;font-size:12px;font-weight:800;color:#0f172a;`;
+    const thCommon = "padding:10px 14px;font-size:11px;letter-spacing:0.04em;line-height:1.25;text-align:center;vertical-align:middle;white-space:nowrap;color:#ffffff;background:#0f172a;";
+    const thStyle = `${thCommon}border-right:1px solid rgba(255,255,255,0.12);`;
+    const thTicker = `${thCommon}`;
+
+    const tickerRows: string[] = [];
+    const mainRows: string[] = [];
+    cands.forEach((c, i) => {
       const sevenSuffix = c.sevenDaySinceListing ? `<span style="color:#64748b;font-weight:500;font-size:10px;"> since-listing</span>` : "";
       const isPriority = i < 5;
       const rowBg = isPriority ? (i % 2 === 0 ? "#f0fdf4" : "#ecfdf5") : (i % 2 === 0 ? "#ffffff" : "#f8fafc");
-      return `
+      tickerRows.push(`<tr style="background:${rowBg};"><td style="${tdTicker}">${escapeHtml(c.symbol)}</td></tr>`);
+      mainRows.push(`
         <tr style="background:${rowBg};">
           <td style="${tdBase}font-weight:700;">${isPriority ? `<span style="color:#047857;">#${i + 1}</span>` : `#${i + 1}`}</td>
-          <td class="sticky-ticker" style="${tdBase}font-weight:800;font-size:13px;background:${rowBg};">${escapeHtml(c.symbol)}</td>
           <td style="${tdCompany}">${escapeHtml(c.companyName)}</td>
           <td style="${tdBase}font-weight:600;">$${escapeHtml(c.priceFmt)}</td>
           <td style="${tdBase}">${fmtPctSimple(c.oneDayPctRaw)}</td>
@@ -2015,50 +2024,52 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
           <td style="${tdBase}">${analystCell(c)}</td>
           <td style="${tdFlags}">${flagsCell(c.riskFlags)}</td>
           <td style="${tdBase}font-size:13px;">${scoreCell(c.score)}</td>
-        </tr>`;
-    }).join("");
-    const thStyle = "padding:10px 14px;font-size:11px;letter-spacing:0.04em;line-height:1.25;text-align:center;vertical-align:middle;white-space:nowrap;border-right:1px solid rgba(255,255,255,0.12);";
+        </tr>`);
+    });
+
+    const innerTableStyle = "border-collapse:separate;border-spacing:0;table-layout:auto;font-size:13px;";
     return `
       <p style="margin:0 0 4px 0;color:#475569;font-size:12px;font-weight:600;">Top 5 = highest research priority after momentum, volume, entry quality, and risk checks. Rows 6–20 = extended watchlist.</p>
-      <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns. Ticker column may stay visible in supported email apps.</p>
-      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;border:1px solid #e2e8f0;border-radius:12px;">
-        <style>
-          .sticky-ticker {
-            position: sticky;
-            left: 0;
-            z-index: 3;
-            background: inherit;
-            box-shadow: 2px 0 6px rgba(0, 0, 0, 0.18);
-          }
-          thead .sticky-ticker {
-            z-index: 4;
-          }
-        </style>
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="table-layout:auto;width:max-content;border-collapse:separate;border-spacing:0;font-size:13px;">
-          <thead>
-            <tr style="background:#0f172a;color:#ffffff;">
-              <th style="${thStyle}">RANK</th>
-              <th class="sticky-ticker" style="${thStyle}background:#0f172a;">TICKER</th>
-              <th style="${thStyle}">COMPANY</th>
-              <th style="${thStyle}">PRICE</th>
-              <th style="${thStyle}">1 SESSION</th>
-              <th style="${thStyle}">7 SESSIONS</th>
-              <th style="${thStyle}">20 SESSIONS</th>
-              <th style="${thStyle}">VOLUME STRENGTH</th>
-              <th style="${thStyle}">VOL CONFIRMATION</th>
-              <th style="${thStyle}">MOMENTUM STATUS</th>
-              <th style="${thStyle}">LOWER WATCH AREA</th>
-              <th style="${thStyle}">UPPER WATCH AREA</th>
-              <th style="${thStyle}">UPSIDE VS RISK</th>
-              <th style="${thStyle}">ENTRY STATUS</th>
-              <th style="${thStyle}">ANALYST</th>
-              <th style="${thStyle}">RISK FLAGS</th>
-              <th style="${thStyle}">SCORE</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
+      <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns. TICKER stays visible on the left.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="watchlist-split-wrapper" style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <tr>
+          <td class="watchlist-ticker-side" style="vertical-align:top;width:1%;border-right:2px solid #cbd5e1;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="watchlist-ticker-table" style="${innerTableStyle}">
+              <thead>
+                <tr><th style="${thTicker}">TICKER</th></tr>
+              </thead>
+              <tbody>${tickerRows.join("")}</tbody>
+            </table>
+          </td>
+          <td class="watchlist-scroll-side" style="vertical-align:top;width:100%;">
+            <div class="watchlist-scroll" style="overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="watchlist-main-table" style="${innerTableStyle}width:max-content;">
+                <thead>
+                  <tr>
+                    <th style="${thStyle}">RANK</th>
+                    <th style="${thStyle}">COMPANY</th>
+                    <th style="${thStyle}">PRICE</th>
+                    <th style="${thStyle}">1 SESSION</th>
+                    <th style="${thStyle}">7 SESSIONS</th>
+                    <th style="${thStyle}">20 SESSIONS</th>
+                    <th style="${thStyle}">VOLUME STRENGTH</th>
+                    <th style="${thStyle}">VOL CONFIRMATION</th>
+                    <th style="${thStyle}">MOMENTUM STATUS</th>
+                    <th style="${thStyle}">LOWER WATCH AREA</th>
+                    <th style="${thStyle}">UPPER WATCH AREA</th>
+                    <th style="${thStyle}">UPSIDE VS RISK</th>
+                    <th style="${thStyle}">ENTRY STATUS</th>
+                    <th style="${thStyle}">ANALYST</th>
+                    <th style="${thStyle}">RISK FLAGS</th>
+                    <th style="${thStyle}">SCORE</th>
+                  </tr>
+                </thead>
+                <tbody>${mainRows.join("")}</tbody>
+              </table>
+            </div>
+          </td>
+        </tr>
+      </table>`;
   };
 
 
