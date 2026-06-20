@@ -102,6 +102,7 @@ type WatchlistCandidate = {
   supportRaw: number | undefined;
   resistanceRaw: number | undefined;
   resistanceIsBreakout: boolean;
+  resistanceNoNearby: boolean;
   riskRewardRaw: number | undefined;
   riskRewardIsBreakout: boolean;
   marketCapRaw: number;
