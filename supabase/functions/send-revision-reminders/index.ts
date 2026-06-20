@@ -1999,7 +1999,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       return `
         <tr style="background:${rowBg};">
           <td style="${tdBase}font-weight:700;">${isPriority ? `<span style="color:#047857;">#${i + 1}</span>` : `#${i + 1}`}</td>
-          <td style="${tdBase}font-weight:800;font-size:13px;">${escapeHtml(c.symbol)}</td>
+          <td class="sticky-ticker" style="${tdBase}font-weight:800;font-size:13px;background:${rowBg};">${escapeHtml(c.symbol)}</td>
           <td style="${tdCompany}">${escapeHtml(c.companyName)}</td>
           <td style="${tdBase}font-weight:600;">$${escapeHtml(c.priceFmt)}</td>
           <td style="${tdBase}">${fmtPctSimple(c.oneDayPctRaw)}</td>
