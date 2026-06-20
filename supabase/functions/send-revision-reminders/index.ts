@@ -1990,14 +1990,16 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       return `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">Best Watchlist Candidates are unavailable right now.</p>`;
     }
     // Shared cell metrics so left ticker rows and right main rows align row-for-row.
-    const cellCommon = "padding:10px 14px;line-height:1.25;vertical-align:middle;white-space:nowrap;border-bottom:1px solid #eef2f7;";
+    const ROW_H = 44;
+    const cellCommon = `padding:10px 14px;line-height:1.25;vertical-align:middle;white-space:nowrap;border-bottom:1px solid #eef2f7;height:${ROW_H}px;`;
     const tdBase = `${cellCommon}border-right:1px solid #e2e8f0;text-align:center;font-size:12px;color:#0f172a;`;
     const tdCompany = `${cellCommon}border-right:1px solid #e2e8f0;text-align:left;font-size:12px;color:#334155;`;
     const tdFlags = `${cellCommon}border-right:1px solid #e2e8f0;text-align:left;font-size:12px;`;
     const tdTicker = `${cellCommon}text-align:center;font-size:12px;font-weight:800;color:#0f172a;`;
-    const thCommon = "padding:10px 14px;font-size:11px;letter-spacing:0.04em;line-height:1.25;text-align:center;vertical-align:middle;white-space:nowrap;color:#ffffff;background:#0f172a;";
+    const thCommon = `padding:10px 14px;font-size:11px;letter-spacing:0.04em;line-height:1.25;text-align:center;vertical-align:middle;white-space:nowrap;color:#ffffff;background:#0f172a;height:${ROW_H}px;`;
     const thStyle = `${thCommon}border-right:1px solid rgba(255,255,255,0.12);`;
     const thTicker = `${thCommon}`;
+
 
     const tickerRows: string[] = [];
     const mainRows: string[] = [];
