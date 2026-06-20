@@ -1787,6 +1787,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   };
   const resCell = (c: WatchlistCandidate) => {
     if (c.resistanceIsBreakout) return `<span style="color:#7c3aed;font-weight:700;">Breakout</span>`;
+    if (c.resistanceNoNearby) return `<span style="color:#64748b;font-weight:600;">No nearby resistance</span>`;
     if (c.resistanceRaw === undefined) return `<span style="color:#94a3b8;">N/A</span>`;
     return `$${c.resistanceRaw.toFixed(2)}`;
   };
