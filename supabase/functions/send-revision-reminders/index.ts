@@ -778,10 +778,13 @@ function computeWatchlistMetrics(
   }
 
   // ---- UPPER WATCH AREA (resistance) ----
-  // Prefer nearest previous completed high ABOVE current price.
-  // Fallback to 52-week high. If above both, mark Breakout.
+  // Prefer nearest previous completed high ABOVE current price (last 20 sessions).
+  // Only fall back to 52-week high if it is within 15% above current price.
+  // Otherwise mark as "no nearby resistance" (do NOT treat as Breakout).
+  // True Breakout = price already at/above 52-week high.
   let resistanceRaw: number | undefined;
   let resistanceIsBreakout = false;
+  let resistanceNoNearby = false;
   const highsAll = chart.highs;
   const lastHighExcludeIdx = sameDayBar ? highsAll.length - 1 : -1;
   const prevHighs: number[] = [];
@@ -793,20 +796,28 @@ function computeWatchlistMetrics(
   const highsAbove = prevHighs.filter((h) => h > latestPrice);
   if (highsAbove.length) {
     resistanceRaw = Math.min(...highsAbove);
-  } else if (Number.isFinite(chart.meta52wHigh as number) && (chart.meta52wHigh as number) > latestPrice) {
-    resistanceRaw = chart.meta52wHigh as number;
-  } else if (Number.isFinite(chart.meta52wHigh as number) && (chart.meta52wHigh as number) <= latestPrice) {
-    resistanceIsBreakout = true;
-  } else if (prevHighs.length > 0) {
-    resistanceIsBreakout = true;
+  } else {
+    const m52 = Number(chart.meta52wHigh);
+    if (Number.isFinite(m52) && latestPrice > 0 && m52 <= latestPrice) {
+      // Price at or above 52-week high — genuine breakout
+      resistanceIsBreakout = true;
+    } else if (Number.isFinite(m52) && latestPrice > 0 && (m52 - latestPrice) / latestPrice <= 0.15) {
+      // 52-week high is reasonably close (≤15% above) — use as upper watch area
+      resistanceRaw = m52;
+    } else {
+      // 52-week high too far away or unavailable — no nearby resistance
+      resistanceNoNearby = true;
+    }
   }
 
   // ---- UPSIDE VS RISK ----
+  // Only calculate when BOTH lower watch area exists AND a nearby upper watch area exists.
+  // If true breakout → Breakout. If no nearby resistance → N/A (no R:R bonus).
   let riskRewardRaw: number | undefined;
   let riskRewardIsBreakout = false;
   if (resistanceIsBreakout) {
     riskRewardIsBreakout = true;
-  } else if (supportRaw !== undefined && resistanceRaw !== undefined) {
+  } else if (!resistanceNoNearby && supportRaw !== undefined && resistanceRaw !== undefined) {
     const downside = latestPrice - supportRaw;
     const upside = resistanceRaw - latestPrice;
     if (downside > 0 && upside > 0) riskRewardRaw = upside / downside;
@@ -826,6 +837,7 @@ function computeWatchlistMetrics(
     supportRaw,
     resistanceRaw,
     resistanceIsBreakout,
+    resistanceNoNearby,
     riskRewardRaw,
     riskRewardIsBreakout,
     marketCapRaw: gainer.marketCapRaw,
