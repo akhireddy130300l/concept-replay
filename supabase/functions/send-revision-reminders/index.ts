@@ -2019,7 +2019,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     }).join("");
     const thStyle = "padding:10px 14px;font-size:11px;letter-spacing:0.04em;line-height:1.25;text-align:center;vertical-align:middle;white-space:nowrap;border-right:1px solid rgba(255,255,255,0.12);";
     return `
-      <p style="margin:0 0 4px 0;color:#475569;font-size:12px;font-weight:600;">Top 5 = highest research priority. Rows 6–20 = extended watchlist.</p>
+      <p style="margin:0 0 4px 0;color:#475569;font-size:12px;font-weight:600;">Top 5 = highest research priority after momentum, volume, entry quality, and risk checks. Rows 6–20 = extended watchlist.</p>
       <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns.</p>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;border:1px solid #e2e8f0;border-radius:12px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="table-layout:auto;width:max-content;border-collapse:separate;border-spacing:0;font-size:13px;">
