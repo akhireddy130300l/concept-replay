@@ -997,7 +997,7 @@ async function buildWatchlistCandidates(
     (b.pre.volumeRatio ?? 0) - (a.pre.volumeRatio ?? 0) ||
     b.pre.marketCapRaw - a.pre.marketCapRaw
   );
-  const top = provisional.slice(0, 10);
+  const top = provisional.slice(0, 20);
 
   const final: WatchlistCandidate[] = top.map((t) => {
     const { flags, score } = computeRiskFlagsAndScore(t.pre, false, "No clear company news", t.chart);
