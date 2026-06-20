@@ -102,6 +102,7 @@ type WatchlistCandidate = {
   supportRaw: number | undefined;
   resistanceRaw: number | undefined;
   resistanceIsBreakout: boolean;
+  resistanceNoNearby: boolean;
   riskRewardRaw: number | undefined;
   riskRewardIsBreakout: boolean;
   marketCapRaw: number;
@@ -777,10 +778,13 @@ function computeWatchlistMetrics(
   }
 
   // ---- UPPER WATCH AREA (resistance) ----
-  // Prefer nearest previous completed high ABOVE current price.
-  // Fallback to 52-week high. If above both, mark Breakout.
+  // Prefer nearest previous completed high ABOVE current price (last 20 sessions).
+  // Only fall back to 52-week high if it is within 15% above current price.
+  // Otherwise mark as "no nearby resistance" (do NOT treat as Breakout).
+  // True Breakout = price already at/above 52-week high.
   let resistanceRaw: number | undefined;
   let resistanceIsBreakout = false;
+  let resistanceNoNearby = false;
   const highsAll = chart.highs;
   const lastHighExcludeIdx = sameDayBar ? highsAll.length - 1 : -1;
   const prevHighs: number[] = [];
@@ -792,20 +796,28 @@ function computeWatchlistMetrics(
   const highsAbove = prevHighs.filter((h) => h > latestPrice);
   if (highsAbove.length) {
     resistanceRaw = Math.min(...highsAbove);
-  } else if (Number.isFinite(chart.meta52wHigh as number) && (chart.meta52wHigh as number) > latestPrice) {
-    resistanceRaw = chart.meta52wHigh as number;
-  } else if (Number.isFinite(chart.meta52wHigh as number) && (chart.meta52wHigh as number) <= latestPrice) {
-    resistanceIsBreakout = true;
-  } else if (prevHighs.length > 0) {
-    resistanceIsBreakout = true;
+  } else {
+    const m52 = Number(chart.meta52wHigh);
+    if (Number.isFinite(m52) && latestPrice > 0 && m52 <= latestPrice) {
+      // Price at or above 52-week high — genuine breakout
+      resistanceIsBreakout = true;
+    } else if (Number.isFinite(m52) && latestPrice > 0 && (m52 - latestPrice) / latestPrice <= 0.15) {
+      // 52-week high is reasonably close (≤15% above) — use as upper watch area
+      resistanceRaw = m52;
+    } else {
+      // 52-week high too far away or unavailable — no nearby resistance
+      resistanceNoNearby = true;
+    }
   }
 
   // ---- UPSIDE VS RISK ----
+  // Only calculate when BOTH lower watch area exists AND a nearby upper watch area exists.
+  // If true breakout → Breakout. If no nearby resistance → N/A (no R:R bonus).
   let riskRewardRaw: number | undefined;
   let riskRewardIsBreakout = false;
   if (resistanceIsBreakout) {
     riskRewardIsBreakout = true;
-  } else if (supportRaw !== undefined && resistanceRaw !== undefined) {
+  } else if (!resistanceNoNearby && supportRaw !== undefined && resistanceRaw !== undefined) {
     const downside = latestPrice - supportRaw;
     const upside = resistanceRaw - latestPrice;
     if (downside > 0 && upside > 0) riskRewardRaw = upside / downside;
@@ -825,6 +837,7 @@ function computeWatchlistMetrics(
     supportRaw,
     resistanceRaw,
     resistanceIsBreakout,
+    resistanceNoNearby,
     riskRewardRaw,
     riskRewardIsBreakout,
     marketCapRaw: gainer.marketCapRaw,
@@ -908,7 +921,7 @@ function computeRiskFlagsAndScore(
     if (c.riskRewardRaw >= 2) score += 1.5;
     else if (c.riskRewardRaw >= 1.2) score += 0.75;
     else if (c.riskRewardRaw < 0.8) score -= 1;
-  } else {
+  } else if (!c.resistanceNoNearby) {
     score -= 0.25;
   }
   if (c.analystKey === "strong_buy") score += 1;
@@ -1774,6 +1787,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   };
   const resCell = (c: WatchlistCandidate) => {
     if (c.resistanceIsBreakout) return `<span style="color:#7c3aed;font-weight:700;">Breakout</span>`;
+    if (c.resistanceNoNearby) return `<span style="color:#64748b;font-weight:600;">No nearby resistance</span>`;
     if (c.resistanceRaw === undefined) return `<span style="color:#94a3b8;">N/A</span>`;
     return `$${c.resistanceRaw.toFixed(2)}`;
   };
@@ -1812,48 +1826,50 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     if (!cands || cands.length === 0) {
       return `<p style="margin:0;padding:14px 16px;background:#ffffff;border:1px dashed #e2e8f0;border-radius:12px;color:#64748b;font-size:13px;">Best Watchlist Candidates are unavailable right now.</p>`;
     }
+    const tdBase = "padding:10px 14px;border-right:1px solid #e2e8f0;border-bottom:1px solid #eef2f7;text-align:center;vertical-align:middle;white-space:nowrap;font-size:12px;color:#0f172a;";
+    const tdCompany = "padding:10px 14px;border-right:1px solid #e2e8f0;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:middle;white-space:normal;font-size:12px;color:#334155;";
+    const tdFlags = "padding:10px 14px;border-right:1px solid #e2e8f0;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:middle;white-space:normal;font-size:12px;";
     const rows = cands.map((c, i) => {
       const sevenSuffix = c.sevenDaySinceListing ? `<span style="color:#64748b;font-weight:500;font-size:10px;"> since-listing</span>` : "";
       return `
         <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"};">
-          <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;white-space:nowrap;font-size:12px;">#${i + 1}</td>
-          <td style="padding:10px 8px;font-weight:800;color:#0f172a;text-align:left;white-space:nowrap;font-size:13px;">${escapeHtml(c.symbol)}</td>
-          <td style="padding:10px 8px;color:#334155;text-align:left;white-space:nowrap;font-size:12px;">${escapeHtml(c.companyName)}</td>
-          <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;font-size:12px;">$${escapeHtml(c.priceFmt)}</td>
-          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPctSimple(c.oneDayPctRaw)}</td>
-          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPctSimple(c.sevenDayPctRaw)}${sevenSuffix}</td>
-          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${trendBadge(c.twentyDayLabel)}${c.twentyDayPctRaw !== undefined && Number.isFinite(c.twentyDayPctRaw) ? ` <span style="color:#475569;font-weight:600;font-size:11px;">(${c.twentyDayPctRaw >= 0 ? "+" : ""}${c.twentyDayPctRaw.toFixed(2)}%)</span>` : ""}</td>
-          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${volBadge(c.volumeRatio)}</td>
-          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${supCell(c.supportRaw)}</td>
-          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;color:#0f172a;">${resCell(c)}</td>
-          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${rrCell(c)}</td>
-          
-          <td style="padding:10px 8px;text-align:left;white-space:nowrap;font-size:12px;">${analystCell(c)}</td>
-          <td style="padding:10px 8px;text-align:left;font-size:12px;min-width:180px;">${flagsCell(c.riskFlags)}</td>
-          <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:13px;">${scoreCell(c.score)}</td>
+          <td style="${tdBase}font-weight:700;">#${i + 1}</td>
+          <td style="${tdBase}font-weight:800;font-size:13px;">${escapeHtml(c.symbol)}</td>
+          <td style="${tdCompany}">${escapeHtml(c.companyName)}</td>
+          <td style="${tdBase}font-weight:600;">$${escapeHtml(c.priceFmt)}</td>
+          <td style="${tdBase}">${fmtPctSimple(c.oneDayPctRaw)}</td>
+          <td style="${tdBase}">${fmtPctSimple(c.sevenDayPctRaw)}${sevenSuffix}</td>
+          <td style="${tdBase}">${trendBadge(c.twentyDayLabel)}${c.twentyDayPctRaw !== undefined && Number.isFinite(c.twentyDayPctRaw) ? ` <span style="color:#475569;font-weight:600;font-size:11px;">(${c.twentyDayPctRaw >= 0 ? "+" : ""}${c.twentyDayPctRaw.toFixed(2)}%)</span>` : ""}</td>
+          <td style="${tdBase}">${volBadge(c.volumeRatio)}</td>
+          <td style="${tdBase}">${supCell(c.supportRaw)}</td>
+          <td style="${tdBase}">${resCell(c)}</td>
+          <td style="${tdBase}">${rrCell(c)}</td>
+          <td style="${tdBase}">${analystCell(c)}</td>
+          <td style="${tdFlags}">${flagsCell(c.riskFlags)}</td>
+          <td style="${tdBase}font-size:13px;">${scoreCell(c.score)}</td>
         </tr>`;
     }).join("");
+    const thStyle = "padding:10px 14px;font-size:11px;letter-spacing:0.04em;line-height:1.25;text-align:center;vertical-align:middle;white-space:nowrap;border-right:1px solid rgba(255,255,255,0.12);";
     return `
       <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns.</p>
-      <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;-webkit-overflow-scrolling:touch;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;min-width:1280px;border-collapse:collapse;font-size:13px;">
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;border:1px solid #e2e8f0;border-radius:12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="table-layout:auto;width:max-content;border-collapse:separate;border-spacing:0;font-size:13px;">
           <thead>
             <tr style="background:#0f172a;color:#ffffff;">
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RANK</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">TICKER</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">COMPANY</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">PRICE</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">1 SESSION</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">7 SESSIONS</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">20 SESSIONS</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">VOLUME STRENGTH</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">LOWER WATCH AREA</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">UPPER WATCH AREA</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">UPSIDE VS RISK</th>
-              
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">ANALYST</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:left;white-space:nowrap;">RISK FLAGS</th>
-              <th style="padding:10px 8px;font-size:11px;letter-spacing:0.5px;text-align:right;white-space:nowrap;">SCORE</th>
+              <th style="${thStyle}">RANK</th>
+              <th style="${thStyle}">TICKER</th>
+              <th style="${thStyle}">COMPANY</th>
+              <th style="${thStyle}">PRICE</th>
+              <th style="${thStyle}">1 SESSION</th>
+              <th style="${thStyle}">7 SESSIONS</th>
+              <th style="${thStyle}">20 SESSIONS</th>
+              <th style="${thStyle}">VOLUME STRENGTH</th>
+              <th style="${thStyle}">LOWER WATCH AREA</th>
+              <th style="${thStyle}">UPPER WATCH AREA</th>
+              <th style="${thStyle}">UPSIDE VS RISK</th>
+              <th style="${thStyle}">ANALYST</th>
+              <th style="${thStyle}">RISK FLAGS</th>
+              <th style="${thStyle}">SCORE</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
