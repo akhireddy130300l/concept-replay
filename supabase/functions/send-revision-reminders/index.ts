@@ -1921,11 +1921,11 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   };
   const entryStatus = (c: WatchlistCandidate): string => {
     if (c.resistanceIsBreakout || c.resistanceNoNearby) return "Breakout watch";
-    const r = c.riskRewardRaw;
     const near = isNearResistance(c);
-    if (r !== undefined && r >= 2.0 && !near) return "Good setup";
-    if (r !== undefined && r >= 1.5) return "Fair setup";
     if (near) return "Wait near upper area";
+    const r = c.riskRewardRaw;
+    if (r !== undefined && r >= 2.0) return "Good setup";
+    if (r !== undefined && r >= 1.5) return "Fair setup";
     return "Wait";
   };
   const entryBadge = (c: WatchlistCandidate) => {
