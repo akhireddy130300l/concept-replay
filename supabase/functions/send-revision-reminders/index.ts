@@ -2031,19 +2031,19 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return `
       <p style="margin:0 0 4px 0;color:#475569;font-size:12px;font-weight:600;">Top 5 = highest research priority after momentum, volume, entry quality, and risk checks. Rows 6–20 = extended watchlist.</p>
       <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns. TICKER stays visible on the left.</p>
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="watchlist-split-wrapper" style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="watchlist-split-wrapper" style="width:100%;max-width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;table-layout:fixed;">
         <tr>
-          <td class="watchlist-ticker-side" style="vertical-align:top;width:1%;border-right:2px solid #cbd5e1;">
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="watchlist-ticker-table" style="${innerTableStyle}">
+          <td class="watchlist-ticker-side" width="78" style="vertical-align:top;width:78px;border-right:2px solid #cbd5e1;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="watchlist-ticker-table" style="${innerTableStyle}width:78px;">
               <thead>
                 <tr><th style="${thTicker}">TICKER</th></tr>
               </thead>
               <tbody>${tickerRows.join("")}</tbody>
             </table>
           </td>
-          <td class="watchlist-scroll-side" style="vertical-align:top;width:100%;">
-            <div class="watchlist-scroll" style="overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="watchlist-main-table" style="${innerTableStyle}width:max-content;">
+          <td class="watchlist-scroll-side" style="vertical-align:top;padding:0;">
+            <div class="watchlist-scroll" style="overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;width:100%;max-width:100%;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="watchlist-main-table" style="${innerTableStyle}width:max-content;min-width:100%;">
                 <thead>
                   <tr>
                     <th style="${thStyle}">RANK</th>
@@ -2070,6 +2070,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
           </td>
         </tr>
       </table>`;
+
   };
 
 
