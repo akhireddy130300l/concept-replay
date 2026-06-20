@@ -935,6 +935,16 @@ function computeRiskFlagsAndScore(
   if (flags.includes("High volatility")) score -= 0.25;
   if (flags.includes("Fading from high")) score -= 0.5;
 
+  // Cap score when entry is poor (near resistance AND R:R < 1.0), unless momentum + volume are extremely strong
+  const nearResistance = flags.includes("Near resistance");
+  const extremelyStrong =
+    (c.sevenDayPctRaw ?? 0) >= 20 &&
+    (c.twentyDayPctRaw ?? 0) >= 25 &&
+    (c.volumeRatio ?? 0) >= 2;
+  if (nearResistance && c.riskRewardRaw !== undefined && c.riskRewardRaw < 1.0 && !extremelyStrong) {
+    score = Math.min(score, 8.5);
+  }
+
   score = Math.max(0, Math.min(10, score));
   return { flags, score: Math.round(score * 10) / 10 };
 }
@@ -997,7 +1007,7 @@ async function buildWatchlistCandidates(
     (b.pre.volumeRatio ?? 0) - (a.pre.volumeRatio ?? 0) ||
     b.pre.marketCapRaw - a.pre.marketCapRaw
   );
-  const top = provisional.slice(0, 10);
+  const top = provisional.slice(0, 20);
 
   const final: WatchlistCandidate[] = top.map((t) => {
     const { flags, score } = computeRiskFlagsAndScore(t.pre, false, "No clear company news", t.chart);
@@ -1774,15 +1784,16 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return `<span style="color:${color};font-weight:700;">${r.toFixed(1)}x avg</span>`;
   };
   const rrCell = (c: WatchlistCandidate) => {
-    if (c.riskRewardIsBreakout) return `<span style="color:#7c3aed;font-weight:700;">Breakout</span>`;
+    if (c.riskRewardIsBreakout || c.resistanceNoNearby) {
+      return `<span style="color:#94a3b8;font-weight:600;">N/A</span>`;
+    }
     if (c.riskRewardRaw === undefined) return `<span style="color:#94a3b8;">N/A</span>`;
     const r = c.riskRewardRaw;
     let label: string;
     let color: string;
-    if (r >= 3) { label = "Strong"; color = "#047857"; }
-    else if (r >= 2) { label = "Good"; color = "#0f766e"; }
-    else if (r >= 1.5) { label = "Okay"; color = "#475569"; }
-    else { label = "Weak"; color = "#b45309"; }
+    if (r >= 2.0) { label = "Good setup"; color = "#047857"; }
+    else if (r >= 1.5) { label = "Fair setup"; color = "#0f766e"; }
+    else { label = "Wait"; color = "#b45309"; }
     return `<span style="color:${color};font-weight:700;">${label} <span style="color:#64748b;font-weight:600;font-size:11px;">(${r.toFixed(2)}R)</span></span>`;
   };
   const resCell = (c: WatchlistCandidate) => {
@@ -1793,14 +1804,81 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
   };
   const supCell = (v: number | undefined) =>
     v === undefined ? `<span style="color:#94a3b8;">N/A</span>` : `$${v.toFixed(2)}`;
-  const newsCell = (c: WatchlistCandidate) => {
-    if (!c.catalystHasNews) return `<span style="color:#94a3b8;">—</span>`;
-    const anchor = `news-${c.symbol}`;
-    if (c.catalystConfirmed) {
-      return `<a href="#${anchor}" style="text-decoration:none;color:#0f172a;font-size:14px;" title="${escapeHtml(c.catalystLabel)}">📰</a>`;
-    }
-    return `<a href="#${anchor}" style="text-decoration:none;color:#475569;font-size:14px;" title="Company news only — not confirmed as reason for latest move">◐</a>`;
+
+  // ----- Derived research labels: Momentum / Entry / Volume confirmation -----
+  const momentumStatus = (c: WatchlistCandidate): string => {
+    const s1 = c.oneDayPctRaw;
+    const s7 = c.sevenDayPctRaw;
+    const s20 = c.twentyDayPctRaw;
+    if (s1 === undefined || s7 === undefined || s20 === undefined) return "Mixed";
+    if (s20 > 15 && s7 > 10 && s1 > 5) return "Extended";
+    if (s20 > 10 && s7 > 5 && s1 >= 0) return "Strong trend";
+    if (s20 > 10 && s7 > 0 && s1 < 0) return "Healthy pullback";
+    if (s20 > 0 && s7 < 0) return "Losing momentum";
+    return "Mixed";
   };
+  const momentumBadge = (c: WatchlistCandidate) => {
+    const label = momentumStatus(c);
+    const map: Record<string, { bg: string; color: string }> = {
+      "Extended":         { bg: "#fef3c7", color: "#92400e" },
+      "Strong trend":     { bg: "#dcfce7", color: "#047857" },
+      "Healthy pullback": { bg: "#dbeafe", color: "#1d4ed8" },
+      "Losing momentum":  { bg: "#fee2e2", color: "#b91c1c" },
+      "Mixed":            { bg: "#f1f5f9", color: "#475569" },
+    };
+    const s = map[label];
+    return `<span style="display:inline-block;padding:2px 8px;background:${s.bg};color:${s.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${label}</span>`;
+  };
+
+  const isNearResistance = (c: WatchlistCandidate): boolean => {
+    if (c.resistanceRaw === undefined || c.priceRaw <= 0) return false;
+    return (c.resistanceRaw - c.priceRaw) / c.priceRaw < 0.03;
+  };
+  const entryStatus = (c: WatchlistCandidate): string => {
+    if (c.resistanceIsBreakout || c.resistanceNoNearby) return "Breakout watch";
+    const r = c.riskRewardRaw;
+    const near = isNearResistance(c);
+    if (r !== undefined && r >= 2.0 && !near) return "Good setup";
+    if (r !== undefined && r >= 1.5) return "Fair setup";
+    if (near) return "Wait near upper area";
+    return "Wait";
+  };
+  const entryBadge = (c: WatchlistCandidate) => {
+    const label = entryStatus(c);
+    const map: Record<string, { bg: string; color: string }> = {
+      "Breakout watch":       { bg: "#ede9fe", color: "#6d28d9" },
+      "Good setup":           { bg: "#dcfce7", color: "#047857" },
+      "Fair setup":           { bg: "#ecfccb", color: "#3f6212" },
+      "Wait near upper area": { bg: "#fef3c7", color: "#92400e" },
+      "Wait":                 { bg: "#f1f5f9", color: "#475569" },
+    };
+    const s = map[label] || map["Wait"];
+    return `<span style="display:inline-block;padding:2px 8px;background:${s.bg};color:${s.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${label}</span>`;
+  };
+
+  const volConfirmation = (c: WatchlistCandidate): string => {
+    const s1 = c.oneDayPctRaw;
+    const vr = c.volumeRatio;
+    if (s1 === undefined || vr === undefined) return "Normal";
+    if (s1 > 0 && vr >= 1.3) return "Confirmed";
+    if (s1 < 0 && vr >= 1.3) return "Heavy selling";
+    if (Math.abs(s1) < 1 && vr >= 1.5) return "High activity";
+    if (s1 > 0 && vr < 1.0) return "Weak confirmation";
+    return "Normal";
+  };
+  const volConfirmBadge = (c: WatchlistCandidate) => {
+    const label = volConfirmation(c);
+    const map: Record<string, { bg: string; color: string }> = {
+      "Confirmed":         { bg: "#dcfce7", color: "#047857" },
+      "Heavy selling":     { bg: "#fee2e2", color: "#b91c1c" },
+      "High activity":     { bg: "#dbeafe", color: "#1d4ed8" },
+      "Weak confirmation": { bg: "#fef3c7", color: "#92400e" },
+      "Normal":            { bg: "#f1f5f9", color: "#475569" },
+    };
+    const s = map[label];
+    return `<span style="display:inline-block;padding:2px 8px;background:${s.bg};color:${s.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${label}</span>`;
+  };
+
   const analystCell = (c: WatchlistCandidate) => {
     if (c.analystKey === "none") return `<span style="color:#94a3b8;font-style:italic;">No coverage</span>`;
     const map: Record<string, { bg: string; color: string }> = {
@@ -1831,9 +1909,11 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     const tdFlags = "padding:10px 14px;border-right:1px solid #e2e8f0;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:middle;white-space:normal;font-size:12px;";
     const rows = cands.map((c, i) => {
       const sevenSuffix = c.sevenDaySinceListing ? `<span style="color:#64748b;font-weight:500;font-size:10px;"> since-listing</span>` : "";
+      const isPriority = i < 5;
+      const rowBg = isPriority ? (i % 2 === 0 ? "#f0fdf4" : "#ecfdf5") : (i % 2 === 0 ? "#ffffff" : "#f8fafc");
       return `
-        <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"};">
-          <td style="${tdBase}font-weight:700;">#${i + 1}</td>
+        <tr style="background:${rowBg};">
+          <td style="${tdBase}font-weight:700;">${isPriority ? `<span style="color:#047857;">#${i + 1}</span>` : `#${i + 1}`}</td>
           <td style="${tdBase}font-weight:800;font-size:13px;">${escapeHtml(c.symbol)}</td>
           <td style="${tdCompany}">${escapeHtml(c.companyName)}</td>
           <td style="${tdBase}font-weight:600;">$${escapeHtml(c.priceFmt)}</td>
@@ -1841,9 +1921,12 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
           <td style="${tdBase}">${fmtPctSimple(c.sevenDayPctRaw)}${sevenSuffix}</td>
           <td style="${tdBase}">${trendBadge(c.twentyDayLabel)}${c.twentyDayPctRaw !== undefined && Number.isFinite(c.twentyDayPctRaw) ? ` <span style="color:#475569;font-weight:600;font-size:11px;">(${c.twentyDayPctRaw >= 0 ? "+" : ""}${c.twentyDayPctRaw.toFixed(2)}%)</span>` : ""}</td>
           <td style="${tdBase}">${volBadge(c.volumeRatio)}</td>
+          <td style="${tdBase}">${volConfirmBadge(c)}</td>
+          <td style="${tdBase}">${momentumBadge(c)}</td>
           <td style="${tdBase}">${supCell(c.supportRaw)}</td>
           <td style="${tdBase}">${resCell(c)}</td>
           <td style="${tdBase}">${rrCell(c)}</td>
+          <td style="${tdBase}">${entryBadge(c)}</td>
           <td style="${tdBase}">${analystCell(c)}</td>
           <td style="${tdFlags}">${flagsCell(c.riskFlags)}</td>
           <td style="${tdBase}font-size:13px;">${scoreCell(c.score)}</td>
@@ -1851,6 +1934,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     }).join("");
     const thStyle = "padding:10px 14px;font-size:11px;letter-spacing:0.04em;line-height:1.25;text-align:center;vertical-align:middle;white-space:nowrap;border-right:1px solid rgba(255,255,255,0.12);";
     return `
+      <p style="margin:0 0 4px 0;color:#475569;font-size:12px;font-weight:600;">Top 5 = highest research priority. Rows 6–20 = extended watchlist.</p>
       <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns.</p>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;border:1px solid #e2e8f0;border-radius:12px;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="table-layout:auto;width:max-content;border-collapse:separate;border-spacing:0;font-size:13px;">
@@ -1864,9 +1948,12 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
               <th style="${thStyle}">7 SESSIONS</th>
               <th style="${thStyle}">20 SESSIONS</th>
               <th style="${thStyle}">VOLUME STRENGTH</th>
+              <th style="${thStyle}">VOL CONFIRMATION</th>
+              <th style="${thStyle}">MOMENTUM STATUS</th>
               <th style="${thStyle}">LOWER WATCH AREA</th>
               <th style="${thStyle}">UPPER WATCH AREA</th>
               <th style="${thStyle}">UPSIDE VS RISK</th>
+              <th style="${thStyle}">ENTRY STATUS</th>
               <th style="${thStyle}">ANALYST</th>
               <th style="${thStyle}">RISK FLAGS</th>
               <th style="${thStyle}">SCORE</th>
