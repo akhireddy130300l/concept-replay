@@ -1999,7 +1999,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       return `
         <tr style="background:${rowBg};">
           <td style="${tdBase}font-weight:700;">${isPriority ? `<span style="color:#047857;">#${i + 1}</span>` : `#${i + 1}`}</td>
-          <td style="${tdBase}font-weight:800;font-size:13px;">${escapeHtml(c.symbol)}</td>
+          <td class="sticky-ticker" style="${tdBase}font-weight:800;font-size:13px;background:${rowBg};">${escapeHtml(c.symbol)}</td>
           <td style="${tdCompany}">${escapeHtml(c.companyName)}</td>
           <td style="${tdBase}font-weight:600;">$${escapeHtml(c.priceFmt)}</td>
           <td style="${tdBase}">${fmtPctSimple(c.oneDayPctRaw)}</td>
@@ -2020,13 +2020,25 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     const thStyle = "padding:10px 14px;font-size:11px;letter-spacing:0.04em;line-height:1.25;text-align:center;vertical-align:middle;white-space:nowrap;border-right:1px solid rgba(255,255,255,0.12);";
     return `
       <p style="margin:0 0 4px 0;color:#475569;font-size:12px;font-weight:600;">Top 5 = highest research priority after momentum, volume, entry quality, and risk checks. Rows 6–20 = extended watchlist.</p>
-      <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns.</p>
+      <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">👆 Swipe left/right to view all columns. Ticker column may stay visible in supported email apps.</p>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;border:1px solid #e2e8f0;border-radius:12px;">
+        <style>
+          .sticky-ticker {
+            position: sticky;
+            left: 0;
+            z-index: 3;
+            background: inherit;
+            box-shadow: 2px 0 6px rgba(0, 0, 0, 0.18);
+          }
+          thead .sticky-ticker {
+            z-index: 4;
+          }
+        </style>
         <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="table-layout:auto;width:max-content;border-collapse:separate;border-spacing:0;font-size:13px;">
           <thead>
             <tr style="background:#0f172a;color:#ffffff;">
               <th style="${thStyle}">RANK</th>
-              <th style="${thStyle}">TICKER</th>
+              <th class="sticky-ticker" style="${thStyle}background:#0f172a;">TICKER</th>
               <th style="${thStyle}">COMPANY</th>
               <th style="${thStyle}">PRICE</th>
               <th style="${thStyle}">1 SESSION</th>
