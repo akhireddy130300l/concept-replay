@@ -921,7 +921,7 @@ function computeRiskFlagsAndScore(
     if (c.riskRewardRaw >= 2) score += 1.5;
     else if (c.riskRewardRaw >= 1.2) score += 0.75;
     else if (c.riskRewardRaw < 0.8) score -= 1;
-  } else {
+  } else if (!c.resistanceNoNearby) {
     score -= 0.25;
   }
   if (c.analystKey === "strong_buy") score += 1;
