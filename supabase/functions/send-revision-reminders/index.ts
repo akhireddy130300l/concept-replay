@@ -935,6 +935,16 @@ function computeRiskFlagsAndScore(
   if (flags.includes("High volatility")) score -= 0.25;
   if (flags.includes("Fading from high")) score -= 0.5;
 
+  // Cap score when entry is poor (near resistance AND R:R < 1.0), unless momentum + volume are extremely strong
+  const nearResistance = flags.includes("Near resistance");
+  const extremelyStrong =
+    (c.sevenDayPctRaw ?? 0) >= 20 &&
+    (c.twentyDayPctRaw ?? 0) >= 25 &&
+    (c.volumeRatio ?? 0) >= 2;
+  if (nearResistance && c.riskRewardRaw !== undefined && c.riskRewardRaw < 1.0 && !extremelyStrong) {
+    score = Math.min(score, 8.5);
+  }
+
   score = Math.max(0, Math.min(10, score));
   return { flags, score: Math.round(score * 10) / 10 };
 }
