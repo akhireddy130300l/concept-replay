@@ -1669,12 +1669,12 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
 
 
   // Build Best Watchlist Candidates (real-time research table) — best effort.
+  // Candidate universe is built independently from the six Yahoo screeners,
+  // NOT from the three displayed market-mover tables.
   let watchlist: WatchlistCandidate[] = [];
   try {
-    watchlist = await buildWatchlistCandidates(
-      [...movers, ...largeCapMovers, ...largeCapWeekly],
-      yahooRatingToKeyLocal,
-    );
+    const researchPool = await buildResearchCandidatePool();
+    watchlist = await buildWatchlistCandidates(researchPool, yahooRatingToKeyLocal);
   } catch (err) {
     console.error("Failed to build watchlist candidates:", err);
   }
