@@ -2202,17 +2202,24 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return `<span style="color:${color};font-weight:700;">${r.toFixed(1)}x avg</span>`;
   };
   const rrCell = (c: WatchlistCandidate) => {
-    if (c.riskRewardIsBreakout || c.resistanceNoNearby) {
+    if (c.riskRewardIsBreakout) {
       return `<span style="color:#94a3b8;font-weight:600;">N/A</span>`;
+    }
+    if (c.resistanceNoNearby) {
+      return `<span style="color:#64748b;font-weight:600;">N/A — no nearby resistance</span>`;
+    }
+    if (c.rrSupportTooClose) {
+      return `<span style="color:#b45309;font-weight:600;">N/A — support too close</span>`;
     }
     if (c.riskRewardRaw === undefined) return `<span style="color:#94a3b8;">N/A</span>`;
     const r = c.riskRewardRaw;
+    const display = r >= 5 ? "5.00R+" : `${r.toFixed(2)}R`;
     let label: string;
     let color: string;
-    if (r >= 2.0) { label = "Good setup"; color = "#047857"; }
-    else if (r >= 1.5) { label = "Fair setup"; color = "#0f766e"; }
-    else { label = "Wait"; color = "#b45309"; }
-    return `<span style="color:${color};font-weight:700;">${label} <span style="color:#64748b;font-weight:600;font-size:11px;">(${r.toFixed(2)}R)</span></span>`;
+    if (r >= 2.0) { label = "Attractive R/R"; color = "#047857"; }
+    else if (r >= 1.5) { label = "Fair R/R"; color = "#0f766e"; }
+    else { label = "Poor R/R"; color = "#b45309"; }
+    return `<span style="color:${color};font-weight:700;">${label} <span style="color:#64748b;font-weight:600;font-size:11px;">(${display})</span></span>`;
   };
   const resCell = (c: WatchlistCandidate) => {
     if (c.resistanceIsBreakout) return `<span style="color:#7c3aed;font-weight:700;">Breakout</span>`;
