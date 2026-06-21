@@ -7,7 +7,7 @@ const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const FUNCTION_VERSION = "market-gainers-v9-visible-email-debug-2026-06-12";
+const FUNCTION_VERSION = "research-v10-corrected-rr-no-preselect-2026-06-21";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
