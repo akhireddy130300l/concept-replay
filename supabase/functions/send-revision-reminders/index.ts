@@ -309,22 +309,10 @@ async function buildResearchCandidatePool(): Promise<MarketGainer[]> {
     });
   }
   console.log(`[research] Symbols after basic filters: ${filtered.length}`);
+  console.log(`[research] Candidates eligible for deep analysis: ${filtered.length}`);
 
-  // Lightweight pre-score using only screener-quote fields.
-  const scored = filtered.map((f) => {
-    let pre = 0;
-    pre += Math.max(-3, Math.min(6, f.chgPct * 0.4));
-    pre += Math.min(4, Math.log10(Math.max(1, f.volume / 250_000)) * 1.5);
-    if (f.mcap >= 1e9) pre += Math.min(2.5, Math.log10(f.mcap / 1e9) * 1.2);
-    // Small overlap bonus only — never the main driver.
-    pre += Math.min(1.5, Math.max(0, f.sourceScreeners.length - 1) * 0.6);
-    if (f.sourceScreeners.includes("most_actives")) pre += 0.8;
-    if (f.sourceScreeners.some((s) => RESEARCH_VALUE_GROWTH_SCREENERS.has(s))) pre += 0.5;
-    return { ...f, preScore: pre };
-  });
-  scored.sort((a, b) => b.preScore - a.preScore);
-  const top = scored.slice(0, RESEARCH_DEEP_ANALYSIS_LIMIT);
-  console.log(`[research] Symbols selected for deep analysis: ${top.length}`);
+  // Phase 2: No lightweight preselection. Every eligible candidate proceeds to deep analysis.
+  const top = filtered;
 
   // Convert to MarketGainer shape so the existing watchlist pipeline can consume it.
   return top.map(({ sym, q, sourceScreeners, price, volume, mcap, chgPct }) => {
