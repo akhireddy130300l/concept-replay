@@ -183,6 +183,165 @@ async function fetchYahooScreenerQuotes(scrId: string, count = 100): Promise<Scr
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Research candidate universe — built from six Yahoo predefined screeners.
+// Used ONLY for the "Best Watchlist Candidates" research table. The three
+// fixed market-mover tables continue to use their own data sources above.
+// ─────────────────────────────────────────────────────────────────────────
+const RESEARCH_SCREENERS = [
+  "day_gainers",
+  "most_actives",
+  "day_losers",
+  "growth_technology_stocks",
+  "undervalued_growth_stocks",
+  "undervalued_large_caps",
+];
+const RESEARCH_DEEP_ANALYSIS_LIMIT = 200;
+const RESEARCH_VALUE_GROWTH_SCREENERS = new Set([
+  "growth_technology_stocks",
+  "undervalued_growth_stocks",
+  "undervalued_large_caps",
+]);
+
+async function fetchResearchScreenerRaw(
+  scrId: string,
+): Promise<{ scrId: string; quotes: any[]; status: number; total?: number; ms: number; error?: string }> {
+  const start = Date.now();
+  const url = `${YAHOO_SCREENER_ENDPOINT}?formatted=true&lang=en-US&region=US&scrIds=${encodeURIComponent(scrId)}&count=100`;
+  try {
+    const res = await fetch(url, {
+      headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0 LearnLoop/1.0" },
+    });
+    const ms = Date.now() - start;
+    if (!res.ok) {
+      console.warn(`[research:${scrId}] HTTP ${res.status} in ${ms}ms`);
+      return { scrId, quotes: [], status: res.status, ms, error: `HTTP ${res.status}` };
+    }
+    let data: any;
+    try {
+      data = await res.json();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`[research:${scrId}] malformed JSON in ${ms}ms: ${msg}`);
+      return { scrId, quotes: [], status: res.status, ms, error: `malformed JSON: ${msg}` };
+    }
+    const result = data?.finance?.result?.[0];
+    const quotes = Array.isArray(result?.quotes) ? result.quotes : [];
+    const total = Number(result?.total);
+    console.log(
+      `[research:${scrId}] HTTP ${res.status} quotes=${quotes.length} total=${Number.isFinite(total) ? total : "n/a"} in ${ms}ms`,
+    );
+    return { scrId, quotes, status: res.status, total: Number.isFinite(total) ? total : undefined, ms };
+  } catch (e) {
+    const ms = Date.now() - start;
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[research:${scrId}] error in ${ms}ms: ${msg}`);
+    return { scrId, quotes: [], status: 0, ms, error: msg };
+  }
+}
+
+async function buildResearchCandidatePool(): Promise<MarketGainer[]> {
+  const settled = await Promise.allSettled(RESEARCH_SCREENERS.map((s) => fetchResearchScreenerRaw(s)));
+  const merged = new Map<string, { q: any; sourceScreeners: string[] }>();
+  let rawCount = 0;
+  let okScreeners = 0;
+  let failedScreeners = 0;
+
+  for (const s of settled) {
+    if (s.status !== "fulfilled") {
+      failedScreeners++;
+      console.warn(`[research] screener promise rejected:`, s.reason);
+      continue;
+    }
+    if (s.value.error) failedScreeners++;
+    else okScreeners++;
+    const { scrId, quotes } = s.value;
+    for (const q of quotes) {
+      rawCount++;
+      const sym = String(q?.symbol || "").trim().toUpperCase();
+      if (!sym) continue;
+      const prev = merged.get(sym);
+      if (prev) {
+        if (!prev.sourceScreeners.includes(scrId)) prev.sourceScreeners.push(scrId);
+        // Backfill any missing fields from the later record without overwriting good values.
+        for (const [k, v] of Object.entries(q)) {
+          if (v === undefined || v === null) continue;
+          if ((prev.q as any)[k] === undefined || (prev.q as any)[k] === null) (prev.q as any)[k] = v;
+        }
+      } else {
+        merged.set(sym, { q: { ...q }, sourceScreeners: [scrId] });
+      }
+    }
+  }
+  console.log(`[research] Screeners OK: ${okScreeners}, failed: ${failedScreeners}`);
+  console.log(`[research] Raw screener rows: ${rawCount}`);
+  console.log(`[research] Unique symbols after dedupe: ${merged.size}`);
+
+  // Basic filters
+  const filtered: Array<{
+    sym: string; q: any; sourceScreeners: string[];
+    price: number; volume: number; mcap: number; chgPct: number;
+  }> = [];
+  for (const [sym, { q, sourceScreeners }] of merged.entries()) {
+    const price = getRawNumber(q.regularMarketPrice);
+    const volume = getRawNumber(q.regularMarketVolume);
+    const mcap = getRawNumber(q.marketCap);
+    const chgPct = getRawNumber(q.regularMarketChangePercent);
+    const qt = String(q.quoteType || "").toUpperCase();
+    // Exclude obvious non-equity instruments when quoteType is present.
+    if (qt && qt !== "EQUITY") continue;
+    if (!Number.isFinite(price) || price < 2) continue;
+    if (!Number.isFinite(volume) || volume < 250_000) continue;
+    if (Number.isFinite(mcap) && mcap < 0) continue;
+    // Exclude extremely illiquid penny-spike pattern (low price + low dollar-volume).
+    if (price < 5 && volume * price < 2_000_000) continue;
+    filtered.push({
+      sym, q, sourceScreeners,
+      price, volume,
+      mcap: Number.isFinite(mcap) ? mcap : 0,
+      chgPct: Number.isFinite(chgPct) ? chgPct : 0,
+    });
+  }
+  console.log(`[research] Symbols after basic filters: ${filtered.length}`);
+
+  // Lightweight pre-score using only screener-quote fields.
+  const scored = filtered.map((f) => {
+    let pre = 0;
+    pre += Math.max(-3, Math.min(6, f.chgPct * 0.4));
+    pre += Math.min(4, Math.log10(Math.max(1, f.volume / 250_000)) * 1.5);
+    if (f.mcap >= 1e9) pre += Math.min(2.5, Math.log10(f.mcap / 1e9) * 1.2);
+    // Small overlap bonus only — never the main driver.
+    pre += Math.min(1.5, Math.max(0, f.sourceScreeners.length - 1) * 0.6);
+    if (f.sourceScreeners.includes("most_actives")) pre += 0.8;
+    if (f.sourceScreeners.some((s) => RESEARCH_VALUE_GROWTH_SCREENERS.has(s))) pre += 0.5;
+    return { ...f, preScore: pre };
+  });
+  scored.sort((a, b) => b.preScore - a.preScore);
+  const top = scored.slice(0, RESEARCH_DEEP_ANALYSIS_LIMIT);
+  console.log(`[research] Symbols selected for deep analysis: ${top.length}`);
+
+  // Convert to MarketGainer shape so the existing watchlist pipeline can consume it.
+  return top.map(({ sym, q, sourceScreeners, price, volume, mcap, chgPct }) => {
+    const mover: MarketGainer = {
+      symbol: sym,
+      companyName: String(q.shortName || q.longName || q.displayName || sym).trim(),
+      price: getFormattedValue(q.regularMarketPrice),
+      percentGain: getFormattedValue(q.regularMarketChangePercent),
+      volume: getFormattedValue(q.regularMarketVolume),
+      marketCap: getFormattedValue(q.marketCap),
+      exchange: String(q.fullExchangeName || q.exchange || "N/A").trim(),
+      session: getMarketSession(q.marketState),
+      priceRaw: price,
+      percentGainRaw: chgPct,
+      volumeRaw: volume,
+      marketCapRaw: mcap,
+      averageAnalystRating: q.averageAnalystRating,
+    };
+    (mover as any).sourceScreeners = sourceScreeners;
+    return mover;
+  });
+}
+
 async function discoverLargeCapUniverse(): Promise<Map<string, ScreenerQuote>> {
   const lists = await Promise.all(YAHOO_LARGE_CAP_SCREENERS.map((s) => fetchYahooScreenerQuotes(s, 100)));
   const map = new Map<string, ScreenerQuote>();
