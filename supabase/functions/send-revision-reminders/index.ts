@@ -1346,56 +1346,66 @@ async function buildWatchlistCandidates(
   console.log(`[watchlist] candidate universe count: ${allMovers.length}`);
   console.log(`[watchlist] deduplicated symbol count: ${dedup.size}`);
 
-  // Fetch charts with controlled concurrency (8 in-flight) and a single retry.
+  // Fetch charts with controlled concurrency (8 in-flight). No hidden top-N cap.
   const entries = Array.from(dedup.entries());
   const CHUNK = 8;
   type PreMetrics = NonNullable<ReturnType<typeof computeWatchlistMetrics>>;
-  const initial: Array<{ pre: PreMetrics; chart: ChartOHLCV; gainer: MarketGainer }> = [];
+  const initial: Array<{ pre: PreMetrics; chart: ChartOHLCV; gainer: MarketGainer; sourceScreeners: string[] }> = [];
+  let chartAttempted = 0;
   let chartOk = 0;
   let chartFail = 0;
+  let metricsOk = 0;
+  let metricsFail = 0;
   let supResCount = 0;
+  const t0 = Date.now();
 
   for (let i = 0; i < entries.length; i += CHUNK) {
     const slice = entries.slice(i, i + CHUNK);
-    const results = await Promise.all(slice.map(async ([sym, g]) => {
-      const chart = await fetchChartOHLCVWithRetry(sym, 1);
+    const results = await Promise.allSettled(slice.map(async ([sym, g]) => {
+      chartAttempted++;
+      const chart = await fetchChartOHLCVWithRetry(sym, 2);
       return { sym, g, chart };
     }));
-    for (const { sym, g, chart } of results) {
-      if (!chart) { chartFail++; console.warn(`[watchlist] chart failed for ${sym}`); continue; }
+    for (const r of results) {
+      if (r.status !== "fulfilled") { chartFail++; continue; }
+      const { sym, g, chart } = r.value;
+      if (!chart) {
+        chartFail++;
+        if (RESEARCH_DIAGNOSTIC_SYMBOLS.has(sym)) console.warn(`[research:${sym}] chart fetch failed after retries`);
+        continue;
+      }
       chartOk++;
       const pre = computeWatchlistMetrics(g, chart);
-      if (!pre) continue;
+      if (!pre) {
+        metricsFail++;
+        if (RESEARCH_DIAGNOSTIC_SYMBOLS.has(sym)) console.warn(`[research:${sym}] metrics calculation failed`);
+        continue;
+      }
+      metricsOk++;
       if (pre.supportRaw !== undefined || pre.resistanceRaw !== undefined || pre.resistanceIsBreakout) supResCount++;
       const key = analystKeyForGainer(g, yahooRatingToKey);
       pre.analystKey = key;
       pre.analystLabel = analystLabelForKey(key);
-      initial.push({ pre, chart, gainer: g });
+      const sourceScreeners = ((g as any).sourceScreeners as string[] | undefined) ?? [];
+      initial.push({ pre, chart, gainer: g, sourceScreeners });
     }
   }
+  console.log(`[watchlist] Chart requests attempted: ${chartAttempted}`);
   console.log(`[watchlist] Successful chart analyses: ${chartOk}`);
   console.log(`[watchlist] Failed chart analyses: ${chartFail}`);
+  console.log(`[watchlist] Metrics calculations succeeded: ${metricsOk}`);
+  console.log(`[watchlist] Metrics calculations failed: ${metricsFail}`);
   console.log(`[watchlist] support/resistance calculation count: ${supResCount}`);
 
-  // Compute scores
-  const provisional = initial.map(({ pre, chart, gainer }) => {
-    const { flags, score } = computeRiskFlagsAndScore(pre, false, "Not confirmed", chart);
-    return { pre, chart, gainer, flags, score };
-  });
-
-  provisional.sort((a, b) =>
-    b.score - a.score ||
-    (b.pre.riskRewardRaw ?? 0) - (a.pre.riskRewardRaw ?? 0) ||
-    (b.pre.sevenDayPctRaw ?? -999) - (a.pre.sevenDayPctRaw ?? -999) ||
-    (b.pre.volumeRatio ?? 0) - (a.pre.volumeRatio ?? 0) ||
-    b.pre.marketCapRaw - a.pre.marketCapRaw
-  );
-  const top = provisional.slice(0, 20);
-
-  const final: WatchlistCandidate[] = top.map((t) => {
-    const { flags, score } = computeRiskFlagsAndScore(t.pre, false, "No clear company news", t.chart);
-    return {
-      ...t.pre,
+  // Score every successfully analyzed candidate (no preliminary top-N slice).
+  const scored = initial.map(({ pre, chart, gainer, sourceScreeners }) => {
+    const result = computeRiskFlagsAndScore(pre, false, "No clear company news", chart, undefined, sourceScreeners);
+    const decorated: WatchlistCandidate = {
+      ...pre,
+      volumeConfirmationLabel: result.volumeConfirmationLabel,
+      candidateType: result.candidateType,
+      entryStatusLabel: result.entryStatusLabel,
+      reversalConfirmed: result.reversalConfirmed,
       catalystLabel: "",
       catalystHasNews: false,
       catalystConfirmed: false,
@@ -1404,20 +1414,46 @@ async function buildWatchlistCandidates(
       newsSource: "",
       newsLink: "",
       newsPublishedDate: null,
-      riskFlags: flags,
-      score,
+      riskFlags: result.flags,
+      score: result.score,
     };
+    return decorated;
   });
+  console.log(`[watchlist] Candidates receiving final scores: ${scored.length}`);
 
-  final.sort((a, b) =>
+  // Phase 4: deterministic ranking AFTER complete analysis.
+  const entryRank: Record<string, number> = {
+    "Good setup": 0,
+    "Fair setup": 1,
+    "Breakout watch": 2,
+    "Reversal watch": 3,
+    "Wait near upper area": 4,
+    "Wait": 5,
+  };
+  const volRank: Record<string, number> = {
+    "Strong bullish confirmation": 0,
+    "Bullish confirmation": 1,
+    "High activity": 2,
+    "Normal": 3,
+    "Normal pullback": 4,
+    "Weak confirmation": 5,
+    "Heavy selling": 6,
+  };
+  const seriousFlags = new Set(["Heavy selling", "Fading from high", "Very overbought", "Big one-day move"]);
+  const seriousCount = (c: WatchlistCandidate) => c.riskFlags.filter((f) => seriousFlags.has(f)).length;
+  scored.sort((a, b) =>
     b.score - a.score ||
+    (entryRank[a.entryStatusLabel ?? "Wait"] - entryRank[b.entryStatusLabel ?? "Wait"]) ||
+    ((b.sevenDayPctRaw ?? -999) + (b.twentyDayPctRaw ?? -999)) - ((a.sevenDayPctRaw ?? -999) + (a.twentyDayPctRaw ?? -999)) ||
+    (volRank[a.volumeConfirmationLabel ?? "Normal"] - volRank[b.volumeConfirmationLabel ?? "Normal"]) ||
     (b.riskRewardRaw ?? 0) - (a.riskRewardRaw ?? 0) ||
-    (b.sevenDayPctRaw ?? -999) - (a.sevenDayPctRaw ?? -999) ||
-    (b.volumeRatio ?? 0) - (a.volumeRatio ?? 0) ||
+    (seriousCount(a) - seriousCount(b)) ||
     b.marketCapRaw - a.marketCapRaw
   );
 
-  console.log(`[watchlist] score calculation count: ${final.length}`);
+  const final = scored.slice(0, 20);
+  console.log(`[watchlist] Final top-20 symbols: ${final.map((f) => f.symbol).join(", ")}`);
+  console.log(`[watchlist] Total execution time: ${Date.now() - t0}ms`);
   console.log(`[watchlist] Final research rows: ${final.length}`);
   return final;
 }
