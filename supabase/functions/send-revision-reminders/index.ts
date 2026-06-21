@@ -965,17 +965,50 @@ function computeWatchlistMetrics(
     }
   }
 
+  // ---- ATR14 (absolute $) for minimum-risk floor ----
+  let atr14Raw: number | undefined;
+  {
+    const { highs: hh, lows: ll, closes: cc } = chart;
+    const n = Math.min(hh.length, ll.length, cc.length);
+    if (n >= 15) {
+      const trs: number[] = [];
+      for (let i = n - 14; i < n; i++) {
+        if (i <= 0) continue;
+        const h = hh[i], l = ll[i], pc = cc[i - 1];
+        if (!Number.isFinite(h) || !Number.isFinite(l) || !Number.isFinite(pc)) continue;
+        trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+      }
+      if (trs.length) atr14Raw = trs.reduce((a, b) => a + b, 0) / trs.length;
+    }
+  }
+
   // ---- UPSIDE VS RISK ----
-  // Only calculate when BOTH lower watch area exists AND a nearby upper watch area exists.
-  // If true breakout → Breakout. If no nearby resistance → N/A (no R:R bonus).
+  // Valid only when raw downside is meaningful (>= max(0.5 * ATR14, 1% of price)).
   let riskRewardRaw: number | undefined;
   let riskRewardIsBreakout = false;
+  let rrSupportTooClose = false;
   if (resistanceIsBreakout) {
     riskRewardIsBreakout = true;
   } else if (!resistanceNoNearby && supportRaw !== undefined && resistanceRaw !== undefined) {
-    const downside = latestPrice - supportRaw;
-    const upside = resistanceRaw - latestPrice;
-    if (downside > 0 && upside > 0) riskRewardRaw = upside / downside;
+    const rawDownside = latestPrice - supportRaw;
+    const rawUpside = resistanceRaw - latestPrice;
+    const atrFloor = Number.isFinite(atr14Raw) ? (atr14Raw as number) * 0.5 : 0;
+    const pctFloor = latestPrice * 0.01;
+    const minMeaningfulRisk = Math.max(atrFloor, pctFloor);
+    if (rawDownside <= 0 || rawUpside <= 0) {
+      // invalid geometry — leave riskRewardRaw undefined
+    } else if (rawDownside < minMeaningfulRisk) {
+      rrSupportTooClose = true;
+      if (RESEARCH_DIAGNOSTIC_SYMBOLS.has(gainer.symbol)) {
+        console.warn(`[research:${gainer.symbol}] support too close: downside=${rawDownside.toFixed(4)} < minRisk=${minMeaningfulRisk.toFixed(4)} (atrFloor=${atrFloor.toFixed(4)} pctFloor=${pctFloor.toFixed(4)})`);
+      }
+    } else {
+      const ratio = rawUpside / rawDownside;
+      riskRewardRaw = ratio;
+      if (ratio > 10) {
+        console.warn(`[research:${gainer.symbol}] suspicious raw R/R=${ratio.toFixed(2)} downside=${rawDownside.toFixed(4)} upside=${rawUpside.toFixed(4)}`);
+      }
+    }
   }
 
   return {
@@ -995,6 +1028,8 @@ function computeWatchlistMetrics(
     resistanceNoNearby,
     riskRewardRaw,
     riskRewardIsBreakout,
+    rrSupportTooClose,
+    atr14Raw,
     marketCapRaw: gainer.marketCapRaw,
     analystKey: "none",
     analystLabel: "No coverage",
