@@ -202,11 +202,13 @@ const RESEARCH_SCREENERS = [
   "undervalued_growth_stocks",
   "undervalued_large_caps",
 ];
-const RESEARCH_DEEP_ANALYSIS_LIMIT = 200;
 const RESEARCH_VALUE_GROWTH_SCREENERS = new Set([
   "growth_technology_stocks",
   "undervalued_growth_stocks",
   "undervalued_large_caps",
+]);
+const RESEARCH_DIAGNOSTIC_SYMBOLS = new Set([
+  "ARM","WDC","SNDK","STX","AMD","QCOM","ROKU","GRAB","SITM","MPC","VLO",
 ]);
 
 async function fetchResearchScreenerRaw(
