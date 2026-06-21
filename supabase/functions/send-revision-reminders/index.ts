@@ -2255,10 +2255,6 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     return `<span style="display:inline-block;padding:2px 8px;background:${s.bg};color:${s.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${label}</span>`;
   };
 
-  const isNearResistance = (c: WatchlistCandidate): boolean => {
-    if (c.resistanceRaw === undefined || c.priceRaw <= 0) return false;
-    return (c.resistanceRaw - c.priceRaw) / c.priceRaw < 0.03;
-  };
   const entryStatus = (c: WatchlistCandidate): string => c.entryStatusLabel ?? "Wait";
   const entryBadge = (c: WatchlistCandidate) => {
     const label = entryStatus(c);
