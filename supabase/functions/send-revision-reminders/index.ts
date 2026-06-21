@@ -2259,15 +2259,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     if (c.resistanceRaw === undefined || c.priceRaw <= 0) return false;
     return (c.resistanceRaw - c.priceRaw) / c.priceRaw < 0.03;
   };
-  const entryStatus = (c: WatchlistCandidate): string => {
-    if (c.resistanceIsBreakout || c.resistanceNoNearby) return "Breakout watch";
-    const near = isNearResistance(c);
-    if (near) return "Wait near upper area";
-    const r = c.riskRewardRaw;
-    if (r !== undefined && r >= 2.0) return "Good setup";
-    if (r !== undefined && r >= 1.5) return "Fair setup";
-    return "Wait";
-  };
+  const entryStatus = (c: WatchlistCandidate): string => c.entryStatusLabel ?? "Wait";
   const entryBadge = (c: WatchlistCandidate) => {
     const label = entryStatus(c);
     const map: Record<string, { bg: string; color: string }> = {
@@ -2275,32 +2267,26 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       "Good setup":           { bg: "#dcfce7", color: "#047857" },
       "Fair setup":           { bg: "#ecfccb", color: "#3f6212" },
       "Wait near upper area": { bg: "#fef3c7", color: "#92400e" },
+      "Reversal watch":       { bg: "#fee2e2", color: "#b91c1c" },
       "Wait":                 { bg: "#f1f5f9", color: "#475569" },
     };
     const s = map[label] || map["Wait"];
     return `<span style="display:inline-block;padding:2px 8px;background:${s.bg};color:${s.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${label}</span>`;
   };
 
-  const volConfirmation = (c: WatchlistCandidate): string => {
-    const s1 = c.oneDayPctRaw;
-    const vr = c.volumeRatio;
-    if (s1 === undefined || vr === undefined) return "Normal";
-    if (s1 > 0 && vr >= 1.3) return "Confirmed";
-    if (s1 < 0 && vr >= 1.3) return "Heavy selling";
-    if (Math.abs(s1) < 1 && vr >= 1.5) return "High activity";
-    if (s1 > 0 && vr < 1.0) return "Weak confirmation";
-    return "Normal";
-  };
+  const volConfirmation = (c: WatchlistCandidate): string => c.volumeConfirmationLabel ?? "Normal";
   const volConfirmBadge = (c: WatchlistCandidate) => {
     const label = volConfirmation(c);
     const map: Record<string, { bg: string; color: string }> = {
-      "Confirmed":         { bg: "#dcfce7", color: "#047857" },
-      "Heavy selling":     { bg: "#fee2e2", color: "#b91c1c" },
-      "High activity":     { bg: "#dbeafe", color: "#1d4ed8" },
-      "Weak confirmation": { bg: "#fef3c7", color: "#92400e" },
-      "Normal":            { bg: "#f1f5f9", color: "#475569" },
+      "Strong bullish confirmation": { bg: "#bbf7d0", color: "#065f46" },
+      "Bullish confirmation":        { bg: "#dcfce7", color: "#047857" },
+      "Heavy selling":               { bg: "#fee2e2", color: "#b91c1c" },
+      "High activity":               { bg: "#dbeafe", color: "#1d4ed8" },
+      "Weak confirmation":           { bg: "#fef3c7", color: "#92400e" },
+      "Normal pullback":             { bg: "#f1f5f9", color: "#475569" },
+      "Normal":                      { bg: "#f1f5f9", color: "#475569" },
     };
-    const s = map[label];
+    const s = map[label] || map["Normal"];
     return `<span style="display:inline-block;padding:2px 8px;background:${s.bg};color:${s.color};border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">${label}</span>`;
   };
 
