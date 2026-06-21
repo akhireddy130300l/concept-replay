@@ -1073,13 +1073,52 @@ function compute20DMA(closes: number[]): number | undefined {
   return s.reduce((a, b) => a + b, 0) / 20;
 }
 
+function classifyVolumeConfirmation(s1Raw: number | undefined, vr: number | undefined): string {
+  const s1 = s1Raw;
+  if (s1 === undefined || vr === undefined) return "Normal";
+  if (s1 >= 2.0 && vr >= 2.0) return "Strong bullish confirmation";
+  if (s1 >= 1.0 && vr >= 1.3) return "Bullish confirmation";
+  if (Math.abs(s1) < 1.0 && vr >= 1.5) return "High activity";
+  if (s1 <= -1.0 && vr >= 1.3) return "Heavy selling";
+  if (s1 > 0 && vr < 1.0) return "Weak confirmation";
+  if (s1 < 0) return "Normal pullback";
+  return "Normal";
+}
+
+function classifyCandidateType(
+  c: { oneDayPctRaw?: number; sevenDayPctRaw?: number; twentyDayPctRaw?: number;
+        supportRaw?: number; priceRaw: number; resistanceNoNearby: boolean; },
+  volLabel: string,
+  sourceScreeners: string[],
+): string {
+  const s1 = c.oneDayPctRaw ?? 0;
+  const s7 = c.sevenDayPctRaw ?? 0;
+  const s20 = c.twentyDayPctRaw ?? 0;
+  const heavySelling = volLabel === "Heavy selling";
+  if (s7 < 0 && s20 < 0) return "Reversal";
+  if (c.resistanceNoNearby && s1 > 0 && !heavySelling) {
+    const distFromSupportPct = (c.supportRaw && c.priceRaw > 0)
+      ? ((c.priceRaw - c.supportRaw) / c.priceRaw) * 100 : 0;
+    if (distFromSupportPct < 20) return "Breakout";
+  }
+  if (s20 > 0 && s1 <= 0 && s1 > -3 && !heavySelling && c.supportRaw && c.priceRaw > 0) {
+    const distPct = ((c.priceRaw - c.supportRaw) / c.priceRaw) * 100;
+    if (distPct < 8) return "Pullback";
+  }
+  const fromValueGrowth = sourceScreeners.some((s) => RESEARCH_VALUE_GROWTH_SCREENERS.has(s));
+  if (fromValueGrowth && !(s7 < -10 && s20 < -10)) return "Value/Growth";
+  if (s7 > 0 && s20 > 0 && !heavySelling) return "Momentum";
+  return "Momentum";
+}
+
 function computeRiskFlagsAndScore(
   c: Omit<WatchlistCandidate, "catalystLabel" | "catalystHasNews" | "catalystConfirmed" | "newsHeadline" | "newsSummary" | "newsSource" | "newsLink" | "newsPublishedDate" | "riskFlags" | "score">,
   catalystHasNews: boolean,
   catalystLabel: string,
   chart: ChartOHLCV,
   todayRange?: { dayHigh?: number; dayLow?: number },
-): { flags: string[]; score: number } {
+  sourceScreeners: string[] = [],
+): { flags: string[]; score: number; volumeConfirmationLabel: string; candidateType: string; entryStatusLabel: string; reversalConfirmed: boolean } {
   const flags: string[] = [];
 
   // Volatility proxy: std-dev of last 20 daily % moves
@@ -1120,21 +1159,14 @@ function computeRiskFlagsAndScore(
   if (c.supportRaw !== undefined && c.priceRaw > 0) {
     if ((c.priceRaw - c.supportRaw) / c.priceRaw > 0.15) flags.push("Far above support");
   }
-
-  // High volatility: prefer ATR%, fall back to daily std-dev
   if ((atrPct !== undefined && atrPct >= 5) || (atrPct === undefined && dailyVolPct > 5)) {
     flags.push("High volatility");
   }
-
-  // RSI overbought (risk warning, not a sell signal)
   if (rsi14 !== undefined) {
     if (rsi14 >= 80) flags.push("Very overbought");
     else if (rsi14 >= 70) flags.push("Overbought");
   }
-
-  // Extended above 20-DMA
   if (aboveMA20Pct !== undefined && aboveMA20Pct >= 25) flags.push("Extended above trend");
-
   if (todayRange?.dayHigh && todayRange?.dayLow && c.priceRaw > 0) {
     const range = todayRange.dayHigh - todayRange.dayLow;
     if (range > 0) {
@@ -1145,44 +1177,93 @@ function computeRiskFlagsAndScore(
     }
   }
 
-  // ---- Entry-aware scoring ----
-  let score = 5;
+  // ---- Classify volume confirmation ----
+  const volumeConfirmationLabel = classifyVolumeConfirmation(c.oneDayPctRaw, c.volumeRatio);
+  if (volumeConfirmationLabel === "Heavy selling") flags.push("Heavy selling");
 
+  // ---- Candidate type ----
+  const candidateType = classifyCandidateType(
+    { oneDayPctRaw: c.oneDayPctRaw, sevenDayPctRaw: c.sevenDayPctRaw, twentyDayPctRaw: c.twentyDayPctRaw,
+      supportRaw: c.supportRaw, priceRaw: c.priceRaw, resistanceNoNearby: c.resistanceNoNearby },
+    volumeConfirmationLabel,
+    sourceScreeners,
+  );
+
+  // ---- Reversal confirmation (need ≥2 of) ----
+  const s1 = c.oneDayPctRaw ?? 0;
+  const s7 = c.sevenDayPctRaw ?? 0;
+  const s20 = c.twentyDayPctRaw ?? 0;
+  let rcSignals = 0;
+  if (s1 > 0) rcSignals++;
+  if (closes.length >= 2 && closes[closes.length - 1] > closes[closes.length - 2]) rcSignals++;
+  if (volumeConfirmationLabel !== "Heavy selling") rcSignals++;
+  if (sma20 !== undefined && c.priceRaw >= sma20) rcSignals++;
+  if (closes.length >= 6) {
+    const recentLow = Math.min(...closes.slice(-5, -1));
+    const lastClose = closes[closes.length - 1];
+    if (lastClose > recentLow) rcSignals++;
+  }
+  const downtrend = s7 < 0 && s20 < 0;
+  const reversalConfirmed = downtrend && rcSignals >= 2;
+
+  // ---- Entry status (precomputed) ----
+  const nearResistance = flags.includes("Near resistance");
+  const noNearbyResistance = c.resistanceIsBreakout || c.resistanceNoNearby;
+  const validRR = !c.rrSupportTooClose && c.riskRewardRaw !== undefined && !noNearbyResistance;
+  const trendPositive = s7 > 0 && s20 > 0;
+  const seriousRiskFlags = ["Heavy selling", "Fading from high", "Very overbought", "Big one-day move"];
+  const hasSeriousRiskFlag = flags.some((f) => seriousRiskFlags.includes(f));
+  let entryStatusLabel: string;
+  if (noNearbyResistance) entryStatusLabel = "Breakout watch";
+  else if (nearResistance) entryStatusLabel = "Wait near upper area";
+  else if (trendPositive && validRR && (c.riskRewardRaw as number) >= 2.0 && !hasSeriousRiskFlag) entryStatusLabel = "Good setup";
+  else if (trendPositive && validRR && (c.riskRewardRaw as number) >= 1.5) entryStatusLabel = "Fair setup";
+  else if (s7 < 0 && s20 < 0) entryStatusLabel = "Reversal watch";
+  else entryStatusLabel = "Wait";
+
+  // ---- Scoring ----
+  let score = 5;
   // Trend (7S)
   if (c.sevenDayPctRaw !== undefined) {
     const v = c.sevenDayPctRaw;
     if (v >= 15) score += 1.5;
     else if (v >= 10) score += 1.0;
     else if (v >= 5) score += 0.5;
-    else if (v <= -10) score -= 1;
+    else if (v <= -10) score -= 1.5;
+    else if (v < 0) score -= 0.5;
   }
-  // Trend (20S)
   if (c.twentyDayPctRaw !== undefined) {
     const v = c.twentyDayPctRaw;
     if (v >= 20) score += 2.0;
     else if (v >= 15) score += 1.5;
     else if (v >= 10) score += 1.0;
     else if (v >= 5) score += 0.5;
-    else if (v <= -10) score -= 1;
+    else if (v <= -10) score -= 1.5;
+    else if (v < 0) score -= 0.5;
   }
-  // Volume
-  const volConfirmed = (c.oneDayPctRaw ?? 0) > 0 && (c.volumeRatio ?? 0) >= 1.3;
-  if (c.volumeRatio !== undefined) {
-    if (c.volumeRatio >= 2) score += 1.5;
-    else if (c.volumeRatio >= 1.3) score += 1.0;
-    else if (c.volumeRatio < 1) score -= 0.75;
-  }
-  if (volConfirmed) score += 0.25;
+  // Volume (use label)
+  if (volumeConfirmationLabel === "Strong bullish confirmation") score += 1.5;
+  else if (volumeConfirmationLabel === "Bullish confirmation") score += 1.0;
+  else if (volumeConfirmationLabel === "High activity") score += 0.25;
+  else if (volumeConfirmationLabel === "Weak confirmation") score -= 0.5;
+  else if (volumeConfirmationLabel === "Heavy selling") score -= 1.5;
+  else if (volumeConfirmationLabel === "Normal pullback") score -= 0.25;
 
-  // Risk / reward
+  // Risk / reward — ONLY award when valid
   const farAboveSupport = flags.includes("Far above support");
-  if (c.riskRewardIsBreakout || c.resistanceNoNearby) {
-    if (volConfirmed && !farAboveSupport) score += 0.5;
-  } else if (c.riskRewardRaw !== undefined) {
-    const r = c.riskRewardRaw;
+  if (validRR) {
+    const r = c.riskRewardRaw as number;
     if (r >= 2.0) score += 2.0;
     else if (r >= 1.5) score += 1.0;
     else if (r < 1.0) score -= 1.0;
+  } else if (noNearbyResistance) {
+    // Breakout / no-nearby-resistance: only a tiny credit if volume confirms cleanly.
+    if (volumeConfirmationLabel === "Strong bullish confirmation" && !farAboveSupport) score += 0.5;
+  } else if (c.rrSupportTooClose) {
+    // Invalid R/R due to micro-downside — do NOT award bonus.
+    if (RESEARCH_DIAGNOSTIC_SYMBOLS.has(c.symbol)) {
+      console.warn(`[research:${c.symbol}] no R/R bonus — support too close`);
+    }
   }
 
   // Analyst
@@ -1192,7 +1273,6 @@ function computeRiskFlagsAndScore(
   else if (c.analystKey === "none") score -= 0.5;
 
   // Penalties
-  const nearResistance = flags.includes("Near resistance");
   if (nearResistance) score -= 1.0;
   if (farAboveSupport) score -= 1.0;
   if (flags.includes("High volatility")) score -= 0.5;
@@ -1201,27 +1281,46 @@ function computeRiskFlagsAndScore(
   if (flags.includes("Very overbought")) score -= 0.5;
   else if (flags.includes("Overbought")) score -= 0.25;
   if (flags.includes("Extended above trend")) score -= 0.5;
+  if (downtrend) score -= 1.5;
 
-  // Extended momentum status penalty
-  const s1 = c.oneDayPctRaw ?? 0;
-  const s7 = c.sevenDayPctRaw ?? 0;
-  const s20 = c.twentyDayPctRaw ?? 0;
   const extendedMomentum = s20 > 15 && s7 > 10 && s1 > 5;
   if (extendedMomentum) score -= 0.75;
 
-  // ---- Score caps for risky late-entry setups ----
-  const rrLow = c.riskRewardRaw !== undefined && c.riskRewardRaw < 1.0;
-  const waitNearUpper =
-    nearResistance && !c.riskRewardIsBreakout && !c.resistanceNoNearby;
-  if (waitNearUpper && rrLow) score = Math.min(score, 8.3);
-  if (extendedMomentum && rrLow) score = Math.min(score, 8.3);
-  if (farAboveSupport && nearResistance) score = Math.min(score, 8.0);
-  if (flags.includes("Big one-day move") && flags.includes("High volatility") && nearResistance) {
-    score = Math.min(score, 8.0);
+  const preCapScore = score;
+
+  // ---- Score caps ----
+  const rrLow = validRR && (c.riskRewardRaw as number) < 1.0;
+  let appliedCap: number | undefined;
+  const setCap = (cap: number) => {
+    if (appliedCap === undefined || cap < appliedCap) appliedCap = cap;
+  };
+  if (entryStatusLabel === "Wait near upper area") setCap(8.8);
+  if (nearResistance && c.rrSupportTooClose) setCap(8.3);
+  if (downtrend && !reversalConfirmed) setCap(7.0);
+  if (volumeConfirmationLabel === "Heavy selling" && !reversalConfirmed) setCap(7.0);
+  if (c.analystKey === "none" && flags.includes("High volatility")) setCap(8.0);
+  if (farAboveSupport && nearResistance) setCap(8.0);
+  if (rrLow && (entryStatusLabel === "Wait near upper area" || extendedMomentum)) setCap(8.3);
+  if (entryStatusLabel === "Good setup" && hasSeriousRiskFlag) setCap(8.5);
+
+  if (appliedCap !== undefined) score = Math.min(score, appliedCap);
+  score = Math.max(0, Math.min(10, score));
+
+  if (RESEARCH_DIAGNOSTIC_SYMBOLS.has(c.symbol)) {
+    console.log(`[research:diagnostic] ${c.symbol} type=${candidateType} entry=${entryStatusLabel} vol=${volumeConfirmationLabel} rrRaw=${c.riskRewardRaw?.toFixed(2) ?? "n/a"} tooClose=${!!c.rrSupportTooClose} downtrend=${downtrend} reversalConfirmed=${reversalConfirmed} preCap=${preCapScore.toFixed(2)} cap=${appliedCap ?? "none"} final=${score.toFixed(2)}`);
+  }
+  if (downtrend && volumeConfirmationLabel === "Heavy selling" && preCapScore > 7) {
+    console.warn(`[research:${c.symbol}] downtrend+heavy selling pre-cap ${preCapScore.toFixed(2)} > 7`);
   }
 
-  score = Math.max(0, Math.min(10, score));
-  return { flags, score: Math.round(score * 10) / 10 };
+  return {
+    flags,
+    score: Math.round(score * 10) / 10,
+    volumeConfirmationLabel,
+    candidateType,
+    entryStatusLabel,
+    reversalConfirmed,
+  };
 }
 
 async function fetchChartOHLCVWithRetry(symbol: string, retries = 1): Promise<ChartOHLCV | null> {
