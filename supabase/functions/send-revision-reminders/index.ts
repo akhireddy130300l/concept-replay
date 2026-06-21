@@ -1193,11 +1193,20 @@ function computeRiskFlagsAndScore(
   return { flags, score: Math.round(score * 10) / 10 };
 }
 
+async function fetchChartOHLCVWithRetry(symbol: string, retries = 1): Promise<ChartOHLCV | null> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const chart = await fetchChartOHLCV(symbol);
+    if (chart && chart.closes.length >= 2) return chart;
+    if (attempt < retries) await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
+}
+
 async function buildWatchlistCandidates(
   allMovers: MarketGainer[],
   yahooRatingToKey: (r?: string) => string,
 ): Promise<WatchlistCandidate[]> {
-  // Deduplicate by ticker
+  // Deduplicate by ticker (input pool may already be deduped — defensive).
   const dedup = new Map<string, MarketGainer>();
   for (const m of allMovers) {
     if (!m.symbol) continue;
@@ -1207,43 +1216,43 @@ async function buildWatchlistCandidates(
   console.log(`[watchlist] candidate universe count: ${allMovers.length}`);
   console.log(`[watchlist] deduplicated symbol count: ${dedup.size}`);
 
-  // Fetch charts in chunks
+  // Fetch charts with controlled concurrency (8 in-flight) and a single retry.
   const entries = Array.from(dedup.entries());
-  const CHUNK = 12;
+  const CHUNK = 8;
   type PreMetrics = NonNullable<ReturnType<typeof computeWatchlistMetrics>>;
   const initial: Array<{ pre: PreMetrics; chart: ChartOHLCV; gainer: MarketGainer }> = [];
-  let chartCount = 0;
+  let chartOk = 0;
+  let chartFail = 0;
   let supResCount = 0;
 
   for (let i = 0; i < entries.length; i += CHUNK) {
     const slice = entries.slice(i, i + CHUNK);
     const results = await Promise.all(slice.map(async ([sym, g]) => {
-      const chart = await fetchChartOHLCV(sym);
+      const chart = await fetchChartOHLCVWithRetry(sym, 1);
       return { sym, g, chart };
     }));
-    for (const { g, chart } of results) {
-      if (!chart) continue;
-      chartCount++;
+    for (const { sym, g, chart } of results) {
+      if (!chart) { chartFail++; console.warn(`[watchlist] chart failed for ${sym}`); continue; }
+      chartOk++;
       const pre = computeWatchlistMetrics(g, chart);
       if (!pre) continue;
       if (pre.supportRaw !== undefined || pre.resistanceRaw !== undefined || pre.resistanceIsBreakout) supResCount++;
-      // Attach analyst
       const key = analystKeyForGainer(g, yahooRatingToKey);
       pre.analystKey = key;
       pre.analystLabel = analystLabelForKey(key);
       initial.push({ pre, chart, gainer: g });
     }
   }
-  console.log(`[watchlist] Yahoo chart fetch count: ${chartCount}`);
+  console.log(`[watchlist] Successful chart analyses: ${chartOk}`);
+  console.log(`[watchlist] Failed chart analyses: ${chartFail}`);
   console.log(`[watchlist] support/resistance calculation count: ${supResCount}`);
 
-  // Score WITHOUT news first to pick top 10
+  // Compute scores
   const provisional = initial.map(({ pre, chart, gainer }) => {
     const { flags, score } = computeRiskFlagsAndScore(pre, false, "Not confirmed", chart);
     return { pre, chart, gainer, flags, score };
   });
 
-  // Sort and pick top 10 candidates for news lookup
   provisional.sort((a, b) =>
     b.score - a.score ||
     (b.pre.riskRewardRaw ?? 0) - (a.pre.riskRewardRaw ?? 0) ||
@@ -1270,7 +1279,6 @@ async function buildWatchlistCandidates(
     };
   });
 
-  // Final re-sort with updated scores
   final.sort((a, b) =>
     b.score - a.score ||
     (b.riskRewardRaw ?? 0) - (a.riskRewardRaw ?? 0) ||
@@ -1280,7 +1288,7 @@ async function buildWatchlistCandidates(
   );
 
   console.log(`[watchlist] score calculation count: ${final.length}`);
-  console.log(`[watchlist] final Best Watchlist Candidates count: ${final.length}`);
+  console.log(`[watchlist] Final research rows: ${final.length}`);
   return final;
 }
 
