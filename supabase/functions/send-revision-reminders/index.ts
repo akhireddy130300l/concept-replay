@@ -105,9 +105,15 @@ type WatchlistCandidate = {
   resistanceNoNearby: boolean;
   riskRewardRaw: number | undefined;
   riskRewardIsBreakout: boolean;
+  rrSupportTooClose?: boolean;
+  atr14Raw?: number;
   marketCapRaw: number;
   analystKey: string;
   analystLabel: string;
+  volumeConfirmationLabel?: string;
+  candidateType?: string;
+  entryStatusLabel?: string;
+  reversalConfirmed?: boolean;
   catalystLabel: string;
   catalystHasNews: boolean;
   catalystConfirmed: boolean;
