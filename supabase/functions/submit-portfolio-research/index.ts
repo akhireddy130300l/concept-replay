@@ -115,6 +115,37 @@ Deno.serve(async (req) => {
     return bad(429, { error: "daily_cap_reached", cap: DAILY_REQUEST_CAP });
   }
 
+  // Stale-request recovery: pending >5min or running >10min are marked failed.
+  // If active request is newer than those limits, return 409.
+  const activeQuery = await admin
+    .from("portfolio_research_requests")
+    .select("id, status, created_at, started_at")
+    .eq("user_id", userId)
+    .in("status", ["pending", "running"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (activeQuery.error) return bad(500, { error: "active_check_failed" });
+  const active = (activeQuery.data ?? [])[0];
+  if (active) {
+    const nowMs = Date.now();
+    const createdMs = new Date(active.created_at as string).getTime();
+    const startedMs = active.started_at ? new Date(active.started_at as string).getTime() : createdMs;
+    const pendingAgeMs = nowMs - createdMs;
+    const runningAgeMs = nowMs - startedMs;
+    const isStale =
+      (active.status === "pending" && pendingAgeMs > 5 * 60 * 1000) ||
+      (active.status === "running" && runningAgeMs > 10 * 60 * 1000);
+    if (isStale) {
+      await admin.from("portfolio_research_requests").update({
+        status: "failed",
+        error_summary: "stale_request_recovered",
+        completed_at: new Date().toISOString(),
+      }).eq("id", active.id);
+    } else {
+      return bad(409, { error: "active_request_already_exists" });
+    }
+  }
+
   // Cash + concentration basis.
   const cashBalance = payload.cash_balance ?? null;
   const declaredAccountTotal = Boolean(payload.account_total_declared && cashBalance !== null);
