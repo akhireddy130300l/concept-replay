@@ -304,6 +304,11 @@ Deno.serve(async (req) => {
   }).eq("id", requestId);
 
   return resp(200, { ok: true, request_id: requestId, gemini_model: GEMINI_MODEL, email_sent: emailSent });
+  } catch (err) {
+    console.error("process-portfolio-research unexpected error", err);
+    try { await markFailed(admin, requestId, "unexpected_error"); } catch { /* swallow */ }
+    return resp(200, { ok: false, reason: "unexpected_error" });
+  }
 });
 
 async function markFailed(admin: ReturnType<typeof createClient>, requestId: string, summary: string) {
