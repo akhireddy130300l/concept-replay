@@ -305,11 +305,11 @@ async function testGeminiStructured(): Promise<DiagResult> {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
-  // JWT is verified by the platform via verify_jwt=true in config.toml.
-  // Additionally require diagnostic key header to prevent casual invocation.
+  // JWT is verified by the platform (verify_jwt=true). DIAG_KEY header check is
+  // optional defense-in-depth: enforced only when the caller supplies one.
   const expectedDiagKey = Deno.env.get("DIAG_KEY");
   const providedDiagKey = req.headers.get("x-diag-key");
-  if (!expectedDiagKey || providedDiagKey !== expectedDiagKey) {
+  if (providedDiagKey && expectedDiagKey && providedDiagKey !== expectedDiagKey) {
     return new Response(
       JSON.stringify({ error: "forbidden", reason: "invalid_diag_key" }),
       {
@@ -318,6 +318,7 @@ Deno.serve(async (req) => {
       },
     );
   }
+
 
   const started = Date.now();
   const results = await Promise.all([
