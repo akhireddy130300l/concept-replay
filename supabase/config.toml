@@ -9,3 +9,10 @@ verify_jwt = false
 [functions.diagnose-portfolio-apis]
 verify_jwt = true
 
+[functions.submit-portfolio-research]
+verify_jwt = true
+
+[functions.process-portfolio-research]
+verify_jwt = false
+
+
