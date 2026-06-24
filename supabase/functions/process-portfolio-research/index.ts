@@ -57,6 +57,8 @@ Deno.serve(async (req) => {
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  try {
+
   // Conditional transition pending -> running. Idempotent.
   const transition = await admin
     .from("portfolio_research_requests")
