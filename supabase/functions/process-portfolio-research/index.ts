@@ -57,6 +57,8 @@ Deno.serve(async (req) => {
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  try {
+
   // Conditional transition pending -> running. Idempotent.
   const transition = await admin
     .from("portfolio_research_requests")
@@ -302,6 +304,11 @@ Deno.serve(async (req) => {
   }).eq("id", requestId);
 
   return resp(200, { ok: true, request_id: requestId, gemini_model: GEMINI_MODEL, email_sent: emailSent });
+  } catch (err) {
+    console.error("process-portfolio-research unexpected error", err);
+    try { await markFailed(admin, requestId, "unexpected_error"); } catch { /* swallow */ }
+    return resp(200, { ok: false, reason: "unexpected_error" });
+  }
 });
 
 async function markFailed(admin: ReturnType<typeof createClient>, requestId: string, summary: string) {
