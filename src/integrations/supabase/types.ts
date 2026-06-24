@@ -14,6 +14,62 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_runs: {
+        Row: {
+          completed_at: string | null
+          confidence: string | null
+          created_at: string
+          email_sent: boolean
+          final_decision_status: string | null
+          id: string
+          missing_data_summary: Json
+          request_id: string
+          safe_error_summary: string | null
+          started_at: string | null
+          tools_attempted: Json
+          tools_succeeded: Json
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          confidence?: string | null
+          created_at?: string
+          email_sent?: boolean
+          final_decision_status?: string | null
+          id?: string
+          missing_data_summary?: Json
+          request_id: string
+          safe_error_summary?: string | null
+          started_at?: string | null
+          tools_attempted?: Json
+          tools_succeeded?: Json
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          confidence?: string | null
+          created_at?: string
+          email_sent?: boolean
+          final_decision_status?: string | null
+          id?: string
+          missing_data_summary?: Json
+          request_id?: string
+          safe_error_summary?: string | null
+          started_at?: string | null
+          tools_attempted?: Json
+          tools_succeeded?: Json
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_runs_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "portfolio_research_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       learned_topics: {
         Row: {
           created_at: string
@@ -49,6 +105,176 @@ export type Database = {
           next_revision_date?: string
           revision_count?: number | null
           title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      portfolio_positions: {
+        Row: {
+          average_cost: number | null
+          created_at: string
+          deleted_at: string | null
+          id: string
+          purchase_date: string | null
+          shares: number
+          ticker: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          average_cost?: number | null
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          purchase_date?: string | null
+          shares: number
+          ticker: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          average_cost?: number | null
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          purchase_date?: string | null
+          shares?: number
+          ticker?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      portfolio_research_request_items: {
+        Row: {
+          average_cost: number | null
+          concentration_level: string | null
+          created_at: string
+          data_sources: Json
+          id: string
+          market_price: number | null
+          market_value: number | null
+          missing_data: Json
+          peer_condition: string | null
+          position_status: string | null
+          price_condition: string | null
+          purchase_date: string | null
+          request_id: string
+          shares: number
+          support_condition: string | null
+          ticker: string
+          unrealized_pl: number | null
+          unrealized_pl_pct: number | null
+          user_id: string
+          weight_pct: number | null
+        }
+        Insert: {
+          average_cost?: number | null
+          concentration_level?: string | null
+          created_at?: string
+          data_sources?: Json
+          id?: string
+          market_price?: number | null
+          market_value?: number | null
+          missing_data?: Json
+          peer_condition?: string | null
+          position_status?: string | null
+          price_condition?: string | null
+          purchase_date?: string | null
+          request_id: string
+          shares: number
+          support_condition?: string | null
+          ticker: string
+          unrealized_pl?: number | null
+          unrealized_pl_pct?: number | null
+          user_id: string
+          weight_pct?: number | null
+        }
+        Update: {
+          average_cost?: number | null
+          concentration_level?: string | null
+          created_at?: string
+          data_sources?: Json
+          id?: string
+          market_price?: number | null
+          market_value?: number | null
+          missing_data?: Json
+          peer_condition?: string | null
+          position_status?: string | null
+          price_condition?: string | null
+          purchase_date?: string | null
+          request_id?: string
+          shares?: number
+          support_condition?: string | null
+          ticker?: string
+          unrealized_pl?: number | null
+          unrealized_pl_pct?: number | null
+          user_id?: string
+          weight_pct?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "portfolio_research_request_items_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "portfolio_research_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      portfolio_research_requests: {
+        Row: {
+          attempts: number
+          cash_balance: number | null
+          completed_at: string | null
+          concentration_basis: string
+          confidence: string | null
+          created_at: string
+          email_sent: boolean
+          error_summary: string | null
+          final_decision_status: string | null
+          holdings_count: number | null
+          id: string
+          peer_count: number | null
+          started_at: string | null
+          status: string
+          trigger_type: string
+          user_id: string
+        }
+        Insert: {
+          attempts?: number
+          cash_balance?: number | null
+          completed_at?: string | null
+          concentration_basis?: string
+          confidence?: string | null
+          created_at?: string
+          email_sent?: boolean
+          error_summary?: string | null
+          final_decision_status?: string | null
+          holdings_count?: number | null
+          id?: string
+          peer_count?: number | null
+          started_at?: string | null
+          status?: string
+          trigger_type?: string
+          user_id: string
+        }
+        Update: {
+          attempts?: number
+          cash_balance?: number | null
+          completed_at?: string | null
+          concentration_basis?: string
+          confidence?: string | null
+          created_at?: string
+          email_sent?: boolean
+          error_summary?: string | null
+          final_decision_status?: string | null
+          holdings_count?: number | null
+          id?: string
+          peer_count?: number | null
+          started_at?: string | null
+          status?: string
+          trigger_type?: string
           user_id?: string
         }
         Relationships: []
@@ -93,6 +319,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_portfolio_settings: {
+        Row: {
+          concentration_thresholds: Json
+          created_at: string
+          default_save_holdings: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          concentration_thresholds?: Json
+          created_at?: string
+          default_save_holdings?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          concentration_thresholds?: Json
+          created_at?: string
+          default_save_holdings?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       user_preferences: {
         Row: {
