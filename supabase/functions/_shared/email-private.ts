@@ -12,10 +12,26 @@ export type PeerDetail = {
   symbol: string;
   available: boolean; // valid Yahoo data
   price: number | null;
+  currency: string | null;
   return1Session: number | null;
   return7Session: number | null;
   condition: PeerCondition;
 };
+
+function formatPriceWithCurrency(price: number | null, currency: string | null): string {
+  if (price === null) return "—";
+  const abs = Math.abs(price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const sign = price < 0 ? "-" : "";
+  if (!currency) return sign + abs;
+  const upper = currency.toUpperCase();
+  // Preserve case for GBp (London pence).
+  const code = currency === "GBp" ? "GBp" : upper;
+  if (upper === "USD") return `${sign}$${abs}`;
+  if (upper === "EUR") return `${sign}€${abs}`;
+  if (upper === "GBP") return `${sign}£${abs}`;
+  // Generic suffix label (e.g. CAD 12.34, GBp 543.20).
+  return `${sign}${abs} ${code}`;
+}
 
 export type HoldingReportRow = {
   metrics: HoldingMetrics;
