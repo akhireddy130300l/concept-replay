@@ -45,9 +45,12 @@ interface ActiveRequest {
 
 export default function Portfolio() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [authChecked, setAuthChecked] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string>("");
+  const [accessEnabled, setAccessEnabled] = useState<boolean | null>(null);
+  const [maskedReportEmail, setMaskedReportEmail] = useState<string>("");
 
   // Saved positions from DB.
   const [saved, setSaved] = useState<SavedPosition[]>([]);
@@ -74,21 +77,31 @@ export default function Portfolio() {
   // ── Auth gate ─────────────────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
-    supabase.auth.getUser().then(({ data }) => {
+    const intended = location.pathname + (location.search ?? "");
+    supabase.auth.getUser().then(async ({ data }) => {
       if (!mounted) return;
       if (!data.user) {
+        sessionStorage.setItem("post_login_redirect", intended);
         navigate("/auth", { replace: true });
         return;
       }
       setUserId(data.user.id);
       setUserEmail(data.user.email ?? "");
+      const access = await fetchOwnPortfolioAccess();
+      if (!mounted) return;
+      if (!access || !access.enabled) {
+        setAccessEnabled(false);
+      } else {
+        setAccessEnabled(true);
+        setMaskedReportEmail(maskEmail(access.reportEmail));
+      }
       setAuthChecked(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       if (!session) navigate("/auth", { replace: true });
     });
     return () => { mounted = false; sub.subscription.unsubscribe(); };
-  }, [navigate]);
+  }, [navigate, location.pathname, location.search]);
 
   // ── Load saved holdings ───────────────────────────────────────────────────
   const loadSaved = useCallback(async () => {
