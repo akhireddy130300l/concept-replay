@@ -2414,6 +2414,22 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       <p style="margin:0;font-size:12px;color:#7c2d12;line-height:1.6;">Stocks are risky. Top gainers can fall just as quickly as they rise, and you may lose money. This email is not investment advice, a recommendation to buy or sell, or a forecast. Always do your own research, check official SEC filings, and consult a licensed financial advisor before making any investment decisions.</p>
     </div>
 
+    ${(() => {
+      const base = (Deno.env.get("APP_BASE_URL") ?? "").replace(/\/$/, "");
+      if (!base) return "";
+      const url = `${base}/portfolio?source=stock-email`;
+      return `
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:18px 0 22px 0;">
+      <tr><td align="center" style="padding:14px 16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;">
+        <p style="margin:0 0 10px 0;font-size:13px;color:#1e3a8a;line-height:1.5;">Private portfolio research is available to the authorized account. Sign-in is required. Opening this link does not automatically start an analysis.</p>
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td align="center" bgcolor="#1d4ed8" style="border-radius:8px;">
+          <a href="${url}" style="display:inline-block;padding:12px 22px;font-family:Arial,sans-serif;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;background:#1d4ed8;">Research My Portfolio</a>
+        </td></tr></table>
+        <p style="margin:10px 0 0 0;font-size:12px;color:#475569;">Or open: <a href="${url}" style="color:#1d4ed8;">${url}</a></p>
+      </td></tr>
+    </table>`;
+    })()}
+
     <h3 style="margin:18px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Best Watchlist Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(research priority · Yahoo price + chart data)</span></h3>
     <p style="margin:0 0 10px 0;font-size:12px;color:#475569;">Calculated live from Yahoo screener + chart data. Score is research priority only — not a buy or sell recommendation. Always verify filings, fundamentals, company news, and risk before making any investment decision.</p>
     ${watchlistTable}
