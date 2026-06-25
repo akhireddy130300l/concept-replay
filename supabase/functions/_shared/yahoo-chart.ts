@@ -5,6 +5,7 @@ export type YahooChart = {
   symbol: string;
   price: number;          // regularMarketPrice
   previousClose: number | null;
+  currency: string | null; // Yahoo meta.currency (e.g. USD, GBP, GBp, EUR)
   timestamps: number[];   // unix seconds (filtered to valid sessions)
   closes: number[];
   highs: number[];
