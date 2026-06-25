@@ -105,7 +105,7 @@ function peerTable(h: HoldingReportRow): string {
   const rows = h.peerDetails.map((p) => `
     <tr>
       <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-weight:600;">${esc(p.symbol)}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;">${fmtPrice(p.price)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;">${esc(formatPriceWithCurrency(p.price, p.currency))}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;">${fmtPct(p.return1Session)}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;">${fmtPct(p.return7Session)}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;color:${peerConditionColor(p.condition)};">${esc(p.condition)}</td>
