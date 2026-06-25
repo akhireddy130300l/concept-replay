@@ -72,14 +72,27 @@ Deno.serve(async (req) => {
   const userId = reqRow.user_id as string;
   const requestedAtUtcIso = (reqRow.created_at as string) ?? new Date().toISOString();
 
+  // Owner-only enforcement: load portfolio_feature_access for this user.
+  const accessRes = await admin
+    .from("portfolio_feature_access")
+    .select("user_id, enabled, report_email")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (accessRes.error || !accessRes.data || accessRes.data.enabled !== true || !accessRes.data.report_email) {
+    console.log(JSON.stringify({ phase: "access_check", request_id: requestId, failure_category: "portfolio_access_not_enabled" }));
+    await markFailed(admin, requestId, "portfolio_access_not_enabled");
+    return resp(200, { ok: false, reason: "portfolio_access_not_enabled" });
+  }
+  const reportEmail = accessRes.data.report_email as string;
+
+  // Authoritative auth user must still exist and have a confirmed email.
   const userLookup = await admin.auth.admin.getUserById(userId);
   if (userLookup.error || !userLookup.data?.user) {
     await markFailed(admin, requestId, "user_lookup_failed");
     return resp(200, { ok: false, reason: "user_lookup_failed" });
   }
   const authUser = userLookup.data.user;
-  const recipientEmail = authUser.email && authUser.email_confirmed_at ? authUser.email : null;
-  if (!recipientEmail) {
+  if (!authUser.email_confirmed_at || !authUser.email) {
     await markFailed(admin, requestId, "no_confirmed_recipient_email");
     return resp(200, { ok: false, reason: "no_confirmed_recipient_email" });
   }
