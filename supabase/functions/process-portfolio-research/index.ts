@@ -190,6 +190,7 @@ Deno.serve(async (req) => {
           symbol: sym,
           available: true,
           price: t.price,
+          currency: r.chart.currency ?? null,
           return1Session: t.return1Session,
           return7Session: t.return7Session,
           condition: classifyPeerCondition(t.return1Session),
