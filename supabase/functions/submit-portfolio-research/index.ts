@@ -211,10 +211,15 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Fire-and-forget dispatch; do not await processing.
-  // Note: we use waitUntil-equivalent by not awaiting; runtime keeps it alive for the
-  // duration of this request's response cycle. A future Phase will add a sweeper.
-  dispatchProcessRequest(SUPABASE_URL, DISPATCH_SECRET, requestId).catch(() => { /* swallow */ });
+  // Background dispatch tracked by the runtime so it survives the response cycle.
+  // We send only x-internal-dispatch — never the service-role key — in the internal request.
+  const dispatchPromise = dispatchProcessRequest(SUPABASE_URL, DISPATCH_SECRET, requestId)
+    .catch((e) => { console.log(JSON.stringify({ phase: "dispatch_error", request_id: requestId, message: e instanceof Error ? e.message.slice(0, 120) : "unknown" })); });
+  // @ts-ignore EdgeRuntime is provided by Supabase Edge Functions runtime.
+  if (typeof EdgeRuntime !== "undefined" && typeof (EdgeRuntime as any).waitUntil === "function") {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(dispatchPromise);
+  }
 
   return new Response(JSON.stringify({ request_id: requestId, status: "pending" }), {
     status: 202,
