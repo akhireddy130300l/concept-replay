@@ -86,6 +86,17 @@ Deno.serve(async (req) => {
   // Service-role client for limit checks + writes (RLS would block authenticated writes).
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false, autoRefreshToken: false } });
 
+  // Owner-only access: portfolio_feature_access must have enabled=true for this user.
+  const accessCheck = await admin
+    .from("portfolio_feature_access")
+    .select("user_id, enabled")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (accessCheck.error) return bad(500, { error: "access_check_failed" });
+  if (!accessCheck.data || accessCheck.data.enabled !== true) {
+    return bad(403, { error: "portfolio_access_not_enabled" });
+  }
+
   // Cooldown: any request created in the last 120 seconds (any status).
   const cooldownIso = new Date(Date.now() - COOLDOWN_SECONDS * 1000).toISOString();
   const cooldownQuery = await admin
