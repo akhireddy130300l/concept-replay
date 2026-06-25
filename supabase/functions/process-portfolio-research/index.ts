@@ -391,7 +391,7 @@ Deno.serve(async (req) => {
     email_sent: emailSent,
     started_at: new Date(startedRunAt).toISOString(),
     completed_at: new Date().toISOString(),
-    safe_error_summary: geminiOk ? null : "gemini_fallback_used",
+    safe_error_summary: geminiOk ? null : (aiFailureCategory ?? "gemini_fallback_used"),
   });
 
   await admin.from("portfolio_research_requests").update({
