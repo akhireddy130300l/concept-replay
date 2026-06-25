@@ -1,22 +1,22 @@
 // process-portfolio-research
 // JWT-disabled. Requires x-internal-dispatch header matching INTERNAL_DISPATCH_SECRET.
-// Loads request, transitions pending->running idempotently, runs deterministic
-// market data + calculations, calls Gemini for interpretation, sends private
-// email to the authenticated user's confirmed email, writes audit row, finalizes.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { YahooRunCache } from "../_shared/yahoo-chart.ts";
 import { fetchFinnhubRecommendation, fetchFinnhubPeers } from "../_shared/finnhub.ts";
-import { classifySupport, classifyVolume, computeTechnicals } from "../_shared/technicals.ts";
+import { classifySupport, classifyVolume, computeTechnicals, classifyRsi } from "../_shared/technicals.ts";
 import {
   applyWeights,
+  classifyPeerCondition,
   computeHoldingMetrics,
   computePeerAnalysis,
   computeTotals,
   DEFAULT_CONCENTRATION_THRESHOLDS,
+  peerClassificationToAssessmentType,
+  type AssessmentType,
 } from "../_shared/portfolio-calc.ts";
 import { fallbackInterpretation, generateInterpretation, GEMINI_MODEL } from "../_shared/ai-gateway.ts";
-import { renderPrivateReportHtml, sendPrivateReport, type HoldingReportRow } from "../_shared/email-private.ts";
+import { renderPrivateReportHtml, sendPrivateReport, type HoldingReportRow, type PeerDetail } from "../_shared/email-private.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -42,7 +42,6 @@ Deno.serve(async (req) => {
     return resp(500, { error: "server_misconfigured" });
   }
 
-  // Strict internal-secret gate.
   const provided = req.headers.get("x-internal-dispatch");
   if (!provided || provided !== DISPATCH_SECRET) {
     return resp(403, { error: "forbidden" });
@@ -59,23 +58,19 @@ Deno.serve(async (req) => {
 
   try {
 
-  // Conditional transition pending -> running. Idempotent.
   const transition = await admin
     .from("portfolio_research_requests")
     .update({ status: "running", started_at: new Date().toISOString(), attempts: 1 })
     .eq("id", requestId)
     .eq("status", "pending")
-    .select("id, user_id, cash_balance, concentration_basis")
+    .select("id, user_id, cash_balance, concentration_basis, created_at")
     .maybeSingle();
   if (transition.error) return resp(500, { error: "transition_failed" });
-  if (!transition.data) {
-    // Either already running/completed/failed, or wrong id. No-op.
-    return resp(200, { ok: true, noop: true });
-  }
+  if (!transition.data) return resp(200, { ok: true, noop: true });
   const reqRow = transition.data;
   const userId = reqRow.user_id as string;
+  const requestedAtUtcIso = (reqRow.created_at as string) ?? new Date().toISOString();
 
-  // Resolve recipient from Auth Admin API. Never from request body.
   const userLookup = await admin.auth.admin.getUserById(userId);
   if (userLookup.error || !userLookup.data?.user) {
     await markFailed(admin, requestId, "user_lookup_failed");
@@ -88,7 +83,11 @@ Deno.serve(async (req) => {
     return resp(200, { ok: false, reason: "no_confirmed_recipient_email" });
   }
 
-  // Load items (frozen snapshot).
+  // User timezone (for local email timestamp).
+  const prefRes = await admin.from("user_preferences").select("timezone").eq("user_id", userId).maybeSingle();
+  const userTimezone = typeof prefRes.data?.timezone === "string" && prefRes.data.timezone.length > 0
+    ? prefRes.data.timezone : null;
+
   const itemsRes = await admin
     .from("portfolio_research_request_items")
     .select("id, ticker, shares, average_cost, purchase_date")
@@ -99,7 +98,6 @@ Deno.serve(async (req) => {
   }
   const items = itemsRes.data;
 
-  // Concentration thresholds (per-user override possible).
   const settingsRes = await admin.from("user_portfolio_settings").select("concentration_thresholds").eq("user_id", userId).maybeSingle();
   const thresholds = (settingsRes.data?.concentration_thresholds as any) ?? DEFAULT_CONCENTRATION_THRESHOLDS;
 
@@ -108,7 +106,7 @@ Deno.serve(async (req) => {
   const toolsSucceeded: string[] = [];
   const missingDataSummary: Record<string, string[]> = {};
 
-  // 1) Resolve peers per holding (Finnhub only, no hardcoded list).
+  // 1) Finnhub peers (dynamic, no hardcoded fallback).
   toolsAttempted.push("finnhub.peers");
   const peerMap = new Map<string, string[] | null>();
   if (FINNHUB_KEY) {
@@ -121,7 +119,7 @@ Deno.serve(async (req) => {
     for (const it of items) peerMap.set(it.ticker, null);
   }
 
-  // 2) Build unique ticker set: holdings + all resolved peers.
+  // 2) Build full Yahoo symbol set (holdings + peers).
   toolsAttempted.push("yahoo.chart");
   const allSymbols = new Set<string>();
   for (const it of items) allSymbols.add(it.ticker.toUpperCase());
@@ -131,7 +129,7 @@ Deno.serve(async (req) => {
   const yahooResults = await cache.getMany([...allSymbols], 8);
   if ([...yahooResults.values()].some((r) => r.ok)) toolsSucceeded.push("yahoo.chart");
 
-  // 3) Analyst recommendation — owned holdings only.
+  // 3) Analyst recommendation for owned holdings only.
   toolsAttempted.push("finnhub.recommendation");
   const analystMap = new Map<string, Awaited<ReturnType<typeof fetchFinnhubRecommendation>>>();
   if (FINNHUB_KEY) {
@@ -142,7 +140,7 @@ Deno.serve(async (req) => {
     if ([...analystMap.values()].some((v) => v !== null)) toolsSucceeded.push("finnhub.recommendation");
   }
 
-  // 4) Per-holding deterministic metrics + classifications.
+  // 4) Per-holding metrics + classifications.
   const holdingRows: HoldingReportRow[] = [];
   const baseMetricsList: ReturnType<typeof computeHoldingMetrics>[] = [];
   const evidenceHoldings: any[] = [];
@@ -162,20 +160,35 @@ Deno.serve(async (req) => {
     if (!technicals) missing.push("technicals");
     const supportCondition = technicals ? classifySupport(technicals) : null;
     const volumeCondition = technicals ? classifyVolume(technicals) : null;
+    const rsiCategory = classifyRsi(technicals?.rsi14 ?? null);
 
-    // Peer analysis using cached Yahoo data only.
+    // Peer details (per-peer rows for the email).
+    const finnhubReturned = peerMap.get(it.ticker)?.length ?? 0;
+    const peerDetails: PeerDetail[] = [];
+    const peersUnavailable: string[] = [];
     const peers = peerMap.get(it.ticker) ?? null;
-    let peerAnalysis: ReturnType<typeof computePeerAnalysis> | null;
+    if (peers) {
+      for (const sym of peers) {
+        const r = yahooResults.get(sym.toUpperCase());
+        if (!r || !r.ok) { peersUnavailable.push(sym); continue; }
+        const t = computeTechnicals(r.chart);
+        peerDetails.push({
+          symbol: sym,
+          available: true,
+          price: t.price,
+          return1Session: t.return1Session,
+          return7Session: t.return7Session,
+          condition: classifyPeerCondition(t.return1Session),
+        });
+      }
+    }
+
+    let peerAnalysis: ReturnType<typeof computePeerAnalysis>;
     if (!peers || peers.length === 0) {
       peerAnalysis = { available: false, reason: "no_peers" };
       missing.push("peer_analysis");
     } else {
-      const peerReturns = peers.map((sym) => {
-        const r = yahooResults.get(sym.toUpperCase());
-        if (!r || !r.ok) return { symbol: sym, return1Session: null };
-        const t = computeTechnicals(r.chart);
-        return { symbol: sym, return1Session: t.return1Session };
-      });
+      const peerReturns = peerDetails.map((p) => ({ symbol: p.symbol, return1Session: p.return1Session }));
       peerAnalysis = computePeerAnalysis(technicals?.return1Session ?? null, peerReturns);
       if (!peerAnalysis.available) missing.push("peer_analysis");
     }
@@ -185,7 +198,14 @@ Deno.serve(async (req) => {
 
     if (missing.length > 0) missingDataSummary[it.ticker] = missing;
 
-    holdingRows.push({ metrics, technicals, supportCondition, volumeCondition, analyst, peerAnalysis, missingData: missing });
+    holdingRows.push({
+      metrics, technicals, supportCondition, volumeCondition, analyst, peerAnalysis,
+      peerDetails, peersUnavailable, finnhubPeersReturned: finnhubReturned, missingData: missing,
+    });
+
+    const detAssess: AssessmentType = peerAnalysis.available
+      ? peerClassificationToAssessmentType(peerAnalysis.classification)
+      : "peer-unavailable";
 
     evidenceHoldings.push({
       ticker: it.ticker,
@@ -194,40 +214,51 @@ Deno.serve(async (req) => {
       return7Session: technicals?.return7Session ?? null,
       return20Session: technicals?.return20Session ?? null,
       rsi14: technicals?.rsi14 ?? null,
+      rsiCategory,
       atr14Pct: technicals?.atr14Pct ?? null,
       drawdownFromRecentHighPct: technicals?.drawdownFromRecentHighPct ?? null,
       supportCondition,
       volumeCondition,
       analystSignal: analyst?.signal ?? null,
-      analystTotal: analyst?.totalAnalysts ?? null,
-      peer: peerAnalysis && peerAnalysis.available
+      analystRecommendationRatings: analyst?.totalAnalysts ?? null,
+      analystPeriod: analyst?.period ?? null,
+      peer: peerAnalysis.available
         ? {
             classification: peerAnalysis.classification,
             peersFalling: peerAnalysis.peersFalling,
             peerCount: peerAnalysis.peerCount,
             peersFallingPct: peerAnalysis.peersFallingPct,
+            peersFallingAtLeast5Pct: peerAnalysis.peersFallingAtLeast5Pct,
             median1S: peerAnalysis.medianPeerOneSessionReturn,
+            peersAnalyzed: peerDetails.map((p) => ({ symbol: p.symbol, return1Session: p.return1Session })),
           }
-        : null,
+        : { available: false, reason: (peerAnalysis as any).reason ?? "unavailable" },
+      deterministicAssessmentTypeForHolding: detAssess,
       missingData: missing,
     });
   }
 
-  // 5) Totals + weights (deterministic, never AI).
+  // 5) Totals + weights.
   const cashBalance = reqRow.cash_balance === null || reqRow.cash_balance === undefined ? null : Number(reqRow.cash_balance);
   const declaredAccountTotal = reqRow.concentration_basis === "account_total";
   const totals = computeTotals(baseMetricsList, cashBalance, declaredAccountTotal);
   applyWeights(baseMetricsList, totals, thresholds);
 
-  // 6) Gemini interpretation — strictly evidence in, structured JSON out.
+  // 6) Portfolio-level deterministic assessment type.
+  const types = evidenceHoldings.map((h: any) => h.deterministicAssessmentTypeForHolding as AssessmentType);
+  const portfolioAssessment: AssessmentType = deriveDominantAssessment(types);
+
+  // 7) Gemini.
   toolsAttempted.push("gemini");
   const evidence = {
-    weightLabel: totals.weightLabel,
     concentrationBasis: totals.basis,
+    accountConcentrationAvailable: totals.accountConcentrationAvailable,
+    weightLabel: totals.weightLabel,
+    deterministicAssessmentType: portfolioAssessment,
     holdings: evidenceHoldings.map((h, idx) => ({
       ...h,
-      weightPct: baseMetricsList[idx].weightPct,
-      concentrationLevel: baseMetricsList[idx].concentrationLevel,
+      weightPctOfBasis: baseMetricsList[idx].weightPct,
+      accountConcentrationLevel: baseMetricsList[idx].concentrationLevel, // null if submitted_only
       unrealizedPLPct: baseMetricsList[idx].unrealizedPLPct,
       averageCostKnown: baseMetricsList[idx].averageCost !== null,
     })),
@@ -243,22 +274,37 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 7) Render + send private email.
+  // 8) Deterministic overrides on Gemini output.
+  // Force assessment_type to deterministic value.
+  if (interpretation.assessment_type !== portfolioAssessment) {
+    interpretation = { ...interpretation, assessment_type: portfolioAssessment };
+  }
+  // Submitted-only: forbid Concentration review unless any holding has true account-level Very high/Critical.
+  if (totals.basis === "submitted_only" && interpretation.status === "Concentration review") {
+    interpretation = {
+      ...interpretation,
+      status: "Monitor",
+      interpretation: interpretation.interpretation +
+        " (Status downgraded: full-account concentration was not assessed because cash balance and full-account declaration were not provided.)",
+    };
+  }
+
+  // 9) Render + send email.
   toolsAttempted.push("resend.email");
   const html = renderPrivateReportHtml({
     totals,
     holdings: holdingRows,
     interpretation,
-    requestedAt: new Date().toISOString(),
+    requestedAtUtcIso,
+    userTimezone,
   });
   let emailSent = false;
   if (RESEND_KEY) {
     const sendRes = await sendPrivateReport(recipientEmail, html, RESEND_KEY);
     if (sendRes.ok) { emailSent = true; toolsSucceeded.push("resend.email"); }
   }
-  // Do NOT store rendered HTML anywhere.
 
-  // 8) Persist item-level computed fields (no monetary in audit).
+  // 10) Persist computed fields.
   for (let i = 0; i < items.length; i++) {
     const m = baseMetricsList[i];
     const row = holdingRows[i];
@@ -269,13 +315,17 @@ Deno.serve(async (req) => {
         unrealized_pl: m.unrealizedPL,
         unrealized_pl_pct: m.unrealizedPLPct,
         weight_pct: m.weightPct,
-        concentration_level: m.concentrationLevel,
+        concentration_level: m.concentrationLevel, // null when submitted_only
         support_condition: row.supportCondition,
         peer_condition: row.peerAnalysis && row.peerAnalysis.available ? row.peerAnalysis.classification : "Peer analysis unavailable",
         price_condition: row.volumeCondition,
         position_status: interpretation.status,
-        data_sources: { yahoo: yahooResults.get(items[i].ticker.toUpperCase())?.ok === true, finnhub_recommendation: !!analystMap.get(items[i].ticker), finnhub_peers: !!peerMap.get(items[i].ticker) },
-        missing_data: { items: row.missingData },
+        data_sources: {
+          yahoo: yahooResults.get(items[i].ticker.toUpperCase())?.ok === true,
+          finnhub_recommendation: !!analystMap.get(items[i].ticker),
+          finnhub_peers: !!peerMap.get(items[i].ticker),
+        },
+        missing_data: { items: row.missingData, peers_market_data_unavailable: row.peersUnavailable },
       })
       .eq("id", items[i].id);
   }
@@ -310,6 +360,20 @@ Deno.serve(async (req) => {
     return resp(200, { ok: false, reason: "unexpected_error" });
   }
 });
+
+function deriveDominantAssessment(types: AssessmentType[]): AssessmentType {
+  if (types.length === 0) return "insufficient";
+  const counts: Record<string, number> = {};
+  for (const t of types) counts[t] = (counts[t] ?? 0) + 1;
+  // Priority for ties.
+  const order: AssessmentType[] = ["broad-peer-weakness", "mixed", "stock-specific", "peer-unavailable", "insufficient"];
+  let best: AssessmentType = types[0];
+  let bestCount = counts[best];
+  for (const t of order) {
+    if ((counts[t] ?? 0) > bestCount) { best = t; bestCount = counts[t]; }
+  }
+  return best;
+}
 
 async function markFailed(admin: ReturnType<typeof createClient>, requestId: string, summary: string) {
   await admin.from("portfolio_research_requests").update({

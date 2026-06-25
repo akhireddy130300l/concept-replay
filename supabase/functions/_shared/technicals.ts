@@ -6,21 +6,21 @@ import type { YahooChart } from "./yahoo-chart.ts";
 export type Technicals = {
   price: number;
   previousClose: number | null;
-  return1Session: number | null;     // pct
+  return1Session: number | null;
   return3Session: number | null;
   return7Session: number | null;
   return20Session: number | null;
   rsi14: number | null;
-  atr14: number | null;              // dollars
+  atr14: number | null;
   atr14Pct: number | null;
   sma20: number | null;
   sma50: number | null;
-  support: number | null;            // 20-session low
-  resistance: number | null;         // 20-session high
-  supportBreak: boolean;             // current < 20-session low * 1.0
+  support: number | null;
+  resistance: number | null;
+  supportBreak: boolean;
   drawdownFromRecentHighPct: number | null;
   averageVolume20: number | null;
-  volumeStrengthPct: number | null;  // latest vs avg20, pct
+  volumeStrengthPct: number | null;
   sessionsAnalyzed: number;
 };
 
@@ -144,4 +144,33 @@ export function classifySupport(t: Technicals): SupportCondition {
   if (pos > 0.85) return "Near resistance";
   if (pos < 0.35) return "Holding support";
   return "Mid-range";
+}
+
+export type RsiCategory =
+  | "Potentially oversold"
+  | "Below-neutral momentum"
+  | "Neutral momentum"
+  | "Positive momentum"
+  | "Potentially overbought"
+  | "Unavailable";
+
+export function classifyRsi(rsi: number | null): RsiCategory {
+  if (rsi === null || !Number.isFinite(rsi)) return "Unavailable";
+  if (rsi < 30) return "Potentially oversold";
+  if (rsi < 45) return "Below-neutral momentum";
+  if (rsi <= 55) return "Neutral momentum";
+  if (rsi <= 70) return "Positive momentum";
+  return "Potentially overbought";
+}
+
+export function rsiWording(rsi: number | null): string {
+  const cat = classifyRsi(rsi);
+  switch (cat) {
+    case "Potentially oversold": return "RSI below 30 — potentially oversold.";
+    case "Below-neutral momentum": return "RSI is below neutral, indicating moderately weak momentum.";
+    case "Neutral momentum": return "RSI is near neutral.";
+    case "Positive momentum": return "RSI shows positive momentum.";
+    case "Potentially overbought": return "RSI above 70 — potentially overbought.";
+    case "Unavailable": return "RSI unavailable.";
+  }
 }
