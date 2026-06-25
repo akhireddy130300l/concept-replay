@@ -486,7 +486,7 @@ export default function Portfolio() {
           saveHoldings={saveHoldings}
           cashBalance={cashBalance}
           accountTotalDeclared={accountTotalDeclared}
-          recipientEmail={userEmail}
+          recipientEmail={maskedReportEmail || "configured report address"}
           disabled={submitDisabled}
           busy={submitting || !!activeRequest}
           onConfirm={() => void handleSubmit()}
