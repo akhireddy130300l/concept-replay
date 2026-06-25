@@ -24,6 +24,14 @@ const Auth = () => {
   const { toast } = useToast();
 
   useEffect(() => {
+    const popPostLogin = (): string => {
+      const stored = sessionStorage.getItem("post_login_redirect");
+      if (stored) sessionStorage.removeItem("post_login_redirect");
+      // Only allow same-origin internal paths to avoid open-redirects.
+      if (stored && stored.startsWith("/") && !stored.startsWith("//")) return stored;
+      return "/dashboard";
+    };
+
     // Set up auth state listener first
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
@@ -31,14 +39,14 @@ const Auth = () => {
         setIsForgotPassword(false);
         setIsLogin(false);
       } else if (session && event === 'SIGNED_IN' && !isRecoveryMode) {
-        navigate("/dashboard");
+        navigate(popPostLogin());
       }
     });
 
     // Check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session && !isRecoveryMode) {
-        navigate("/dashboard");
+        navigate(popPostLogin());
       }
     });
 
