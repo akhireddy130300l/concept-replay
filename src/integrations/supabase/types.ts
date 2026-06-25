@@ -109,6 +109,30 @@ export type Database = {
         }
         Relationships: []
       }
+      portfolio_feature_access: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          report_email: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          report_email: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          report_email?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       portfolio_positions: {
         Row: {
           average_cost: number | null
