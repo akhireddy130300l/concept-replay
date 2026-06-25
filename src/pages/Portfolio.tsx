@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import { RequestStatusBadge } from "@/components/portfolio/RequestStatusBadge";
 import { RequestHistoryList, type RequestHistoryRow } from "@/components/portfolio/RequestHistoryList";
 import { MAX_HOLDINGS, type HoldingInput } from "@/lib/portfolio/schema";
 import { payloadFromHoldings, submitPortfolioResearch } from "@/lib/portfolio/api";
+import { fetchOwnPortfolioAccess, maskEmail } from "@/lib/portfolio/access";
 
 const FEATURE_ENABLED = String(import.meta.env.VITE_FEATURE_PORTFOLIO_AGENT ?? "").toLowerCase() === "true";
 
