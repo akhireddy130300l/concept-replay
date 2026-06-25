@@ -340,7 +340,7 @@ export default function Portfolio() {
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground">
-                Your private portfolio report will be emailed to <b className="text-foreground">{userEmail}</b> when ready. You can refresh this page; status updates every 3 seconds.
+                Your private portfolio report will be emailed to the configured report address <b className="text-foreground">{maskedReportEmail || "configured address"}</b> when ready. You can refresh this page; status updates every 3 seconds.
               </p>
             </CardContent>
           </Card>
