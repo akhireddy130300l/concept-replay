@@ -278,23 +278,54 @@ Deno.serve(async (req) => {
       averageCostKnown: baseMetricsList[idx].averageCost !== null,
     })),
   };
-  let interpretation = fallbackInterpretation();
+  let interpretation: Interpretation = fallbackInterpretation();
   let geminiOk = false;
+  let aiFailureCategory: string | null = null;
   if (LOVABLE_KEY) {
-    const ai = await generateInterpretation(evidence, LOVABLE_KEY);
+    const ai = await generateInterpretation(evidence, LOVABLE_KEY, { requestId });
     if (ai.ok) {
       interpretation = ai.data;
       toolsSucceeded.push("gemini");
       geminiOk = true;
+    } else {
+      aiFailureCategory = ai.reason;
     }
+  } else {
+    aiFailureCategory = "ai_gateway_unconfigured";
   }
 
-  // 8) Deterministic overrides on Gemini output.
-  // Force assessment_type to deterministic value.
+  // 8) Deterministic fallback when Gemini failed but core market data is present.
+  if (!geminiOk) {
+    const fbHoldings = evidenceHoldings.map((h, idx) => ({
+      hasPrice: h.hasPrice as boolean,
+      hasTechnicals: h.return1Session !== null || h.return7Session !== null || h.rsi14 !== null,
+      return1Session: h.return1Session as number | null,
+      return7Session: h.return7Session as number | null,
+      drawdownFromRecentHighPct: h.drawdownFromRecentHighPct as number | null,
+      supportBreak: holdingRows[idx].technicals?.supportBreak === true,
+      rsi14: h.rsi14 as number | null,
+    }));
+    const fbStatus = deriveDeterministicFallbackStatus({
+      basis: totals.basis,
+      accountConcentrationAvailable: totals.accountConcentrationAvailable,
+      holdings: fbHoldings,
+      concentrationLevels: baseMetricsList.map((m) => m.concentrationLevel),
+      assessmentType: portfolioAssessment,
+    });
+    interpretation = {
+      status: fbStatus,
+      confidence: "Low",
+      assessment_type: portfolioAssessment,
+      interpretation:
+        "AI interpretation was unavailable. The factual report below was generated from verified market data.",
+    };
+  }
+
+  // 9) Deterministic overrides on Gemini output.
   if (interpretation.assessment_type !== portfolioAssessment) {
     interpretation = { ...interpretation, assessment_type: portfolioAssessment };
   }
-  // Submitted-only: forbid Concentration review unless any holding has true account-level Very high/Critical.
+  // Submitted-only: forbid Concentration review (account concentration not assessed).
   if (totals.basis === "submitted_only" && interpretation.status === "Concentration review") {
     interpretation = {
       ...interpretation,
@@ -304,7 +335,7 @@ Deno.serve(async (req) => {
     };
   }
 
-  // 9) Render + send email.
+  // 10) Render + send email — to server-controlled report_email only.
   toolsAttempted.push("resend.email");
   const html = renderPrivateReportHtml({
     totals,
@@ -315,9 +346,13 @@ Deno.serve(async (req) => {
   });
   let emailSent = false;
   if (RESEND_KEY) {
-    const sendRes = await sendPrivateReport(recipientEmail, html, RESEND_KEY);
+    const sendRes = await sendPrivateReport(reportEmail, html, RESEND_KEY);
     if (sendRes.ok) { emailSent = true; toolsSucceeded.push("resend.email"); }
   }
+  console.log(JSON.stringify({
+    phase: "email_send", request_id: requestId,
+    email_sent: emailSent, fallback_used: !geminiOk, ai_failure_category: aiFailureCategory,
+  }));
 
   // 10) Persist computed fields.
   for (let i = 0; i < items.length; i++) {
