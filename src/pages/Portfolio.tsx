@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import { RequestStatusBadge } from "@/components/portfolio/RequestStatusBadge";
 import { RequestHistoryList, type RequestHistoryRow } from "@/components/portfolio/RequestHistoryList";
 import { MAX_HOLDINGS, type HoldingInput } from "@/lib/portfolio/schema";
 import { payloadFromHoldings, submitPortfolioResearch } from "@/lib/portfolio/api";
+import { fetchOwnPortfolioAccess, maskEmail } from "@/lib/portfolio/access";
 
 const FEATURE_ENABLED = String(import.meta.env.VITE_FEATURE_PORTFOLIO_AGENT ?? "").toLowerCase() === "true";
 
@@ -44,9 +45,12 @@ interface ActiveRequest {
 
 export default function Portfolio() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [authChecked, setAuthChecked] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string>("");
+  const [accessEnabled, setAccessEnabled] = useState<boolean | null>(null);
+  const [maskedReportEmail, setMaskedReportEmail] = useState<string>("");
 
   // Saved positions from DB.
   const [saved, setSaved] = useState<SavedPosition[]>([]);
@@ -73,21 +77,31 @@ export default function Portfolio() {
   // ── Auth gate ─────────────────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
-    supabase.auth.getUser().then(({ data }) => {
+    const intended = location.pathname + (location.search ?? "");
+    supabase.auth.getUser().then(async ({ data }) => {
       if (!mounted) return;
       if (!data.user) {
+        sessionStorage.setItem("post_login_redirect", intended);
         navigate("/auth", { replace: true });
         return;
       }
       setUserId(data.user.id);
       setUserEmail(data.user.email ?? "");
+      const access = await fetchOwnPortfolioAccess();
+      if (!mounted) return;
+      if (!access || !access.enabled) {
+        setAccessEnabled(false);
+      } else {
+        setAccessEnabled(true);
+        setMaskedReportEmail(maskEmail(access.reportEmail));
+      }
       setAuthChecked(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       if (!session) navigate("/auth", { replace: true });
     });
     return () => { mounted = false; sub.subscription.unsubscribe(); };
-  }, [navigate]);
+  }, [navigate, location.pathname, location.search]);
 
   // ── Load saved holdings ───────────────────────────────────────────────────
   const loadSaved = useCallback(async () => {
@@ -276,6 +290,22 @@ export default function Portfolio() {
     return <div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">Loading…</div>;
   }
 
+  if (accessEnabled === false) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle>Access restricted</CardTitle>
+            <CardDescription>Portfolio research is not enabled for this account.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => navigate("/dashboard")}>Back to dashboard</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const submitDisabled =
     !!activeRequest ||
     submitting ||
@@ -310,7 +340,7 @@ export default function Portfolio() {
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground">
-                Your private portfolio report will be emailed to <b className="text-foreground">{userEmail}</b> when ready. You can refresh this page; status updates every 3 seconds.
+                Your private portfolio report will be emailed to the configured report address <b className="text-foreground">{maskedReportEmail || "configured address"}</b> when ready. You can refresh this page; status updates every 3 seconds.
               </p>
             </CardContent>
           </Card>
@@ -456,7 +486,7 @@ export default function Portfolio() {
           saveHoldings={saveHoldings}
           cashBalance={cashBalance}
           accountTotalDeclared={accountTotalDeclared}
-          recipientEmail={userEmail}
+          recipientEmail={maskedReportEmail || "configured report address"}
           disabled={submitDisabled}
           busy={submitting || !!activeRequest}
           onConfirm={() => void handleSubmit()}

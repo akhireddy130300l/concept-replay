@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
   // Parse + reject identity/recipient-like fields.
   let raw: any;
   try { raw = await req.json(); } catch { return bad(400, { error: "invalid_json" }); }
-  for (const forbidden of ["user_id", "email", "recipient", "to", "user", "userId"]) {
+  for (const forbidden of ["user_id", "email", "recipient", "to", "user", "userId", "report_email", "reportEmail"]) {
     if (raw && typeof raw === "object" && forbidden in raw) {
       return bad(400, { error: "forbidden_field", field: forbidden });
     }
@@ -85,6 +85,17 @@ Deno.serve(async (req) => {
 
   // Service-role client for limit checks + writes (RLS would block authenticated writes).
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  // Owner-only access: portfolio_feature_access must have enabled=true for this user.
+  const accessCheck = await admin
+    .from("portfolio_feature_access")
+    .select("user_id, enabled")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (accessCheck.error) return bad(500, { error: "access_check_failed" });
+  if (!accessCheck.data || accessCheck.data.enabled !== true) {
+    return bad(403, { error: "portfolio_access_not_enabled" });
+  }
 
   // Cooldown: any request created in the last 120 seconds (any status).
   const cooldownIso = new Date(Date.now() - COOLDOWN_SECONDS * 1000).toISOString();
@@ -200,10 +211,15 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Fire-and-forget dispatch; do not await processing.
-  // Note: we use waitUntil-equivalent by not awaiting; runtime keeps it alive for the
-  // duration of this request's response cycle. A future Phase will add a sweeper.
-  dispatchProcessRequest(SUPABASE_URL, DISPATCH_SECRET, requestId).catch(() => { /* swallow */ });
+  // Background dispatch tracked by the runtime so it survives the response cycle.
+  // We send only x-internal-dispatch — never the service-role key — in the internal request.
+  const dispatchPromise = dispatchProcessRequest(SUPABASE_URL, DISPATCH_SECRET, requestId)
+    .catch((e) => { console.log(JSON.stringify({ phase: "dispatch_error", request_id: requestId, message: e instanceof Error ? e.message.slice(0, 120) : "unknown" })); });
+  // @ts-ignore EdgeRuntime is provided by Supabase Edge Functions runtime.
+  if (typeof EdgeRuntime !== "undefined" && typeof (EdgeRuntime as any).waitUntil === "function") {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(dispatchPromise);
+  }
 
   return new Response(JSON.stringify({ request_id: requestId, status: "pending" }), {
     status: 202,

@@ -12,10 +12,11 @@ import {
   computePeerAnalysis,
   computeTotals,
   DEFAULT_CONCENTRATION_THRESHOLDS,
+  deriveDeterministicFallbackStatus,
   peerClassificationToAssessmentType,
   type AssessmentType,
 } from "../_shared/portfolio-calc.ts";
-import { fallbackInterpretation, generateInterpretation, GEMINI_MODEL } from "../_shared/ai-gateway.ts";
+import { fallbackInterpretation, generateInterpretation, GEMINI_MODEL, type Interpretation } from "../_shared/ai-gateway.ts";
 import { renderPrivateReportHtml, sendPrivateReport, type HoldingReportRow, type PeerDetail } from "../_shared/email-private.ts";
 
 const CORS = {
@@ -71,14 +72,27 @@ Deno.serve(async (req) => {
   const userId = reqRow.user_id as string;
   const requestedAtUtcIso = (reqRow.created_at as string) ?? new Date().toISOString();
 
+  // Owner-only enforcement: load portfolio_feature_access for this user.
+  const accessRes = await admin
+    .from("portfolio_feature_access")
+    .select("user_id, enabled, report_email")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (accessRes.error || !accessRes.data || accessRes.data.enabled !== true || !accessRes.data.report_email) {
+    console.log(JSON.stringify({ phase: "access_check", request_id: requestId, failure_category: "portfolio_access_not_enabled" }));
+    await markFailed(admin, requestId, "portfolio_access_not_enabled");
+    return resp(200, { ok: false, reason: "portfolio_access_not_enabled" });
+  }
+  const reportEmail = accessRes.data.report_email as string;
+
+  // Authoritative auth user must still exist and have a confirmed email.
   const userLookup = await admin.auth.admin.getUserById(userId);
   if (userLookup.error || !userLookup.data?.user) {
     await markFailed(admin, requestId, "user_lookup_failed");
     return resp(200, { ok: false, reason: "user_lookup_failed" });
   }
   const authUser = userLookup.data.user;
-  const recipientEmail = authUser.email && authUser.email_confirmed_at ? authUser.email : null;
-  if (!recipientEmail) {
+  if (!authUser.email_confirmed_at || !authUser.email) {
     await markFailed(admin, requestId, "no_confirmed_recipient_email");
     return resp(200, { ok: false, reason: "no_confirmed_recipient_email" });
   }
@@ -176,6 +190,7 @@ Deno.serve(async (req) => {
           symbol: sym,
           available: true,
           price: t.price,
+          currency: r.chart.currency ?? null,
           return1Session: t.return1Session,
           return7Session: t.return7Session,
           condition: classifyPeerCondition(t.return1Session),
@@ -263,23 +278,54 @@ Deno.serve(async (req) => {
       averageCostKnown: baseMetricsList[idx].averageCost !== null,
     })),
   };
-  let interpretation = fallbackInterpretation();
+  let interpretation: Interpretation = fallbackInterpretation();
   let geminiOk = false;
+  let aiFailureCategory: string | null = null;
   if (LOVABLE_KEY) {
-    const ai = await generateInterpretation(evidence, LOVABLE_KEY);
+    const ai = await generateInterpretation(evidence, LOVABLE_KEY, { requestId });
     if (ai.ok) {
       interpretation = ai.data;
       toolsSucceeded.push("gemini");
       geminiOk = true;
+    } else {
+      aiFailureCategory = ai.reason;
     }
+  } else {
+    aiFailureCategory = "ai_gateway_unconfigured";
   }
 
-  // 8) Deterministic overrides on Gemini output.
-  // Force assessment_type to deterministic value.
+  // 8) Deterministic fallback when Gemini failed but core market data is present.
+  if (!geminiOk) {
+    const fbHoldings = evidenceHoldings.map((h, idx) => ({
+      hasPrice: h.hasPrice as boolean,
+      hasTechnicals: h.return1Session !== null || h.return7Session !== null || h.rsi14 !== null,
+      return1Session: h.return1Session as number | null,
+      return7Session: h.return7Session as number | null,
+      drawdownFromRecentHighPct: h.drawdownFromRecentHighPct as number | null,
+      supportBreak: holdingRows[idx].technicals?.supportBreak === true,
+      rsi14: h.rsi14 as number | null,
+    }));
+    const fbStatus = deriveDeterministicFallbackStatus({
+      basis: totals.basis,
+      accountConcentrationAvailable: totals.accountConcentrationAvailable,
+      holdings: fbHoldings,
+      concentrationLevels: baseMetricsList.map((m) => m.concentrationLevel),
+      assessmentType: portfolioAssessment,
+    });
+    interpretation = {
+      status: fbStatus,
+      confidence: "Low",
+      assessment_type: portfolioAssessment,
+      interpretation:
+        "AI interpretation was unavailable. The factual report below was generated from verified market data.",
+    };
+  }
+
+  // 9) Deterministic overrides on Gemini output.
   if (interpretation.assessment_type !== portfolioAssessment) {
     interpretation = { ...interpretation, assessment_type: portfolioAssessment };
   }
-  // Submitted-only: forbid Concentration review unless any holding has true account-level Very high/Critical.
+  // Submitted-only: forbid Concentration review (account concentration not assessed).
   if (totals.basis === "submitted_only" && interpretation.status === "Concentration review") {
     interpretation = {
       ...interpretation,
@@ -289,7 +335,7 @@ Deno.serve(async (req) => {
     };
   }
 
-  // 9) Render + send email.
+  // 10) Render + send email — to server-controlled report_email only.
   toolsAttempted.push("resend.email");
   const html = renderPrivateReportHtml({
     totals,
@@ -300,9 +346,13 @@ Deno.serve(async (req) => {
   });
   let emailSent = false;
   if (RESEND_KEY) {
-    const sendRes = await sendPrivateReport(recipientEmail, html, RESEND_KEY);
+    const sendRes = await sendPrivateReport(reportEmail, html, RESEND_KEY);
     if (sendRes.ok) { emailSent = true; toolsSucceeded.push("resend.email"); }
   }
+  console.log(JSON.stringify({
+    phase: "email_send", request_id: requestId,
+    email_sent: emailSent, fallback_used: !geminiOk, ai_failure_category: aiFailureCategory,
+  }));
 
   // 10) Persist computed fields.
   for (let i = 0; i < items.length; i++) {
@@ -341,7 +391,7 @@ Deno.serve(async (req) => {
     email_sent: emailSent,
     started_at: new Date(startedRunAt).toISOString(),
     completed_at: new Date().toISOString(),
-    safe_error_summary: geminiOk ? null : "gemini_fallback_used",
+    safe_error_summary: geminiOk ? null : (aiFailureCategory ?? "gemini_fallback_used"),
   });
 
   await admin.from("portfolio_research_requests").update({

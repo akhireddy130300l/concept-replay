@@ -203,3 +203,84 @@ export function peerClassificationToAssessmentType(c: PeerClassification): Asses
 
 function round2(n: number): number { return Math.round(n * 100) / 100; }
 function round4(n: number): number { return Math.round(n * 10000) / 10000; }
+
+// Allowed deterministic fallback statuses.
+export type FallbackStatus =
+  | "Monitor"
+  | "Position-size review"
+  | "Concentration review"
+  | "Sector-risk review"
+  | "Thesis review required"
+  | "Immediate manual review"
+  | "Insufficient data";
+
+export type FallbackInputHolding = {
+  hasPrice: boolean;
+  hasTechnicals: boolean;
+  return1Session: number | null;
+  return7Session: number | null;
+  drawdownFromRecentHighPct: number | null;
+  supportBreak: boolean;
+  rsi14: number | null;
+};
+
+/**
+ * Pure deterministic fallback status used when Gemini fails but core market data is present.
+ * - Returns "Insufficient data" ONLY when core owned-holding data is genuinely missing
+ *   (no valid current price OR all owned holdings missing technicals).
+ * - Peer availability does NOT affect this; peer-unavailable alone never produces Insufficient data.
+ * - "Concentration review" only when account_total basis AND any holding is Very high / Critical.
+ * - "Sector-risk review" supported by broad peer weakness (passed via assessmentType).
+ * - "Thesis review required" supported by material technical deterioration on any owned holding.
+ * - Never returns Buy/Sell — no such status exists in the allowed set.
+ */
+export function deriveDeterministicFallbackStatus(args: {
+  basis: "submitted_only" | "account_total";
+  accountConcentrationAvailable: boolean;
+  holdings: FallbackInputHolding[];
+  concentrationLevels: Array<ConcentrationLevel | null>;
+  assessmentType: AssessmentType;
+}): FallbackStatus {
+  const { basis, accountConcentrationAvailable, holdings, concentrationLevels, assessmentType } = args;
+
+  if (holdings.length === 0) return "Insufficient data";
+  const anyPrice = holdings.some((h) => h.hasPrice);
+  const anyTechnicals = holdings.some((h) => h.hasTechnicals);
+  if (!anyPrice || !anyTechnicals) return "Insufficient data";
+
+  // Material technical deterioration check.
+  const materiallyWeak = holdings.some((h) => {
+    if (!h.hasTechnicals) return false;
+    const dd = h.drawdownFromRecentHighPct;
+    const r1 = h.return1Session;
+    const r7 = h.return7Session;
+    return (
+      h.supportBreak === true ||
+      (typeof dd === "number" && dd <= -15) ||
+      (typeof r1 === "number" && r1 <= -7) ||
+      (typeof r7 === "number" && r7 <= -12)
+    );
+  });
+
+  // Account-level concentration check (only when account_total).
+  const veryConcentrated =
+    basis === "account_total" && accountConcentrationAvailable &&
+    concentrationLevels.some((c) => c === "Very high" || c === "Critical");
+
+  if (veryConcentrated) return "Concentration review";
+  if (materiallyWeak) return "Thesis review required";
+  if (assessmentType === "broad-peer-weakness") return "Sector-risk review";
+
+  // Mild deterioration -> Position-size review; otherwise Monitor.
+  const mildlyWeak = holdings.some((h) => {
+    if (!h.hasTechnicals) return false;
+    const r1 = h.return1Session;
+    const r7 = h.return7Session;
+    return (
+      (typeof r1 === "number" && r1 <= -3) ||
+      (typeof r7 === "number" && r7 <= -6)
+    );
+  });
+  if (mildlyWeak) return "Position-size review";
+  return "Monitor";
+}
