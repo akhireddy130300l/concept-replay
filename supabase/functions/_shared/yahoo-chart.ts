@@ -93,6 +93,7 @@ async function fetchOnce(symbol: string): Promise<YahooFetchResult> {
         previousClose: isValidNumber(meta.chartPreviousClose)
           ? meta.chartPreviousClose
           : isValidNumber(meta.previousClose) ? meta.previousClose : null,
+        currency: typeof meta.currency === "string" && meta.currency.length > 0 ? meta.currency : null,
         timestamps: aligned.timestamps,
         closes: aligned.closes,
         highs: aligned.highs,
