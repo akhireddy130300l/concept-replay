@@ -290,6 +290,22 @@ export default function Portfolio() {
     return <div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">Loading…</div>;
   }
 
+  if (accessEnabled === false) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle>Access restricted</CardTitle>
+            <CardDescription>Portfolio research is not enabled for this account.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => navigate("/dashboard")}>Back to dashboard</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const submitDisabled =
     !!activeRequest ||
     submitting ||
