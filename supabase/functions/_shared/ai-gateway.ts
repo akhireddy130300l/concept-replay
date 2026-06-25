@@ -17,7 +17,13 @@ export const InterpretationSchema = z.object({
     "Insufficient data",
   ]),
   confidence: z.enum(["Low", "Medium", "High"]),
-  assessment_type: z.enum(["stock-specific", "sector-wide", "mixed", "insufficient"]),
+  assessment_type: z.enum([
+    "stock-specific",
+    "broad-peer-weakness",
+    "mixed",
+    "peer-unavailable",
+    "insufficient",
+  ]),
   interpretation: z.string().min(1).max(800),
 });
 
@@ -29,15 +35,20 @@ export async function generateInterpretation(
   timeoutMs = 20000,
 ): Promise<{ ok: true; data: Interpretation } | { ok: false; reason: string; status: number | null }> {
   const system = [
-    "You are a research analyst assistant. You will be given precomputed numeric evidence as JSON.",
-    "Return STRICT JSON only with this schema:",
-    `{"status": one of ["Monitor","Position-size review","Concentration review","Sector-risk review","Thesis review required","Immediate manual review","Insufficient data"],`,
-    `"confidence": one of ["Low","Medium","High"],`,
-    `"assessment_type": one of ["stock-specific","sector-wide","mixed","insufficient"],`,
-    `"interpretation": string (concise, plain English, max 600 chars).}`,
-    "Rules: Do NOT invent numbers, prices, peers, or analyst data. Do NOT recommend Buy/Sell. Do NOT execute trades.",
-    "If evidence is incomplete or contradictory, return status=Insufficient data and confidence=Low.",
-    "Only describe what the provided numbers imply. This is decision support, not a trading instruction.",
+    "You are a research analyst assistant. You are given precomputed deterministic numeric evidence as JSON.",
+    "Return STRICT JSON only matching the provided schema fields: status, confidence, assessment_type, interpretation.",
+    "HARD RULES:",
+    "- Do NOT invent numbers, prices, peer tickers, or analyst data.",
+    "- Do NOT recommend Buy or Sell. Do NOT issue trading instructions.",
+    "- The peer set is a limited dynamic list of company peers, NOT a full market sector. Never call it 'sector-wide'.",
+    "- When evidence.concentrationBasis === 'submitted_only', the per-holding weight is a share of submitted holdings ONLY and does NOT prove full-account concentration. Do NOT assign status='Concentration review' based solely on submitted-only weight.",
+    "- Only treat concentration as account-level when evidence.accountConcentrationAvailable === true.",
+    "- Do NOT describe RSI > 30 as 'oversold'. Use the provided rsiCategory verbatim.",
+    "- Do NOT claim recommendation counts are 'unique analysts'. Refer to 'recommendation ratings'.",
+    "- The deterministic assessment_type is supplied in evidence.deterministicAssessmentType. You MUST return exactly that value for assessment_type.",
+    "- If evidence is incomplete or contradictory, return status='Insufficient data' and confidence='Low'.",
+    "- This is decision support, not a trading instruction.",
+    "Keep interpretation under 600 characters, plain English, factual.",
   ].join(" ");
 
   try {
