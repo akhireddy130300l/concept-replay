@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
   // Parse + reject identity/recipient-like fields.
   let raw: any;
   try { raw = await req.json(); } catch { return bad(400, { error: "invalid_json" }); }
-  for (const forbidden of ["user_id", "email", "recipient", "to", "user", "userId"]) {
+  for (const forbidden of ["user_id", "email", "recipient", "to", "user", "userId", "report_email", "reportEmail"]) {
     if (raw && typeof raw === "object" && forbidden in raw) {
       return bad(400, { error: "forbidden_field", field: forbidden });
     }
