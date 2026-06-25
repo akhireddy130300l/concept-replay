@@ -12,10 +12,11 @@ import {
   computePeerAnalysis,
   computeTotals,
   DEFAULT_CONCENTRATION_THRESHOLDS,
+  deriveDeterministicFallbackStatus,
   peerClassificationToAssessmentType,
   type AssessmentType,
 } from "../_shared/portfolio-calc.ts";
-import { fallbackInterpretation, generateInterpretation, GEMINI_MODEL } from "../_shared/ai-gateway.ts";
+import { fallbackInterpretation, generateInterpretation, GEMINI_MODEL, type Interpretation } from "../_shared/ai-gateway.ts";
 import { renderPrivateReportHtml, sendPrivateReport, type HoldingReportRow, type PeerDetail } from "../_shared/email-private.ts";
 
 const CORS = {
