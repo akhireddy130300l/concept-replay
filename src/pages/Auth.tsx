@@ -59,10 +59,9 @@ const Auth = () => {
     }
     setLoading(true);
     try {
-      // shouldCreateUser: false ensures we only send OTP to existing accounts
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { shouldCreateUser: false },
+      // Sends a password recovery email containing a 6-digit OTP
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth`,
       });
       if (error) throw error;
       toast({ title: "Code sent", description: "Check your email for a 6-digit verification code." });
