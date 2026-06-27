@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { useToast } from "@/hooks/use-toast";
 import { Brain } from "lucide-react";
 import { z } from "zod";
@@ -13,14 +12,12 @@ import { z } from "zod";
 const emailSchema = z.string().email("Invalid email address");
 const passwordSchema = z.string().min(6, "Password must be at least 6 characters");
 
-type Mode = "login" | "signup" | "forgot-email" | "forgot-otp";
+type Mode = "login" | "signup" | "forgot";
 
 const Auth = () => {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -34,23 +31,25 @@ const Auth = () => {
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Don't auto-navigate while user is resetting password via OTP flow
-      if (session && event === "SIGNED_IN" && mode !== "forgot-otp") {
+      // If this is a password recovery session, send the user to the reset page.
+      if (event === "PASSWORD_RECOVERY") {
+        navigate("/reset-password");
+        return;
+      }
+      if (session && event === "SIGNED_IN") {
         navigate(popPostLogin());
       }
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session && mode !== "forgot-otp") {
-        navigate(popPostLogin());
-      }
+      if (session) navigate(popPostLogin());
     });
 
     return () => subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigate, mode]);
+  }, [navigate]);
 
-  const handleSendOtp = async (e: React.FormEvent) => {
+  const handleForgot = async (e: React.FormEvent) => {
     e.preventDefault();
     const v = emailSchema.safeParse(email);
     if (!v.success) {
@@ -59,49 +58,15 @@ const Auth = () => {
     }
     setLoading(true);
     try {
-      // Sends a password recovery email containing a 6-digit OTP
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth`,
+        redirectTo: `${window.location.origin}/reset-password`,
       });
       if (error) throw error;
-      toast({ title: "Code sent", description: "Check your email for a 6-digit verification code." });
-      setMode("forgot-otp");
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyOtpAndReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (otp.length !== 6) {
-      toast({ title: "Invalid code", description: "Enter the 6-digit code.", variant: "destructive" });
-      return;
-    }
-    const pv = passwordSchema.safeParse(password);
-    if (!pv.success) {
-      toast({ title: "Invalid password", description: pv.error.errors[0].message, variant: "destructive" });
-      return;
-    }
-    if (password !== confirmPassword) {
-      toast({ title: "Passwords don't match", description: "Please retype your new password.", variant: "destructive" });
-      return;
-    }
-    setLoading(true);
-    try {
-      const { error: verifyError } = await supabase.auth.verifyOtp({
-        email,
-        token: otp,
-        type: "recovery",
+      toast({
+        title: "Check your email",
+        description: "We've sent you a link to reset your password.",
       });
-      if (verifyError) throw verifyError;
-
-      const { error: updateError } = await supabase.auth.updateUser({ password });
-      if (updateError) throw updateError;
-
-      toast({ title: "Password updated", description: "You're signed in with your new password." });
-      navigate("/dashboard");
+      setMode("login");
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
@@ -159,19 +124,11 @@ const Auth = () => {
   };
 
   const title =
-    mode === "forgot-otp"
-      ? "Enter Verification Code"
-      : mode === "forgot-email"
-      ? "Reset Password"
-      : mode === "login"
-      ? "Welcome Back"
-      : "Create Account";
+    mode === "forgot" ? "Reset Password" : mode === "login" ? "Welcome Back" : "Create Account";
 
   const description =
-    mode === "forgot-otp"
-      ? `We sent a 6-digit code to ${email}. Enter it below with your new password.`
-      : mode === "forgot-email"
-      ? "Enter your email and we'll send you a verification code."
+    mode === "forgot"
+      ? "Enter your email and we'll send you a reset link."
       : mode === "login"
       ? "Sign in to continue your learning journey"
       : "Start remembering everything you learn";
@@ -189,8 +146,8 @@ const Auth = () => {
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>
-          {mode === "forgot-email" && (
-            <form onSubmit={handleSendOtp} className="space-y-4">
+          {mode === "forgot" ? (
+            <form onSubmit={handleForgot} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -208,71 +165,10 @@ const Auth = () => {
                 className="w-full glossy-button bg-gradient-to-r from-primary to-secondary hover:opacity-90 text-primary-foreground font-medium"
                 disabled={loading}
               >
-                {loading ? "Sending..." : "Send Verification Code"}
+                {loading ? "Sending..." : "Send Reset Link"}
               </Button>
             </form>
-          )}
-
-          {mode === "forgot-otp" && (
-            <form onSubmit={handleVerifyOtpAndReset} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Verification Code</Label>
-                <div className="flex justify-center">
-                  <InputOTP maxLength={6} value={otp} onChange={setOtp}>
-                    <InputOTPGroup>
-                      <InputOTPSlot index={0} />
-                      <InputOTPSlot index={1} />
-                      <InputOTPSlot index={2} />
-                      <InputOTPSlot index={3} />
-                      <InputOTPSlot index={4} />
-                      <InputOTPSlot index={5} />
-                    </InputOTPGroup>
-                  </InputOTP>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-password">New Password</Label>
-                <Input
-                  id="new-password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="glass-input border-border/50 focus:border-primary/50"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm-password">Confirm New Password</Label>
-                <Input
-                  id="confirm-password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                  className="glass-input border-border/50 focus:border-primary/50"
-                />
-              </div>
-              <Button
-                type="submit"
-                className="w-full glossy-button bg-gradient-to-r from-primary to-secondary hover:opacity-90 text-primary-foreground font-medium"
-                disabled={loading}
-              >
-                {loading ? "Verifying..." : "Verify & Update Password"}
-              </Button>
-              <button
-                type="button"
-                onClick={handleSendOtp as any}
-                className="w-full text-sm text-primary hover:underline"
-                disabled={loading}
-              >
-                Resend code
-              </button>
-            </form>
-          )}
-
-          {(mode === "login" || mode === "signup") && (
+          ) : (
             <form onSubmit={handleAuth} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
@@ -302,7 +198,7 @@ const Auth = () => {
                 <div className="text-right">
                   <button
                     type="button"
-                    onClick={() => setMode("forgot-email")}
+                    onClick={() => setMode("forgot")}
                     className="text-sm text-primary hover:underline"
                   >
                     Forgot password?
@@ -320,15 +216,10 @@ const Auth = () => {
           )}
 
           <div className="mt-4 text-center text-sm">
-            {mode === "forgot-email" || mode === "forgot-otp" ? (
+            {mode === "forgot" ? (
               <button
                 type="button"
-                onClick={() => {
-                  setMode("login");
-                  setOtp("");
-                  setPassword("");
-                  setConfirmPassword("");
-                }}
+                onClick={() => setMode("login")}
                 className="text-primary hover:underline"
               >
                 Back to sign in
