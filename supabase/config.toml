@@ -15,4 +15,10 @@ verify_jwt = true
 [functions.process-portfolio-research]
 verify_jwt = false
 
+[functions.speaking-feedback]
+verify_jwt = true
+
+[functions.send-speaking-email]
+verify_jwt = false
+
 

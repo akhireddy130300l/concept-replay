@@ -8,6 +8,7 @@ import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Portfolio from "./pages/Portfolio";
+import Speaking from "./pages/Speaking";
 import NotFound from "./pages/NotFound";
 
 const FEATURE_PORTFOLIO_AGENT = String(import.meta.env.VITE_FEATURE_PORTFOLIO_AGENT ?? "").toLowerCase() === "true";
@@ -26,6 +27,7 @@ const App = () => (
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/dashboard" element={<Dashboard />} />
           {FEATURE_PORTFOLIO_AGENT && <Route path="/portfolio" element={<Portfolio />} />}
+          <Route path="/speaking-gym" element={<Speaking />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
