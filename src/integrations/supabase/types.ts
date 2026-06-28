@@ -344,6 +344,84 @@ export type Database = {
           },
         ]
       }
+      speaking_sessions: {
+        Row: {
+          completed_at: string
+          created_at: string
+          feedback: Json | null
+          id: string
+          is_recovery: boolean
+          mode: string
+          scenario_prompt: string
+          scenario_title: string
+          session_date: string
+          transcript: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string
+          created_at?: string
+          feedback?: Json | null
+          id?: string
+          is_recovery?: boolean
+          mode: string
+          scenario_prompt: string
+          scenario_title: string
+          session_date?: string
+          transcript: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string
+          created_at?: string
+          feedback?: Json | null
+          id?: string
+          is_recovery?: boolean
+          mode?: string
+          scenario_prompt?: string
+          scenario_title?: string
+          session_date?: string
+          transcript?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      speaking_user_state: {
+        Row: {
+          created_at: string
+          current_streak: number
+          last_completed_date: string | null
+          longest_streak: number
+          missed_count: number
+          paused: boolean
+          preferred_mode: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          current_streak?: number
+          last_completed_date?: string | null
+          longest_streak?: number
+          missed_count?: number
+          paused?: boolean
+          preferred_mode?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          current_streak?: number
+          last_completed_date?: string | null
+          longest_streak?: number
+          missed_count?: number
+          paused?: boolean
+          preferred_mode?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_portfolio_settings: {
         Row: {
           concentration_thresholds: Json
