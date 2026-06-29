@@ -1,6 +1,7 @@
 // Influence Speaking Gym — AI feedback endpoint.
-// JWT-required. Calls Lovable AI Gateway (Gemini) for structured speaking feedback.
-// Never logs full transcripts. Returns feedback JSON only — caller stores it.
+// JWT-required. Calls Google Gemini API DIRECTLY using a server-side GEMINI_API_KEY secret.
+// Lovable AI Gateway is intentionally NOT used by this function.
+// Never logs full transcripts, raw Gemini responses, or the API key.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { ALL_MODES, type SpeakingMode } from "../_shared/speaking-content.ts";
@@ -11,8 +12,9 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const MODEL = "google/gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_URL =
+  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 type Body = {
   mode: SpeakingMode;
@@ -32,25 +34,36 @@ function buildSystemPrompt(): string {
     "Be direct, useful, and motivating. Never harsh. Never preachy. No moralizing.",
     "Return STRICT JSON ONLY matching this shape (no markdown, no code fences):",
     `{
-      "corrected": string,        // small grammar/clarity fixes, preserves voice
-      "natural": string,          // how a fluent native professional would phrase it
-      "powerful": string,         // confident, persuasive, leader-like rewrite
-      "role_style": string,       // rewritten in the selected mode's style
-      "did_well": string[],       // 2-4 short bullets
-      "weak_phrases": string[],   // 2-5 specific phrases from the transcript that weaken it
-      "stronger_phrases": string[], // 2-5 direct replacements aligned by index with weak_phrases when possible
-      "filler_issues": string,    // 1-2 sentences on filler words / hesitation patterns observed
+      "corrected": string,
+      "natural": string,
+      "powerful": string,
+      "role_style": string,
+      "did_well": string[],
+      "weak_phrases": string[],
+      "stronger_phrases": string[],
+      "filler_issues": string,
       "scores": {
-        "clarity": number,             // 0-10
-        "confidence": number,          // 0-10
-        "persuasion": number,          // 0-10
-        "structure": number,           // 0-10
-        "executive_presence": number   // 0-10
+        "clarity": number,
+        "confidence": number,
+        "persuasion": number,
+        "structure": number,
+        "executive_presence": number
       },
-      "tomorrows_drill": string   // one small, specific 2-minute drill for tomorrow
+      "tomorrows_drill": string
     }`,
     "Keep each text field under 600 characters. Be concrete. Quote phrases when useful.",
   ].join("\n");
+}
+
+function extractJson(raw: string): string {
+  const t = raw.trim();
+  const fence = t.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
+  if (fence) return fence[1].trim();
+  // Fallback: find first { ... last }
+  const i = t.indexOf("{");
+  const j = t.lastIndexOf("}");
+  if (i !== -1 && j !== -1 && j > i) return t.slice(i, j + 1);
+  return t;
 }
 
 Deno.serve(async (req) => {
@@ -59,10 +72,10 @@ Deno.serve(async (req) => {
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
-    if (!LOVABLE_API_KEY) {
-      return new Response(JSON.stringify({ error: "AI gateway not configured" }), {
+    if (!GEMINI_API_KEY) {
+      return new Response(JSON.stringify({ error: "Gemini API key is not configured." }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -105,50 +118,59 @@ Deno.serve(async (req) => {
       transcript,
     };
 
-    const res = await fetch(GATEWAY_URL, {
+    const systemPrompt = buildSystemPrompt();
+
+    // Google Gemini direct API call (generateContent)
+    const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: "system", content: buildSystemPrompt() },
-          { role: "user", content: JSON.stringify(userPayload) },
-        ],
-        response_format: { type: "json_object" },
+        systemInstruction: { role: "system", parts: [{ text: systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: JSON.stringify(userPayload) }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.7,
+        },
       }),
     });
 
     if (res.status === 429) {
-      return new Response(JSON.stringify({ error: "Coaching is busy right now. Try again in a moment." }), {
+      return new Response(JSON.stringify({ error: "Gemini rate limit reached. Please try again later." }), {
         status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (res.status === 402) {
-      return new Response(JSON.stringify({ error: "AI credits exhausted. Add credits to continue." }), {
-        status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
     if (!res.ok) {
-      // Do NOT log transcript on failure.
-      console.log(JSON.stringify({ phase: "speaking_feedback", failure_category: "ai_gateway_error", http_status: res.status }));
-      return new Response(JSON.stringify({ error: "Coaching is unavailable. Please try again." }), {
+      console.log(JSON.stringify({ phase: "speaking_feedback", failure_category: "gemini_error", http_status: res.status }));
+      return new Response(JSON.stringify({ error: "Feedback could not be generated right now. Please try again later." }), {
         status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const json = await res.json();
-    const content: string | undefined = json?.choices?.[0]?.message?.content;
-    if (!content) {
-      return new Response(JSON.stringify({ error: "Empty coaching response." }), {
+    let json: any;
+    try { json = await res.json(); } catch {
+      return new Response(JSON.stringify({ error: "Feedback could not be generated right now. Please try again later." }), {
         status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const parts = json?.candidates?.[0]?.content?.parts;
+    const content: string | undefined = Array.isArray(parts)
+      ? parts.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("").trim()
+      : undefined;
+
+    if (!content) {
+      console.log(JSON.stringify({ phase: "speaking_feedback", failure_category: "gemini_empty" }));
+      return new Response(JSON.stringify({ error: "Feedback could not be generated right now. Please try again later." }), {
+        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     let feedback: unknown;
     try {
-      const stripped = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "");
-      feedback = JSON.parse(stripped);
+      feedback = JSON.parse(extractJson(content));
     } catch {
-      return new Response(JSON.stringify({ error: "Coaching returned invalid JSON." }), {
+      console.log(JSON.stringify({ phase: "speaking_feedback", failure_category: "invalid_json" }));
+      return new Response(JSON.stringify({ error: "Feedback could not be generated right now. Please try again later." }), {
         status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
