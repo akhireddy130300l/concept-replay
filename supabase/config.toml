@@ -21,4 +21,5 @@ verify_jwt = true
 [functions.send-speaking-email]
 verify_jwt = false
 
-
+[functions.stock-ticker-insight]
+verify_jwt = true

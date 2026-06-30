@@ -1,7 +1,5 @@
 // Influence Speaking Gym — AI feedback endpoint.
-// JWT-required. Calls Google Gemini API DIRECTLY using a server-side GEMINI_API_KEY secret.
-// Lovable AI Gateway is intentionally NOT used by this function.
-// Never logs full transcripts, raw Gemini responses, or the API key.
+// JWT-required. Direct Gemini via GEMINI_API_KEY. No Lovable AI Gateway.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { ALL_MODES, type SpeakingMode } from "../_shared/speaking-content.ts";
@@ -13,13 +11,14 @@ const corsHeaders = {
 };
 
 const GEMINI_MODEL = "gemini-2.5-flash";
-const GEMINI_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 type Body = {
   mode: SpeakingMode;
   scenarioTitle: string;
-  scenarioPrompt: string;
+  scenarioContext: string; // full deep context for the model
+  improvementTarget: string;
+  rounds: { opening: string; pressure: string; close: string };
   transcript: string;
 };
 
@@ -27,12 +26,28 @@ function isMode(s: unknown): s is SpeakingMode {
   return typeof s === "string" && (ALL_MODES as string[]).includes(s);
 }
 
+function isGibberish(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (t.length < 50) return true;
+  const tokens = t.split(/\s+/).filter(Boolean);
+  if (tokens.length < 12) return true;
+  const unique = new Set(tokens);
+  const diversity = unique.size / tokens.length;
+  if (diversity < 0.35) return true;
+  // Single token dominance
+  const counts = new Map<string, number>();
+  for (const tk of tokens) counts.set(tk, (counts.get(tk) ?? 0) + 1);
+  for (const [, c] of counts) if (c / tokens.length > 0.25) return true;
+  return false;
+}
+
 function buildSystemPrompt(): string {
   return [
     "You are an elite communication coach for professionals: sales leaders, tech leads, marketers, public speakers, and executives.",
-    "This is NOT beginner English. The speaker is already fluent. Your job is to sharpen confidence, clarity, persuasion, structure, and executive presence.",
-    "Be direct, useful, and motivating. Never harsh. Never preachy. No moralizing.",
-    "Return STRICT JSON ONLY matching this shape (no markdown, no code fences):",
+    "This is NOT beginner English. The speaker is already fluent. Sharpen confidence, clarity, persuasion, structure, and executive presence.",
+    "You will receive a deep scenario, the speaker's improvement target for today, and a transcript split into 3 rounds (opening, pressure, close).",
+    "Judge the IMPROVEMENT TARGET strictly. A high overall score does NOT automatically mean the target was met.",
+    "Return STRICT JSON ONLY (no markdown, no code fences) matching this exact shape:",
     `{
       "corrected": string,
       "natural": string,
@@ -43,15 +58,18 @@ function buildSystemPrompt(): string {
       "stronger_phrases": string[],
       "filler_issues": string,
       "scores": {
-        "clarity": number,
-        "confidence": number,
-        "persuasion": number,
-        "structure": number,
-        "executive_presence": number
+        "clarity": number, "confidence": number, "persuasion": number,
+        "structure": number, "executive_presence": number
       },
+      "main_weakness": string,
+      "improvement_target_met": "met" | "partial" | "missed",
+      "target_evaluated": string,
+      "meaningful_attempt": boolean,
       "tomorrows_drill": string
     }`,
-    "Keep each text field under 600 characters. Be concrete. Quote phrases when useful.",
+    "Keep each text field under 600 characters. Quote phrases when useful.",
+    "meaningful_attempt = false ONLY if the transcript is gibberish, off-topic, or clearly not a real rep.",
+    "tomorrows_drill must be a concrete, single-sentence improvement target for the NEXT session, derived from today's main_weakness.",
   ].join("\n");
 }
 
@@ -59,7 +77,6 @@ function extractJson(raw: string): string {
   const t = raw.trim();
   const fence = t.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
   if (fence) return fence[1].trim();
-  // Fallback: find first { ... last }
   const i = t.indexOf("{");
   const j = t.lastIndexOf("}");
   if (i !== -1 && j !== -1 && j > i) return t.slice(i, j + 1);
@@ -93,44 +110,52 @@ Deno.serve(async (req) => {
 
     const body = (await req.json().catch(() => null)) as Body | null;
     if (!body || !isMode(body.mode) || typeof body.transcript !== "string" ||
-        typeof body.scenarioTitle !== "string" || typeof body.scenarioPrompt !== "string") {
+        typeof body.scenarioTitle !== "string" || typeof body.scenarioContext !== "string" ||
+        typeof body.improvementTarget !== "string" || !body.rounds ||
+        typeof body.rounds.opening !== "string" ||
+        typeof body.rounds.pressure !== "string" ||
+        typeof body.rounds.close !== "string") {
       return new Response(JSON.stringify({ error: "Invalid request body" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const transcript = body.transcript.trim();
-    if (transcript.length < 20) {
-      return new Response(JSON.stringify({ error: "Transcript is too short. Speak or type at least a few sentences." }), {
+    if (transcript.length > 8000) {
+      return new Response(JSON.stringify({ error: "Transcript is too long. Keep it under 8000 characters." }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (transcript.length > 6000) {
-      return new Response(JSON.stringify({ error: "Transcript is too long. Keep it under 6000 characters." }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+
+    // Each round must have substance
+    const r = body.rounds;
+    if (r.opening.trim().length < 40 || r.pressure.trim().length < 40 || r.close.trim().length < 40) {
+      return new Response(JSON.stringify({
+        error: "This does not look like a complete speaking rep. Try again with clearer, fuller responses.",
+      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (isGibberish(transcript)) {
+      return new Response(JSON.stringify({
+        error: "This does not look like a complete speaking rep. Try again with clearer, fuller responses.",
+      }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const userPayload = {
       mode: body.mode,
       scenario_title: body.scenarioTitle,
-      scenario_prompt: body.scenarioPrompt,
+      scenario_context: body.scenarioContext,
+      improvement_target: body.improvementTarget,
+      rounds: r,
       transcript,
     };
 
-    const systemPrompt = buildSystemPrompt();
-
-    // Google Gemini direct API call (generateContent)
     const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        systemInstruction: { role: "system", parts: [{ text: systemPrompt }] },
+        systemInstruction: { role: "system", parts: [{ text: buildSystemPrompt() }] },
         contents: [{ role: "user", parts: [{ text: JSON.stringify(userPayload) }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          temperature: 0.7,
-        },
+        generationConfig: { responseMimeType: "application/json", temperature: 0.7 },
       }),
     });
 
@@ -165,15 +190,24 @@ Deno.serve(async (req) => {
       });
     }
 
-    let feedback: unknown;
-    try {
-      feedback = JSON.parse(extractJson(content));
-    } catch {
+    let feedback: any;
+    try { feedback = JSON.parse(extractJson(content)); } catch {
       console.log(JSON.stringify({ phase: "speaking_feedback", failure_category: "invalid_json" }));
       return new Response(JSON.stringify({ error: "Feedback could not be generated right now. Please try again later." }), {
         status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Normalize target verdict.
+    const m = String(feedback.improvement_target_met ?? "").toLowerCase();
+    if (m !== "met" && m !== "partial" && m !== "missed") {
+      feedback.improvement_target_met = "partial";
+    } else {
+      feedback.improvement_target_met = m;
+    }
+    if (typeof feedback.meaningful_attempt !== "boolean") feedback.meaningful_attempt = true;
+    if (typeof feedback.main_weakness !== "string") feedback.main_weakness = "";
+    if (typeof feedback.target_evaluated !== "string") feedback.target_evaluated = body.improvementTarget;
 
     return new Response(JSON.stringify({ feedback }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },

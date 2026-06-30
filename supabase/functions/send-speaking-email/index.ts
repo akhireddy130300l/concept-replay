@@ -1,10 +1,11 @@
 // Influence Speaking Gym — daily session email.
-// Sends today's mode/scenario/warm-up to authorized users only (Resend in testing mode).
+// Sends today's mode/scenario/warm-up OR a recovery email when the user is paused.
 // Auth: requires CRON_SECRET header, OR a valid JWT (manual trigger by the user).
-// Never includes transcripts or feedback.
+// Manual triggers always send the regular session email (never recovery) so the user can re-engage.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { todaysMode, todaysScenario, todaysWarmups, MODE_DESCRIPTIONS } from "../_shared/speaking-content.ts";
+import { classifyGate } from "../_shared/speaking-gate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -144,28 +145,92 @@ Deno.serve(async (req) => {
     const scenario = todaysScenario(mode, now);
     const warmups = todaysWarmups(now);
     const ctaUrl = `${APP_BASE_URL || ""}/speaking-gym`;
-    const html = renderEmail({
+    const sessionHtml = renderEmail({
       mode,
       scenarioTitle: scenario.title,
-      scenarioPrompt: scenario.prompt,
+      scenarioPrompt: scenario.your_task,
       warmups,
       ctaUrl,
     });
 
-    const results: Array<{ to: string; ok: boolean; status: number | null; reason?: string }> = [];
+    function renderRecoveryEmail(): string {
+      return `<!doctype html><html><head><meta charset="utf-8"/></head>
+<body style="margin:0;padding:0;background:#fef2f2;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="padding:24px 0;">
+    <tr><td align="center">
+      <table width="600" style="max-width:600px;background:#ffffff;border-radius:16px;padding:28px;">
+        <tr><td>
+          <h1 style="margin:0 0 12px 0;color:#991b1b;font-size:20px;">Action Required: Complete Speaking Gym to Resume Emails</h1>
+          <p style="color:#374151;font-size:14px;line-height:1.6;">
+            Your scheduled emails are paused because your daily speaking session was not completed.
+            Complete one good speaking session to resume all scheduled emails.
+          </p>
+          <div style="text-align:center;margin:22px 0 6px 0;">
+            <a href="${ctaUrl}" style="display:inline-block;background:#dc2626;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:10px;font-size:15px;">Open Speaking Gym</a>
+          </div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+    }
+
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const results: Array<{ to: string; ok: boolean; status: number | null; reason?: string; kind: "session" | "recovery" | "skipped" }> = [];
+
     for (const r of recipients) {
+      // Per-recipient gate check (only enforced on cron sends).
+      let isPaused = false;
+      let lastRecoveryDate: string | null = null;
+      if (isCron) {
+        const { data: st } = await admin
+          .from("speaking_user_state")
+          .select("last_completed_date, speaking_gate_started_at, last_recovery_email_date")
+          .eq("user_id", r.user_id)
+          .maybeSingle();
+        const status = classifyGate({
+          gateStartedAt: st?.speaking_gate_started_at ?? null,
+          lastCompletedDate: st?.last_completed_date ?? null,
+        });
+        isPaused = status === "paused";
+        lastRecoveryDate = st?.last_recovery_email_date ?? null;
+      }
+
+      let subject: string;
+      let html: string;
+      let kind: "session" | "recovery";
+      if (isPaused) {
+        if (lastRecoveryDate === todayDate) {
+          results.push({ to: r.report_email, ok: true, status: 0, kind: "skipped", reason: "recovery_already_sent_today" });
+          continue;
+        }
+        subject = "Action Required: Complete Speaking Gym to Resume Emails";
+        html = renderRecoveryEmail();
+        kind = "recovery";
+      } else {
+        subject = "Your 10-Minute Influence Speaking Session";
+        html = sessionHtml;
+        kind = "session";
+      }
+
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
         body: JSON.stringify({
           from: "Influence Gym <onboarding@resend.dev>",
           to: [r.report_email],
-          subject: "Your 10-Minute Influence Speaking Session",
+          subject,
           html,
         }),
       });
       const ok = res.status >= 200 && res.status < 300;
-      results.push({ to: r.report_email, ok, status: res.status, reason: ok ? undefined : `resend_${res.status}` });
+      results.push({ to: r.report_email, ok, status: res.status, kind, reason: ok ? undefined : `resend_${res.status}` });
+      if (ok && kind === "recovery") {
+        await admin
+          .from("speaking_user_state")
+          .update({ last_recovery_email_date: todayDate })
+          .eq("user_id", r.user_id);
+      }
     }
 
     return new Response(JSON.stringify({ ok: true, sent: results.filter((x) => x.ok).length, results }), {
