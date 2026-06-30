@@ -350,8 +350,12 @@ export type Database = {
           created_at: string
           feedback: Json | null
           id: string
+          improvement_target: string | null
+          improvement_target_met: string | null
           is_recovery: boolean
+          main_weakness: string | null
           mode: string
+          rounds: Json | null
           scenario_prompt: string
           scenario_title: string
           session_date: string
@@ -363,8 +367,12 @@ export type Database = {
           created_at?: string
           feedback?: Json | null
           id?: string
+          improvement_target?: string | null
+          improvement_target_met?: string | null
           is_recovery?: boolean
+          main_weakness?: string | null
           mode: string
+          rounds?: Json | null
           scenario_prompt: string
           scenario_title: string
           session_date?: string
@@ -376,8 +384,12 @@ export type Database = {
           created_at?: string
           feedback?: Json | null
           id?: string
+          improvement_target?: string | null
+          improvement_target_met?: string | null
           is_recovery?: boolean
+          main_weakness?: string | null
           mode?: string
+          rounds?: Json | null
           scenario_prompt?: string
           scenario_title?: string
           session_date?: string
@@ -391,10 +403,14 @@ export type Database = {
           created_at: string
           current_streak: number
           last_completed_date: string | null
+          last_main_weakness: string | null
+          last_recovery_email_date: string | null
           longest_streak: number
           missed_count: number
+          next_improvement_target: string | null
           paused: boolean
           preferred_mode: string | null
+          speaking_gate_started_at: string | null
           updated_at: string
           user_id: string
         }
@@ -402,10 +418,14 @@ export type Database = {
           created_at?: string
           current_streak?: number
           last_completed_date?: string | null
+          last_main_weakness?: string | null
+          last_recovery_email_date?: string | null
           longest_streak?: number
           missed_count?: number
+          next_improvement_target?: string | null
           paused?: boolean
           preferred_mode?: string | null
+          speaking_gate_started_at?: string | null
           updated_at?: string
           user_id: string
         }
@@ -413,12 +433,46 @@ export type Database = {
           created_at?: string
           current_streak?: number
           last_completed_date?: string | null
+          last_main_weakness?: string | null
+          last_recovery_email_date?: string | null
           longest_streak?: number
           missed_count?: number
+          next_improvement_target?: string | null
           paused?: boolean
           preferred_mode?: string | null
+          speaking_gate_started_at?: string | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      stock_ticker_insight_cache: {
+        Row: {
+          created_by: string | null
+          expires_at: string
+          generated_at: string
+          grounded: boolean
+          id: string
+          payload: Json
+          ticker: string
+        }
+        Insert: {
+          created_by?: string | null
+          expires_at: string
+          generated_at?: string
+          grounded?: boolean
+          id?: string
+          payload: Json
+          ticker: string
+        }
+        Update: {
+          created_by?: string | null
+          expires_at?: string
+          generated_at?: string
+          grounded?: boolean
+          id?: string
+          payload?: Json
+          ticker?: string
         }
         Relationships: []
       }

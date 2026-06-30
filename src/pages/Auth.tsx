@@ -26,7 +26,9 @@ const Auth = () => {
     const popPostLogin = (): string => {
       const stored = sessionStorage.getItem("post_login_redirect");
       if (stored) sessionStorage.removeItem("post_login_redirect");
-      if (stored && stored.startsWith("/") && !stored.startsWith("//")) return stored;
+      const urlParam = new URLSearchParams(window.location.search).get("post_login_redirect");
+      const candidate = stored || urlParam || "";
+      if (candidate && candidate.startsWith("/") && !candidate.startsWith("//")) return candidate;
       return "/dashboard";
     };
 

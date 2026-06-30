@@ -1,11 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Resend } from "https://esm.sh/resend@4.0.0";
+import { classifyGate, WARNING_BANNER_HTML } from "../_shared/speaking-gate.ts";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const APP_BASE_URL = Deno.env.get("APP_BASE_URL") || "";
 
 const FUNCTION_VERSION = "research-v10-corrected-rr-no-preselect-2026-06-21";
 
@@ -15,6 +17,16 @@ const corsHeaders = {
 };
 
 const REVISION_INTERVALS = [1, 3, 7, 14, 30, 60];
+
+// Ticker → /stock-insight link. Falls back to plain text when APP_BASE_URL missing,
+// so we never produce broken hrefs in the email.
+function tickerLink(symbol: string, style = ""): string {
+  const safe = String(symbol || "").replace(/[^A-Z0-9.\-]/gi, "").toUpperCase();
+  const text = `<span>${safe}</span>`;
+  if (!APP_BASE_URL) return safe;
+  const href = `${APP_BASE_URL.replace(/\/+$/, "")}/stock-insight?ticker=${encodeURIComponent(safe)}&source=stock-email`;
+  return `<a href="${href}" style="color:inherit;text-decoration:underline;${style}" target="_blank" rel="noopener">${safe}</a>`;
+}
 
 
 const YAHOO_GAINERS_PAGE_URL = "https://finance.yahoo.com/markets/stocks/gainers/";
@@ -1988,7 +2000,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
               <tr>
                 <td style="vertical-align:middle;">
                   ${rankBadge(i)}
-                  <strong style="font-size:18px;color:#0f172a;margin-left:10px;letter-spacing:0.3px;">${escapeHtml(m.symbol)}</strong>
+                  <strong style="font-size:18px;color:#0f172a;margin-left:10px;letter-spacing:0.3px;">${tickerLink(m.symbol)}</strong>
                   <div style="color:#64748b;font-size:13px;margin-top:4px;">${escapeHtml(m.companyName)}</div>
                 </td>
                 <td style="vertical-align:middle;text-align:right;white-space:nowrap;">
@@ -2035,7 +2047,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
     const rows = movers.map((m, i) => `
       <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"};">
         <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;white-space:nowrap;font-size:12px;">#${i + 1}</td>
-        <td style="padding:10px 8px;font-weight:800;color:#0f172a;text-align:left;white-space:nowrap;font-size:13px;">${escapeHtml(m.symbol)}</td>
+        <td style="padding:10px 8px;font-weight:800;color:#0f172a;text-align:left;white-space:nowrap;font-size:13px;">${tickerLink(m.symbol)}</td>
         <td style="padding:10px 8px;color:#334155;text-align:left;white-space:nowrap;font-size:12px;">${escapeHtml(m.companyName)}</td>
         <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;font-size:12px;">$${escapeHtml(m.price)}</td>
         <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtDailyPL(m.percentGainRaw)}</td>
@@ -2132,7 +2144,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       return `
         <tr style="background:${i % 2 === 0 ? "#ffffff" : "#f8fafc"};">
           <td style="padding:10px 8px;font-weight:700;color:#0f172a;text-align:left;white-space:nowrap;font-size:12px;">#${i + 1}</td>
-          <td style="padding:10px 8px;font-weight:800;color:#0f172a;text-align:left;white-space:nowrap;font-size:13px;">${escapeHtml(m.symbol)}</td>
+          <td style="padding:10px 8px;font-weight:800;color:#0f172a;text-align:left;white-space:nowrap;font-size:13px;">${tickerLink(m.symbol)}</td>
           <td style="padding:10px 8px;color:#334155;text-align:left;white-space:nowrap;font-size:12px;">${escapeHtml(m.companyName)}</td>
           <td style="padding:10px 8px;color:#0f172a;font-weight:600;text-align:right;white-space:nowrap;font-size:12px;">$${escapeHtml(m.price)}</td>
           <td style="padding:10px 8px;text-align:right;white-space:nowrap;font-size:12px;">${fmtPL(m.percentGainRaw, m.percentGain, suffix)}</td>
@@ -2329,7 +2341,7 @@ function buildMarketGainersHTML(result: MarketGainersResult): string {
       const sevenSuffix = c.sevenDaySinceListing ? `<span style="color:#64748b;font-weight:500;font-size:10px;"> since-listing</span>` : "";
       const isPriority = i < 5;
       const rowBg = isPriority ? (i % 2 === 0 ? "#f0fdf4" : "#ecfdf5") : (i % 2 === 0 ? "#ffffff" : "#f8fafc");
-      tickerRows.push(`<tr style="background:${rowBg};"><td style="${tdTicker}">${escapeHtml(c.symbol)}</td></tr>`);
+      tickerRows.push(`<tr style="background:${rowBg};"><td style="${tdTicker}">${tickerLink(c.symbol)}</td></tr>`);
       mainRows.push(`
         <tr style="background:${rowBg};">
           <td style="${tdBase}font-weight:700;">${isPriority ? `<span style="color:#047857;">#${i + 1}</span>` : `#${i + 1}`}</td>
@@ -2826,6 +2838,23 @@ serve(async (req) => {
       const userEmail = userData.user.email;
       console.log("User email:", userEmail);
 
+      // Speaking Gym accountability gate — only enforced when the user has activated it.
+      const { data: speakingState } = await supabase
+        .from("speaking_user_state")
+        .select("last_completed_date, speaking_gate_started_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const gateStatus = classifyGate({
+        gateStartedAt: speakingState?.speaking_gate_started_at ?? null,
+        lastCompletedDate: speakingState?.last_completed_date ?? null,
+      });
+      if (gateStatus === "paused") {
+        console.log(JSON.stringify({ phase: "reminder_send", user_id: userId, skipped_reason: "speaking_paused" }));
+        // Don't advance next_revision_date — topics will be picked up again when the user resumes.
+        continue;
+      }
+      const speakingWarningBanner = gateStatus === "warning" ? WARNING_BANNER_HTML : "";
+
       // Fetch user reminder preferences (timezone + time-of-day).
       const { data: prefsRow } = await supabase
         .from("user_preferences")
@@ -2912,6 +2941,7 @@ serve(async (req) => {
 
       const emailContent = `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff;">
+          ${speakingWarningBanner}
           ${hasRegularTopics ? `
             <h1 style="color: #0891b2; font-size: 28px; margin-bottom: 10px; font-weight: 600;">🧠 Time to Review Your Topics!</h1>
             <p style="color: #475569; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">Hello! Here are the topics due for revision today:</p>
