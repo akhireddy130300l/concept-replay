@@ -142,14 +142,21 @@ const Auth = () => {
   };
 
   const title =
-    mode === "forgot" ? "Reset Password" : mode === "login" ? "Welcome Back" : "Create Account";
+    mode === "forgot"
+      ? "Reset Password"
+      : stockContext
+      ? (mode === "login" ? "Sign in to access Stock Research" : "Verify your email to continue")
+      : (mode === "login" ? "Welcome Back" : "Create Account");
 
   const description =
     mode === "forgot"
       ? "Enter your email and we'll send you a reset link."
-      : mode === "login"
-      ? "Sign in to continue your learning journey"
-      : "Start remembering everything you learn";
+      : stockContext
+      ? "Verify your email to view private stock research."
+      : (mode === "login"
+        ? "Sign in to continue your learning journey"
+        : "Start remembering everything you learn");
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[image:var(--gradient-hero)] p-4">
