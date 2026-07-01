@@ -21,6 +21,7 @@ import { RequestHistoryList, type RequestHistoryRow } from "@/components/portfol
 import { MAX_HOLDINGS, type HoldingInput } from "@/lib/portfolio/schema";
 import { payloadFromHoldings, submitPortfolioResearch } from "@/lib/portfolio/api";
 import { fetchOwnPortfolioAccess, maskEmail } from "@/lib/portfolio/access";
+import { StockResearchLayout } from "@/components/layouts/StockResearchLayout";
 
 const FEATURE_ENABLED = String(import.meta.env.VITE_FEATURE_PORTFOLIO_AGENT ?? "").toLowerCase() === "true";
 
