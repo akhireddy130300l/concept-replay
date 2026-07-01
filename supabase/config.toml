@@ -22,4 +22,4 @@ verify_jwt = true
 verify_jwt = false
 
 [functions.stock-ticker-insight]
-verify_jwt = true
+verify_jwt = false
