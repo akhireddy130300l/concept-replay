@@ -313,20 +313,13 @@ export default function Portfolio() {
     (accountTotalDeclared && cashBalance === null);
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b sticky top-0 bg-background/80 backdrop-blur z-10">
-        <div className="max-w-3xl mx-auto p-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")} aria-label="Back">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <Briefcase className="h-5 w-5" />
-            <h1 className="text-lg font-semibold">Portfolio Research</h1>
-          </div>
-        </div>
-      </header>
+    <StockResearchLayout
+      subtitle="Private Portfolio Research"
+      backTo="/dashboard"
+      showSignOut
+    >
+      <main className="space-y-6">
 
-      <main className="max-w-3xl mx-auto p-4 space-y-6">
         {activeRequest && (
           <Card>
             <CardHeader>
