@@ -1,11 +1,13 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, ExternalLink, RefreshCw, AlertTriangle, ShieldAlert } from "lucide-react";
+import {
+  ExternalLink, RefreshCw, AlertTriangle, ShieldAlert, CheckCircle2, Loader2, Circle,
+} from "lucide-react";
+import { StockResearchLayout } from "@/components/layouts/StockResearchLayout";
 
 type Insight = {
   ticker: string;
@@ -23,117 +25,175 @@ type Insight = {
 
 const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 
+const STEP_LABELS = [
+  "Checking cached insight",
+  "Searching latest news",
+  "Analyzing catalysts",
+  "Building summary",
+  "Preparing sources",
+];
+
 const StockInsight = () => {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const { toast } = useToast();
 
   const rawTicker = (params.get("ticker") || "").toUpperCase().trim();
   const ticker = TICKER_RE.test(rawTicker) ? rawTicker : "";
+  const source = params.get("source") || "";
 
-  const [authChecked, setAuthChecked] = useState(false);
   const [insight, setInsight] = useState<Insight | null>(null);
   const [grounded, setGrounded] = useState<boolean>(false);
   const [cached, setCached] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<number | null>(null);
 
-  const fetchInsight = useCallback(async (refresh = false) => {
-    if (!ticker) return;
-    setLoading(true);
+  const [stepIdx, setStepIdx] = useState(0);
+  const [slow, setSlow] = useState<"none" | "wait" | "very">("none");
+  const inflight = useRef(false);
+
+  const fetchInsight = useCallback(async (refresh: boolean) => {
+    if (!ticker || inflight.current) return;
+    inflight.current = true;
+
+    if (refresh) setRefreshing(true); else setLoading(true);
     setError(null);
+    setErrorCode(null);
+    setStepIdx(0);
+    setSlow("none");
+
+    // Visual step progression — advances every ~5s up to the final "preparing sources" step.
+    const stepTimers: number[] = [];
+    for (let i = 1; i < STEP_LABELS.length; i++) {
+      stepTimers.push(window.setTimeout(() => setStepIdx((s) => Math.max(s, i)), i * 5000));
+    }
+    const slowT = window.setTimeout(() => setSlow("wait"), 15000);
+    const verySlowT = window.setTimeout(() => setSlow("very"), 45000);
+
     try {
       const { data, error: err } = await supabase.functions.invoke("stock-ticker-insight", {
         body: { ticker, refresh },
       });
-      if (err) throw err;
-      if (data?.error) throw new Error(data.error);
+      if (err) {
+        // supabase-js wraps HTTP errors — try to pull status
+        const status = (err as { context?: { status?: number } })?.context?.status ?? null;
+        setErrorCode(status);
+        // Attempt to read the JSON body for a friendly message
+        let msg = err.message || "Could not load insight.";
+        try {
+          const ctx = (err as { context?: { text?: () => Promise<string> } })?.context;
+          if (ctx?.text) {
+            const body = await ctx.text();
+            const parsed = JSON.parse(body);
+            if (parsed?.error) msg = parsed.error;
+          }
+        } catch { /* ignore */ }
+        setError(mapError(msg, status));
+        return;
+      }
+      if (data?.error) {
+        setError(mapError(data.error, null));
+        return;
+      }
       setInsight(data.insight as Insight);
       setGrounded(!!data.grounded);
       setCached(!!data.cached);
+      setStepIdx(STEP_LABELS.length);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not load insight.";
-      setError(msg);
+      setError(mapError(msg, null));
     } finally {
+      stepTimers.forEach(clearTimeout);
+      clearTimeout(slowT);
+      clearTimeout(verySlowT);
       setLoading(false);
+      setRefreshing(false);
+      inflight.current = false;
     }
   }, [ticker]);
 
+  // Single fetch on mount — no auth-gate. Cached insights are available anonymously.
   useEffect(() => {
-    (async () => {
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess.session) {
-        navigate(`/auth?post_login_redirect=${encodeURIComponent(`/stock-insight?ticker=${ticker}&source=stock-email`)}`);
-        return;
-      }
-      setAuthChecked(true);
-      if (!ticker) {
-        setError("Invalid ticker symbol.");
-        setLoading(false);
-        return;
-      }
-      fetchInsight(false);
-    })();
-  }, [navigate, ticker, fetchInsight]);
+    if (!ticker) {
+      setError("Invalid ticker symbol.");
+      setLoading(false);
+      return;
+    }
+    void fetchInsight(false);
+  }, [ticker, fetchInsight]);
 
-  if (!authChecked) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[image:var(--gradient-hero)]">
-        <p className="text-muted-foreground">Checking your access…</p>
-      </div>
-    );
-  }
+  const handleRefresh = () => {
+    if (refreshing || loading || inflight.current) return;
+    void fetchInsight(true);
+  };
+
+  const handleSignInToGenerate = () => {
+    const target = `/stock-insight?ticker=${ticker}${source ? `&source=${encodeURIComponent(source)}` : ""}`;
+    sessionStorage.setItem("post_login_redirect", target);
+    navigate(`/auth?post_login_redirect=${encodeURIComponent(target)}&context=stock`);
+  };
+
+  const busy = loading || refreshing;
 
   return (
-    <div className="min-h-screen bg-[image:var(--gradient-hero)] pb-20">
-      <header className="glass-card sticky top-0 z-10 border-b border-border/30">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")} aria-label="Back">
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <div>
-              <div className="text-xs uppercase tracking-wider text-muted-foreground">Stock Insight</div>
-              <div className="text-lg font-semibold">{ticker || "—"}</div>
-            </div>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => fetchInsight(true)} disabled={loading || !ticker} className="gap-2">
-            <RefreshCw className="w-4 h-4" /> Refresh latest news
-          </Button>
+    <StockResearchLayout
+      subtitle={ticker || "Ticker Insight"}
+      backTo="/dashboard"
+    >
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <div className="text-xs text-muted-foreground">
+          {source === "stock-email" ? "From your stock email" : "Ticker Insight"}
         </div>
-      </header>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRefresh}
+          disabled={busy || !ticker}
+          className="gap-2"
+        >
+          {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {refreshing ? "Refreshing latest news…" : busy ? "Please wait…" : "Refresh latest news"}
+        </Button>
+      </div>
 
-      <main className="container mx-auto px-4 py-6 max-w-3xl space-y-4">
-        {error && (
+      <div className="space-y-4">
+        {busy && (
+          <LoadingCard ticker={ticker} stepIdx={stepIdx} slow={slow} refreshing={refreshing} />
+        )}
+
+        {error && !busy && (
           <Card className="border-red-300">
             <CardContent className="pt-5 pb-5 flex items-start gap-3">
-              <ShieldAlert className="w-5 h-5 text-red-600 mt-0.5" />
-              <div>
+              <ShieldAlert className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
+              <div className="flex-1">
                 <div className="font-semibold text-red-900">{error}</div>
-                <p className="text-sm text-muted-foreground mt-1">Try again in a moment or return to the dashboard.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {errorCode === 401 && (
+                    <Button size="sm" onClick={handleSignInToGenerate}>Sign in to continue</Button>
+                  )}
+                  <Button size="sm" variant="outline" onClick={() => fetchInsight(false)}>
+                    Try again
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => navigate("/dashboard")}>
+                    Back
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {loading && (
-          <div className="space-y-3">
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-40 w-full" />
-            <Skeleton className="h-40 w-full" />
-          </div>
-        )}
-
-        {!loading && insight && (
+        {!busy && !error && insight && (
           <>
             {!grounded && (
               <Card className="border-amber-300">
                 <CardContent className="pt-4 pb-4 flex items-start gap-3">
                   <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5" />
                   <div>
-                    <div className="font-semibold text-amber-900">Fresh news may be unavailable</div>
+                    <div className="font-semibold text-amber-900">Fresh grounded news was unavailable</div>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Google Search grounding didn't return live sources for this request. Treat the content below as a general overview, not breaking news.
+                      Try refreshing later. The overview below is general context, not breaking news.
                     </p>
                   </div>
                 </CardContent>
@@ -143,10 +203,12 @@ const StockInsight = () => {
             <Card>
               <CardHeader>
                 <CardTitle className="text-xl">
-                  {insight.company_name || ticker} <span className="text-muted-foreground font-normal">({ticker})</span>
+                  {insight.company_name || ticker}{" "}
+                  <span className="text-muted-foreground font-normal">({ticker})</span>
                 </CardTitle>
                 <div className="text-xs text-muted-foreground">
-                  {cached ? "Cached" : "Live"} · Generated {insight.generated_at ? new Date(insight.generated_at).toLocaleString() : "just now"}
+                  {cached ? "Cached insight" : "Live"} · generated{" "}
+                  {insight.generated_at ? new Date(insight.generated_at).toLocaleString() : "just now"}
                 </div>
               </CardHeader>
               <CardContent>
@@ -246,15 +308,88 @@ const StockInsight = () => {
                 </CardContent>
               </Card>
             )}
-
-            <p className="text-xs text-muted-foreground italic">
-              {insight.disclaimer || "This is informational only and not investment advice."}
-            </p>
           </>
         )}
-      </main>
-    </div>
+      </div>
+    </StockResearchLayout>
   );
 };
+
+function mapError(raw: string, status: number | null): string {
+  const s = (raw || "").toLowerCase();
+  if (status === 403 || s.includes("not enabled") || s.includes("authorized users")) {
+    return "Stock insight is not enabled for this account.";
+  }
+  if (status === 401 || s.includes("sign in")) {
+    return "Sign in or verify access to generate the latest stock insight.";
+  }
+  if (status === 429 || s.includes("rate limit") || s.includes("too many")) {
+    return "Too many stock insight requests. Please wait and try again.";
+  }
+  if (status === 400 || s.includes("invalid ticker")) {
+    return "Invalid ticker symbol.";
+  }
+  return "Latest news could not be generated right now. Please try again later.";
+}
+
+function LoadingCard({
+  ticker, stepIdx, slow, refreshing,
+}: {
+  ticker: string; stepIdx: number; slow: "none" | "wait" | "very"; refreshing: boolean;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          {refreshing ? `Refreshing latest news for ${ticker}` : `Loading ${ticker} stock insight`}
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Searching latest news and market catalysts. This can take 20–45 seconds on the first request.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <ul className="space-y-2">
+          {STEP_LABELS.map((label, i) => {
+            const done = i < stepIdx;
+            const active = i === stepIdx;
+            return (
+              <li key={label} className="flex items-center gap-2 text-sm">
+                {done ? (
+                  <CheckCircle2 className="w-4 h-4 text-primary" />
+                ) : active ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                ) : (
+                  <Circle className="w-4 h-4 text-muted-foreground/40" />
+                )}
+                <span className={done ? "text-muted-foreground line-through" : active ? "font-medium" : "text-muted-foreground"}>
+                  {label}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+
+        {slow === "wait" && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            Still working — grounded news searches can take a little longer.
+          </div>
+        )}
+        {slow === "very" && (
+          <div className="rounded-md border border-amber-400 bg-amber-100 p-3 text-sm text-amber-900">
+            This is taking longer than usual. You can keep waiting or try again later.
+          </div>
+        )}
+
+        <div className="grid gap-2 pt-2">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-24 w-full mt-2" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default StockInsight;

@@ -22,6 +22,21 @@ const Auth = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  // Detect stock-research context so we can adjust copy.
+  const [stockContext, setStockContext] = useState(false);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const p = url.searchParams;
+    const stored = sessionStorage.getItem("post_login_redirect") || "";
+    const target = stored || p.get("post_login_redirect") || "";
+    const ctxParam = p.get("context");
+    const isStock =
+      ctxParam === "stock" ||
+      target.startsWith("/stock-insight") ||
+      target.startsWith("/portfolio");
+    setStockContext(isStock);
+  }, []);
+
   useEffect(() => {
     const popPostLogin = (): string => {
       const stored = sessionStorage.getItem("post_login_redirect");
@@ -50,6 +65,7 @@ const Auth = () => {
     return () => subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
+
 
   const handleForgot = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,14 +142,21 @@ const Auth = () => {
   };
 
   const title =
-    mode === "forgot" ? "Reset Password" : mode === "login" ? "Welcome Back" : "Create Account";
+    mode === "forgot"
+      ? "Reset Password"
+      : stockContext
+      ? (mode === "login" ? "Sign in to access Stock Research" : "Verify your email to continue")
+      : (mode === "login" ? "Welcome Back" : "Create Account");
 
   const description =
     mode === "forgot"
       ? "Enter your email and we'll send you a reset link."
-      : mode === "login"
-      ? "Sign in to continue your learning journey"
-      : "Start remembering everything you learn";
+      : stockContext
+      ? "Verify your email to view private stock research."
+      : (mode === "login"
+        ? "Sign in to continue your learning journey"
+        : "Start remembering everything you learn");
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[image:var(--gradient-hero)] p-4">
