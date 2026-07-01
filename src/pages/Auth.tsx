@@ -22,6 +22,21 @@ const Auth = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  // Detect stock-research context so we can adjust copy.
+  const [stockContext, setStockContext] = useState(false);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const p = url.searchParams;
+    const stored = sessionStorage.getItem("post_login_redirect") || "";
+    const target = stored || p.get("post_login_redirect") || "";
+    const ctxParam = p.get("context");
+    const isStock =
+      ctxParam === "stock" ||
+      target.startsWith("/stock-insight") ||
+      target.startsWith("/portfolio");
+    setStockContext(isStock);
+  }, []);
+
   useEffect(() => {
     const popPostLogin = (): string => {
       const stored = sessionStorage.getItem("post_login_redirect");
@@ -50,6 +65,7 @@ const Auth = () => {
     return () => subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
+
 
   const handleForgot = async (e: React.FormEvent) => {
     e.preventDefault();
