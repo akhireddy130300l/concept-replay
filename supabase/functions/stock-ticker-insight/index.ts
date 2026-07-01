@@ -78,30 +78,26 @@ Deno.serve(async (req) => {
       });
     }
 
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData?.user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const userId = userData.user.id;
-
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Authorization: must be in portfolio_feature_access.
-    const { data: access } = await admin
-      .from("portfolio_feature_access")
-      .select("user_id")
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (!access) {
-      return new Response(JSON.stringify({ error: "Stock insight is not enabled for this account." }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Try to identify the caller (optional for cached reads).
+    let userId: string | null = null;
+    let authorized = false;
+    const authHeader = req.headers.get("Authorization") ?? "";
+    if (authHeader) {
+      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data: userData } = await userClient.auth.getUser();
+      if (userData?.user) {
+        userId = userData.user.id;
+        const { data: access } = await admin
+          .from("portfolio_feature_access")
+          .select("user_id")
+          .eq("user_id", userId)
+          .maybeSingle();
+        authorized = !!access;
+      }
     }
 
     const body = (await req.json().catch(() => null)) as { ticker?: string; refresh?: boolean } | null;
@@ -113,7 +109,8 @@ Deno.serve(async (req) => {
     }
     const refresh = body?.refresh === true;
 
-    // Cache lookup (skip on refresh).
+    // Cache lookup — anyone (even anonymous) can read a cached insight.
+    // Refresh always bypasses cache and requires authorization.
     if (!refresh) {
       const { data: cached } = await admin
         .from("stock_ticker_insight_cache")
@@ -130,6 +127,23 @@ Deno.serve(async (req) => {
         }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
+
+    // Beyond this point, we must call Gemini — that requires an authorized user.
+    if (!userId) {
+      return new Response(JSON.stringify({ error: "Sign in to generate the latest stock insight." }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (!authorized) {
+      return new Response(JSON.stringify({
+        error: refresh
+          ? "Refreshing latest news is available only to authorized users."
+          : "Stock insight is not enabled for this account.",
+      }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
 
     // Direct Gemini call with Google Search grounding.
     const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
