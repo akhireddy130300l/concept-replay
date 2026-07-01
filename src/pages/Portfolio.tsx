@@ -495,6 +495,7 @@ export default function Portfolio() {
           </CardContent>
         </Card>
       </main>
-    </div>
+    </StockResearchLayout>
   );
 }
+
