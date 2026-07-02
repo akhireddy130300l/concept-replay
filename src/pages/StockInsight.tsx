@@ -46,6 +46,7 @@ const StockInsight = () => {
   const [insight, setInsight] = useState<Insight | null>(null);
   const [grounded, setGrounded] = useState<boolean>(false);
   const [cached, setCached] = useState<boolean>(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +55,7 @@ const StockInsight = () => {
   const [stepIdx, setStepIdx] = useState(0);
   const [slow, setSlow] = useState<"none" | "wait" | "very">("none");
   const inflight = useRef(false);
+
 
   const fetchInsight = useCallback(async (refresh: boolean) => {
     if (!ticker || inflight.current) return;
