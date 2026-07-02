@@ -64,8 +64,10 @@ const StockInsight = () => {
     if (refresh) setRefreshing(true); else setLoading(true);
     setError(null);
     setErrorCode(null);
+    setNotice(null);
     setStepIdx(0);
     setSlow("none");
+
 
     // Visual step progression — advances every ~5s up to the final "preparing sources" step.
     const stepTimers: number[] = [];
