@@ -136,13 +136,8 @@ const StockInsight = () => {
     void fetchInsight(true);
   };
 
-  const handleSignInToGenerate = () => {
-    const target = `/stock-insight?ticker=${ticker}${source ? `&source=${encodeURIComponent(source)}` : ""}`;
-    sessionStorage.setItem("post_login_redirect", target);
-    navigate(`/auth?post_login_redirect=${encodeURIComponent(target)}&context=stock`);
-  };
-
   const busy = loading || refreshing;
+
 
   return (
     <StockResearchLayout
