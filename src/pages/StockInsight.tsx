@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ExternalLink, RefreshCw, AlertTriangle, ShieldAlert, CheckCircle2, Loader2, Circle,
+  LineChart, Info,
 } from "lucide-react";
+
 import { StockResearchLayout } from "@/components/layouts/StockResearchLayout";
 
 type Insight = {
