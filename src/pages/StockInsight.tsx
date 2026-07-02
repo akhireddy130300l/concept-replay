@@ -343,23 +343,61 @@ function mapError(raw: string, status: number | null): string {
   return "Latest news could not be generated right now. Please try again later.";
 }
 
+const ROTATING_MESSAGES = [
+  "Looking for recent company-specific catalysts…",
+  "Checking market-moving headlines…",
+  "Filtering noisy news from useful signals…",
+  "Summarizing catalysts, risks, and analyst context…",
+  "Preparing a source-backed stock brief…",
+];
+
+const INSIGHT_PREVIEW_ITEMS = [
+  "Recent movement",
+  "Key catalysts",
+  "Financial health",
+  "Analyst consensus",
+  "Risk flags",
+  "Sources",
+];
+
 function LoadingCard({
-  ticker, stepIdx, slow, refreshing,
+  ticker, stepIdx, slow, refreshing, source,
 }: {
-  ticker: string; stepIdx: number; slow: "none" | "wait" | "very"; refreshing: boolean;
+  ticker: string; stepIdx: number; slow: "none" | "wait" | "very"; refreshing: boolean; source: string;
 }) {
+  const [msgIdx, setMsgIdx] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      setMsgIdx((i) => (i + 1) % ROTATING_MESSAGES.length);
+    }, 3500);
+    return () => clearInterval(t);
+  }, []);
+
   return (
-    <Card>
+    <Card className="animate-fade-in">
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2">
-          <Loader2 className="w-5 h-5 animate-spin text-primary" />
+          <LineChart className="w-5 h-5 text-primary" />
+          <Loader2 className="w-4 h-4 animate-spin text-primary" />
           {refreshing ? `Refreshing latest news for ${ticker}` : `Loading ${ticker} stock insight`}
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           Searching latest news and market catalysts. This can take 20–45 seconds on the first request.
         </p>
+        <div className="text-xs text-muted-foreground pt-1">
+          Generating a source-backed brief for <span className="font-medium text-foreground">{ticker}</span>.
+          {source === "stock-email" && " Opened from your stock email."}
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div
+          key={msgIdx}
+          className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-primary animate-fade-in"
+          aria-live="polite"
+        >
+          {ROTATING_MESSAGES[msgIdx]}
+        </div>
+
         <ul className="space-y-2">
           {STEP_LABELS.map((label, i) => {
             const done = i < stepIdx;
@@ -381,6 +419,24 @@ function LoadingCard({
           })}
         </ul>
 
+        <div className="rounded-md border border-border bg-muted/40 p-3">
+          <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+            This insight will include
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+            {INSIGHT_PREVIEW_ITEMS.map((item) => (
+              <div key={item} className="flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-primary/70 shrink-0" />
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="text-xs text-muted-foreground italic">
+          First-time insights can take longer because a fresh news search is being performed. Cached insights load faster next time.
+        </div>
+
         {slow === "wait" && (
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             Still working — grounded news searches can take a little longer.
@@ -392,15 +448,17 @@ function LoadingCard({
           </div>
         )}
 
-        <div className="grid gap-2 pt-2">
+        <div className="grid gap-2 pt-2 relative overflow-hidden">
           <Skeleton className="h-4 w-3/4" />
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-5/6" />
           <Skeleton className="h-24 w-full mt-2" />
+          <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/20 to-transparent pointer-events-none" />
         </div>
       </CardContent>
     </Card>
   );
 }
+
 
 export default StockInsight;
