@@ -105,7 +105,9 @@ const StockInsight = () => {
       setInsight(data.insight as Insight);
       setGrounded(!!data.grounded);
       setCached(!!data.cached);
+      setNotice(typeof data.notice === "string" ? data.notice : null);
       setStepIdx(STEP_LABELS.length);
+
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not load insight.";
       setError(mapError(msg, null));
