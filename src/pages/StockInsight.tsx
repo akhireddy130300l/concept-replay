@@ -162,8 +162,9 @@ const StockInsight = () => {
 
       <div className="space-y-4">
         {busy && (
-          <LoadingCard ticker={ticker} stepIdx={stepIdx} slow={slow} refreshing={refreshing} />
+          <LoadingCard ticker={ticker} stepIdx={stepIdx} slow={slow} refreshing={refreshing} source={source} />
         )}
+
 
         {error && !busy && (
           <Card className="border-red-300">
