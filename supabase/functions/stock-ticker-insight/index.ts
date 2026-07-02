@@ -1,6 +1,7 @@
-// Stock ticker insight — on-demand, grounded latest-news lookup.
+// Stock ticker insight — public, on-demand, grounded latest-news lookup.
 // Direct Gemini via GEMINI_API_KEY with Google Search grounding tool.
-// Cached 30 minutes per ticker. Only authorized users (portfolio_feature_access).
+// Cached 30 minutes per ticker. Public access: anyone with a ticker link can
+// view or generate. Refresh has a 10-minute cooldown per ticker.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 
@@ -14,6 +15,11 @@ const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 const CACHE_TTL_MIN = 30;
+const REFRESH_COOLDOWN_MIN = 10;
+
+// Per-instance in-flight coalescing: if two callers ask for the same ticker at
+// the same time (within one edge-function instance), share the same Gemini call.
+const inflight = new Map<string, Promise<Response>>();
 
 function extractJson(raw: string): string {
   const t = raw.trim();
@@ -62,90 +68,77 @@ function buildPrompt(ticker: string): string {
   ].join("\n");
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
 
+async function handle(req: Request): Promise<Response> {
   const t0 = Date.now();
-  try {
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
-    if (!GEMINI_API_KEY) {
-      return new Response(JSON.stringify({ error: "Stock insight is not configured." }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+  if (!GEMINI_API_KEY) {
+    return jsonResponse({ error: "Stock insight is not configured." }, 500);
+  }
 
-    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Try to identify the caller (optional for cached reads).
-    let userId: string | null = null;
-    let authorized = false;
-    const authHeader = req.headers.get("Authorization") ?? "";
-    if (authHeader) {
-      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        global: { headers: { Authorization: authHeader } },
-      });
-      const { data: userData } = await userClient.auth.getUser();
-      if (userData?.user) {
-        userId = userData.user.id;
-        const { data: access } = await admin
-          .from("portfolio_feature_access")
-          .select("user_id")
-          .eq("user_id", userId)
-          .maybeSingle();
-        authorized = !!access;
-      }
-    }
+  const body = (await req.json().catch(() => null)) as { ticker?: string; refresh?: boolean } | null;
+  const rawTicker = String(body?.ticker || "").toUpperCase().trim();
+  if (!TICKER_RE.test(rawTicker)) {
+    return jsonResponse({ error: "Invalid ticker symbol." }, 400);
+  }
+  const refresh = body?.refresh === true;
 
-    const body = (await req.json().catch(() => null)) as { ticker?: string; refresh?: boolean } | null;
-    const rawTicker = String(body?.ticker || "").toUpperCase().trim();
-    if (!TICKER_RE.test(rawTicker)) {
-      return new Response(JSON.stringify({ error: "Invalid ticker symbol." }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const refresh = body?.refresh === true;
+  const { data: cached } = await admin
+    .from("stock_ticker_insight_cache")
+    .select("payload, grounded, generated_at, expires_at")
+    .eq("ticker", rawTicker)
+    .maybeSingle();
 
-    // Cache lookup — anyone (even anonymous) can read a cached insight.
-    // Refresh always bypasses cache and requires authorization.
-    if (!refresh) {
-      const { data: cached } = await admin
-        .from("stock_ticker_insight_cache")
-        .select("payload, grounded, generated_at, expires_at")
-        .eq("ticker", rawTicker)
-        .maybeSingle();
-      if (cached && new Date(cached.expires_at).getTime() > Date.now()) {
-        console.log(JSON.stringify({ phase: "stock_insight", ticker: rawTicker, user_id: userId, cache_hit: true, elapsed_ms: Date.now() - t0 }));
-        return new Response(JSON.stringify({
-          insight: cached.payload,
-          grounded: cached.grounded,
-          cached: true,
-          generated_at: cached.generated_at,
-        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-    }
+  const now = Date.now();
+  const cacheFresh = cached && new Date(cached.expires_at).getTime() > now;
+  const generatedMs = cached?.generated_at ? new Date(cached.generated_at).getTime() : 0;
+  const withinCooldown = cached && (now - generatedMs) < REFRESH_COOLDOWN_MIN * 60_000;
 
-    // Beyond this point, we must call Gemini — that requires an authorized user.
-    if (!userId) {
-      return new Response(JSON.stringify({ error: "Sign in to generate the latest stock insight." }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if (!authorized) {
-      return new Response(JSON.stringify({
-        error: refresh
-          ? "Refreshing latest news is available only to authorized users."
-          : "Stock insight is not enabled for this account.",
-      }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+  // Non-refresh + fresh cache → return cache.
+  if (!refresh && cacheFresh) {
+    console.log(JSON.stringify({ phase: "stock_insight", ticker: rawTicker, cache_hit: true, refresh: false, elapsed_ms: Date.now() - t0 }));
+    return jsonResponse({
+      insight: cached.payload,
+      grounded: cached.grounded,
+      cached: true,
+      generated_at: cached.generated_at,
+    });
+  }
 
+  // Refresh requested but within cooldown → return cache with a note.
+  if (refresh && cached && withinCooldown) {
+    console.log(JSON.stringify({ phase: "stock_insight", ticker: rawTicker, cache_hit: true, refresh: true, rate_limited: true, elapsed_ms: Date.now() - t0 }));
+    return jsonResponse({
+      insight: cached.payload,
+      grounded: cached.grounded,
+      cached: true,
+      generated_at: cached.generated_at,
+      notice: "Recently refreshed. Showing the latest cached insight.",
+    });
+  }
 
-    // Direct Gemini call with Google Search grounding.
+  // We need Gemini. Coalesce concurrent identical requests inside this instance.
+  const key = `gen:${rawTicker}`;
+  const existing = inflight.get(key);
+  if (existing) {
+    console.log(JSON.stringify({ phase: "stock_insight", ticker: rawTicker, coalesced: true }));
+    // Return a clone since Response bodies can only be read once.
+    const shared = await existing;
+    return shared.clone();
+  }
+
+  const p = (async (): Promise<Response> => {
     const res = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -157,18 +150,30 @@ Deno.serve(async (req) => {
     });
 
     if (res.status === 429) {
-      return new Response(JSON.stringify({ error: "Rate limit reached. Please try again in a moment." }), {
-        status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      // Fall back to stale cache if we have it.
+      if (cached) {
+        return jsonResponse({
+          insight: cached.payload,
+          grounded: cached.grounded,
+          cached: true,
+          generated_at: cached.generated_at,
+          notice: "Recently refreshed. Showing the latest cached insight.",
+        });
+      }
+      return jsonResponse({ error: "Rate limit reached. Please try again in a moment." }, 429);
     }
     if (!res.ok) {
-      const safeStatus = res.status;
-      let errBody = "";
-      try { errBody = (await res.text()).slice(0, 300); } catch { /* ignore */ }
-      console.log(JSON.stringify({ phase: "stock_insight", ticker: rawTicker, user_id: userId, failure_category: "gemini_http", http_status: safeStatus, body_preview: errBody }));
-      return new Response(JSON.stringify({ error: "Insight could not be generated right now. Please try again later." }), {
-        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.log(JSON.stringify({ phase: "stock_insight", ticker: rawTicker, failure_category: "gemini_http", http_status: res.status }));
+      if (cached) {
+        return jsonResponse({
+          insight: cached.payload,
+          grounded: cached.grounded,
+          cached: true,
+          generated_at: cached.generated_at,
+          notice: "Latest refresh failed. Showing the previously cached insight.",
+        });
+      }
+      return jsonResponse({ error: "Latest stock insight could not be generated right now. Please try again later." }, 502);
     }
 
     const json: any = await res.json().catch(() => null);
@@ -184,21 +189,34 @@ Deno.serve(async (req) => {
     );
 
     if (!text) {
-      console.log(JSON.stringify({ phase: "stock_insight", ticker: rawTicker, user_id: userId, failure_category: "gemini_empty" }));
-      return new Response(JSON.stringify({ error: "Insight could not be generated right now. Please try again later." }), {
-        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.log(JSON.stringify({ phase: "stock_insight", ticker: rawTicker, failure_category: "gemini_empty" }));
+      if (cached) {
+        return jsonResponse({
+          insight: cached.payload,
+          grounded: cached.grounded,
+          cached: true,
+          generated_at: cached.generated_at,
+          notice: "Latest refresh failed. Showing the previously cached insight.",
+        });
+      }
+      return jsonResponse({ error: "Latest stock insight could not be generated right now. Please try again later." }, 502);
     }
 
     let insight: any;
     try { insight = JSON.parse(extractJson(text)); } catch {
-      console.log(JSON.stringify({ phase: "stock_insight", ticker: rawTicker, user_id: userId, failure_category: "invalid_json" }));
-      return new Response(JSON.stringify({ error: "Insight could not be generated right now. Please try again later." }), {
-        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      console.log(JSON.stringify({ phase: "stock_insight", ticker: rawTicker, failure_category: "invalid_json" }));
+      if (cached) {
+        return jsonResponse({
+          insight: cached.payload,
+          grounded: cached.grounded,
+          cached: true,
+          generated_at: cached.generated_at,
+          notice: "Latest refresh failed. Showing the previously cached insight.",
+        });
+      }
+      return jsonResponse({ error: "Latest stock insight could not be generated right now. Please try again later." }, 502);
     }
 
-    // Merge grounding chunk URLs into sources so users always see real citations.
     if (grounded && Array.isArray(groundingMeta.groundingChunks)) {
       const chunkSources = groundingMeta.groundingChunks
         .map((c: any) => c?.web ? { name: String(c.web.title || c.web.uri || "source"), url: String(c.web.uri || "") } : null)
@@ -215,7 +233,6 @@ Deno.serve(async (req) => {
     const generatedAt = new Date();
     const expiresAt = new Date(generatedAt.getTime() + CACHE_TTL_MIN * 60_000);
 
-    // Upsert cache.
     await admin
       .from("stock_ticker_insight_cache")
       .upsert({
@@ -224,21 +241,33 @@ Deno.serve(async (req) => {
         grounded,
         generated_at: generatedAt.toISOString(),
         expires_at: expiresAt.toISOString(),
-        created_by: userId,
+        created_by: null,
       }, { onConflict: "ticker" });
 
     console.log(JSON.stringify({
-      phase: "stock_insight", ticker: rawTicker, user_id: userId,
-      cache_hit: false, grounded, elapsed_ms: Date.now() - t0,
+      phase: "stock_insight", ticker: rawTicker, cache_hit: false, refresh, grounded, elapsed_ms: Date.now() - t0,
     }));
 
-    return new Response(JSON.stringify({
+    return jsonResponse({
       insight, grounded, cached: false, generated_at: generatedAt.toISOString(),
-    }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    });
+  })();
+
+  inflight.set(key, p);
+  try {
+    const result = await p;
+    return result.clone();
+  } finally {
+    inflight.delete(key);
+  }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  try {
+    return await handle(req);
   } catch (e) {
     console.log(JSON.stringify({ phase: "stock_insight", failure_category: "uncaught", message: e instanceof Error ? e.message : "unknown" }));
-    return new Response(JSON.stringify({ error: "Unexpected error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: "Unexpected error" }, 500);
   }
 });
