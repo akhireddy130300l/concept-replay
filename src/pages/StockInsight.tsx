@@ -173,12 +173,10 @@ const StockInsight = () => {
               <div className="flex-1">
                 <div className="font-semibold text-red-900">{error}</div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {errorCode === 401 && (
-                    <Button size="sm" onClick={handleSignInToGenerate}>Sign in to continue</Button>
-                  )}
                   <Button size="sm" variant="outline" onClick={() => fetchInsight(false)}>
                     Try again
                   </Button>
+
                   <Button size="sm" variant="ghost" onClick={() => navigate("/dashboard")}>
                     Back
                   </Button>
