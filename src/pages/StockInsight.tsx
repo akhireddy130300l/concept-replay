@@ -188,6 +188,14 @@ const StockInsight = () => {
 
         {!busy && !error && insight && (
           <>
+            {notice && (
+              <Card className="border-blue-300 bg-blue-50">
+                <CardContent className="pt-4 pb-4 flex items-start gap-3">
+                  <Info className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
+                  <div className="text-sm text-blue-900">{notice}</div>
+                </CardContent>
+              </Card>
+            )}
             {!grounded && (
               <Card className="border-amber-300">
                 <CardContent className="pt-4 pb-4 flex items-start gap-3">
@@ -201,6 +209,7 @@ const StockInsight = () => {
                 </CardContent>
               </Card>
             )}
+
 
             <Card>
               <CardHeader>
