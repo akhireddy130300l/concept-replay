@@ -1876,7 +1876,7 @@ async function fetchYahooFinanceGainers(): Promise<MarketGainersResult> {
   };
 }
 
-function buildMarketGainersHTML(result: MarketGainersResult): string {
+function buildMarketGainersHTML(result: MarketGainersResult, swingSectionsHtml: string = ""): string {
   const fetchedAt = new Date(result.fetchedAtIso).toLocaleString("en-US", {
     timeZone: "America/New_York",
     year: "numeric",
