@@ -476,6 +476,221 @@ export type Database = {
         }
         Relationships: []
       }
+      swing_ticker_cache: {
+        Row: {
+          created_at: string
+          model: string
+          payload: Json
+          source_type: string
+          ticker: string
+          trading_date: string
+        }
+        Insert: {
+          created_at?: string
+          model: string
+          payload: Json
+          source_type?: string
+          ticker: string
+          trading_date: string
+        }
+        Update: {
+          created_at?: string
+          model?: string
+          payload?: Json
+          source_type?: string
+          ticker?: string
+          trading_date?: string
+        }
+        Relationships: []
+      }
+      swing_trade_checked_tickers: {
+        Row: {
+          checks_completed: Json | null
+          company: string | null
+          confidence: string | null
+          created_at: string
+          elapsed_ms: number | null
+          final_score: number | null
+          id: string
+          industry_context: string | null
+          industry_score: number | null
+          key_risks: Json | null
+          latest_catalyst: string | null
+          model_used: string | null
+          news_score: number | null
+          peer_context: string | null
+          peer_score: number | null
+          red_flags: Json | null
+          rejection_reason: string | null
+          risk_score: number | null
+          run_id: string
+          source_tables: Json | null
+          sources_json: Json | null
+          status: string
+          technical_score: number | null
+          ticker: string
+        }
+        Insert: {
+          checks_completed?: Json | null
+          company?: string | null
+          confidence?: string | null
+          created_at?: string
+          elapsed_ms?: number | null
+          final_score?: number | null
+          id?: string
+          industry_context?: string | null
+          industry_score?: number | null
+          key_risks?: Json | null
+          latest_catalyst?: string | null
+          model_used?: string | null
+          news_score?: number | null
+          peer_context?: string | null
+          peer_score?: number | null
+          red_flags?: Json | null
+          rejection_reason?: string | null
+          risk_score?: number | null
+          run_id: string
+          source_tables?: Json | null
+          sources_json?: Json | null
+          status: string
+          technical_score?: number | null
+          ticker: string
+        }
+        Update: {
+          checks_completed?: Json | null
+          company?: string | null
+          confidence?: string | null
+          created_at?: string
+          elapsed_ms?: number | null
+          final_score?: number | null
+          id?: string
+          industry_context?: string | null
+          industry_score?: number | null
+          key_risks?: Json | null
+          latest_catalyst?: string | null
+          model_used?: string | null
+          news_score?: number | null
+          peer_context?: string | null
+          peer_score?: number | null
+          red_flags?: Json | null
+          rejection_reason?: string | null
+          risk_score?: number | null
+          run_id?: string
+          source_tables?: Json | null
+          sources_json?: Json | null
+          status?: string
+          technical_score?: number | null
+          ticker?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "swing_trade_checked_tickers_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "swing_trade_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      swing_trade_runs: {
+        Row: {
+          catalyst_summary: string | null
+          confidence: string | null
+          created_at: string
+          elapsed_ms: number | null
+          email_run_id: string | null
+          entry_zone_high: number | null
+          entry_zone_low: number | null
+          final_status: string
+          holding_window: string | null
+          id: string
+          industry_context: string | null
+          invalidation: string | null
+          key_risks: Json | null
+          model_used: string
+          peer_context: string | null
+          risk_reward: number | null
+          run_date: string
+          selected_company: string | null
+          selected_price: number | null
+          selected_ticker: string | null
+          setup_type: string | null
+          source_timestamp: string | null
+          stop_loss: number | null
+          target_zone_high: number | null
+          target_zone_low: number | null
+          total_failed: number
+          total_rejected: number
+          total_selected: number
+          total_watch_only: number
+          unique_tickers_checked: number
+        }
+        Insert: {
+          catalyst_summary?: string | null
+          confidence?: string | null
+          created_at?: string
+          elapsed_ms?: number | null
+          email_run_id?: string | null
+          entry_zone_high?: number | null
+          entry_zone_low?: number | null
+          final_status?: string
+          holding_window?: string | null
+          id?: string
+          industry_context?: string | null
+          invalidation?: string | null
+          key_risks?: Json | null
+          model_used: string
+          peer_context?: string | null
+          risk_reward?: number | null
+          run_date: string
+          selected_company?: string | null
+          selected_price?: number | null
+          selected_ticker?: string | null
+          setup_type?: string | null
+          source_timestamp?: string | null
+          stop_loss?: number | null
+          target_zone_high?: number | null
+          target_zone_low?: number | null
+          total_failed?: number
+          total_rejected?: number
+          total_selected?: number
+          total_watch_only?: number
+          unique_tickers_checked?: number
+        }
+        Update: {
+          catalyst_summary?: string | null
+          confidence?: string | null
+          created_at?: string
+          elapsed_ms?: number | null
+          email_run_id?: string | null
+          entry_zone_high?: number | null
+          entry_zone_low?: number | null
+          final_status?: string
+          holding_window?: string | null
+          id?: string
+          industry_context?: string | null
+          invalidation?: string | null
+          key_risks?: Json | null
+          model_used?: string
+          peer_context?: string | null
+          risk_reward?: number | null
+          run_date?: string
+          selected_company?: string | null
+          selected_price?: number | null
+          selected_ticker?: string | null
+          setup_type?: string | null
+          source_timestamp?: string | null
+          stop_loss?: number | null
+          target_zone_high?: number | null
+          target_zone_low?: number | null
+          total_failed?: number
+          total_rejected?: number
+          total_selected?: number
+          total_watch_only?: number
+          unique_tickers_checked?: number
+        }
+        Relationships: []
+      }
       user_portfolio_settings: {
         Row: {
           concentration_thresholds: Json
