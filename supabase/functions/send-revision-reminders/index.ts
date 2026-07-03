@@ -2542,7 +2542,56 @@ async function generateTopicDescription(topic: string): Promise<string> {
     console.log("Latest market gainers request detected; fetching Yahoo Finance movers instead of calling AI.");
     try {
       const gainers = await fetchYahooFinanceGainers();
-      return buildMarketGainersHTML(gainers);
+
+      // Build unique-ticker list from all 4 stock tables for Swing Trader Watch.
+      let swingHtml = "";
+      try {
+        const inputs: SwingTickerInput[] = [];
+        const pushGainer = (g: MarketGainer, table: string) => {
+          inputs.push({
+            ticker: g.symbol,
+            company: g.companyName,
+            price: g.priceRaw,
+            oneDayPct: g.percentGainRaw,
+            sevenDayPct: g.periodLabel === "7-day" ? g.todayChangeRaw : undefined,
+            volumeRatio: undefined,
+            marketCap: g.marketCapRaw,
+            analystLabel: g.averageAnalystRating,
+            sourceTables: [table],
+          });
+        };
+        gainers.movers.forEach((g) => pushGainer(g, "Top Overall Gainers"));
+        gainers.largeCapMovers.forEach((g) => pushGainer(g, "Top Large-Cap Gainers"));
+        gainers.largeCapWeekly.forEach((g) => pushGainer(g, "Top Large-Cap Movers 7d"));
+        for (const w of gainers.watchlist || []) {
+          inputs.push({
+            ticker: w.symbol,
+            company: w.companyName,
+            price: w.priceRaw,
+            oneDayPct: w.oneDayPctRaw,
+            sevenDayPct: w.sevenDayPctRaw,
+            twentyDayPct: w.twentyDayPctRaw,
+            volumeRatio: w.volumeRatio,
+            marketCap: w.marketCapRaw,
+            analystLabel: w.analystLabel,
+            watchlistScore: w.score,
+            entryStatus: w.entryStatusLabel,
+            lowerWatch: w.supportRaw,
+            upperWatch: w.resistanceRaw,
+            riskRewardRaw: w.riskRewardRaw,
+            riskFlags: w.riskFlags,
+            sourceTables: ["Best Watchlist Candidates"],
+          });
+        }
+        const admin = createClient(supabaseUrl, supabaseServiceKey);
+        const swing = await runSwingTraderWatch(admin, inputs);
+        swingHtml = buildSwingSectionsHTML(swing, APP_BASE_URL);
+      } catch (err) {
+        console.error("Swing Trader Watch failed (non-fatal):", err);
+        swingHtml = `<div style="margin:14px 0;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;font-size:12px;color:#7f1d1d;">🎯 Swing Trader Watch is temporarily unavailable for this run. The rest of this email is unchanged.</div>`;
+      }
+
+      return buildMarketGainersHTML(gainers, swingHtml);
     } catch (error) {
       console.error("Error fetching market gainers:", error);
       return buildMarketGainersUnavailableHTML(error);
