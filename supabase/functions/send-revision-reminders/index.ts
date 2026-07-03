@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Resend } from "https://esm.sh/resend@4.0.0";
 import { classifyGate, WARNING_BANNER_HTML } from "../_shared/speaking-gate.ts";
+import { runSwingTraderWatch, buildSwingSectionsHTML, type SwingTickerInput } from "../_shared/swing-watch.ts";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
