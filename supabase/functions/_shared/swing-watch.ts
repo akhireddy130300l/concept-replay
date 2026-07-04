@@ -85,6 +85,7 @@ export type SwingResult = {
   totalCacheHits: number;
   totalGeminiAttempts: number;
   selected?: CheckedTicker;
+  selectedPlan?: TradingPlan;
   passed: CheckedTicker[]; // passed but not selected
   rejected: CheckedTicker[];
   watchOnly: CheckedTicker[];
@@ -105,10 +106,12 @@ export type SwingResult = {
 };
 
 const DEFAULT_SWING_MODEL = "gemini-3.1-flash-lite";
-const FALLBACK_MODEL = "gemini-2.5-flash";
-const MAX_CONCURRENT = 3;
-const MAX_RETRIES = 3;
-const RPM_BUDGET_MS = 4200; // ~14 rpm safety pace between call starts
+// NOTE: No per-ticker model fallback. gemini-2.5-flash has only 20 RPD and would
+// exhaust after a few tickers. On primary-model failure a ticker is marked
+// deep_check_failed and we continue with the next one.
+const MAX_CONCURRENT = 1;
+const MAX_RETRIES = 2;
+const REQUEST_DELAY_MS = 4500; // strict: ~13.3 starts/min, well under 15 RPM cap
 
 function tradingDateNY(): string {
   const now = new Date();
@@ -252,34 +255,46 @@ async function callGeminiOnce(model: string, prompt: string, apiKey: string, sig
   return { text, grounded, groundingChunks: chunks, httpStatus: res.status };
 }
 
-async function callGeminiWithRetry(primaryModel: string, prompt: string, apiKey: string): Promise<{ deep: SwingDeepCheck | null; modelUsed: string; failure?: string }> {
-  const models = primaryModel === FALLBACK_MODEL ? [primaryModel] : [primaryModel, FALLBACK_MODEL];
-  for (const model of models) {
-    let delay = 1500;
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      const r = await callGeminiOnce(model, prompt, apiKey);
-      if (r.httpStatus === 429) {
+async function callGeminiWithRetry(model: string, prompt: string, apiKey: string, ticker: string): Promise<{ deep: SwingDeepCheck | null; modelUsed: string; failure?: string }> {
+  let delay = 2000;
+  let lastStatus: number | null = null;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const started = Date.now();
+    console.log(JSON.stringify({
+      feature: "swing_trader_watch", ticker, model_used: model,
+      request_started: true, attempt,
+    }));
+    const r = await callGeminiOnce(model, prompt, apiKey);
+    lastStatus = r.httpStatus;
+    console.log(JSON.stringify({
+      feature: "swing_trader_watch", ticker, model_used: model,
+      request_finished: true, attempt, status: r.httpStatus, elapsed_ms: Date.now() - started,
+    }));
+    if (r.httpStatus === 429) {
+      if (attempt < MAX_RETRIES) {
         await new Promise((res) => setTimeout(res, delay));
         delay *= 2;
         continue;
       }
-      if (r.httpStatus >= 400) break; // try next model
-      if (!r.text) break;
-      let parsed: any;
-      try { parsed = JSON.parse(extractJson(r.text)); } catch { break; }
-      // Merge grounding sources.
-      if (Array.isArray(r.groundingChunks) && r.groundingChunks.length > 0) {
-        const extra = r.groundingChunks
-          .map((c: any) => c?.web ? { title: String(c.web.title || c.web.uri || "source"), url: String(c.web.uri || "") } : null)
-          .filter((x: any) => x && x.url);
-        if (!Array.isArray(parsed.sources)) parsed.sources = [];
-        const seen = new Set(parsed.sources.map((s: any) => s?.url).filter(Boolean));
-        for (const s of extra) if (!seen.has(s.url)) { parsed.sources.push(s); seen.add(s.url); }
-      }
-      return { deep: parsed as SwingDeepCheck, modelUsed: model };
+      return { deep: null, modelUsed: model, failure: `rate_limited_429` };
     }
+    if (r.httpStatus >= 400) {
+      return { deep: null, modelUsed: model, failure: `http_${r.httpStatus}` };
+    }
+    if (!r.text) return { deep: null, modelUsed: model, failure: "empty_response" };
+    let parsed: any;
+    try { parsed = JSON.parse(extractJson(r.text)); } catch { return { deep: null, modelUsed: model, failure: "invalid_json" }; }
+    if (Array.isArray(r.groundingChunks) && r.groundingChunks.length > 0) {
+      const extra = r.groundingChunks
+        .map((c: any) => c?.web ? { title: String(c.web.title || c.web.uri || "source"), url: String(c.web.uri || "") } : null)
+        .filter((x: any) => x && x.url);
+      if (!Array.isArray(parsed.sources)) parsed.sources = [];
+      const seen = new Set(parsed.sources.map((s: any) => s?.url).filter(Boolean));
+      for (const s of extra) if (!seen.has(s.url)) { parsed.sources.push(s); seen.add(s.url); }
+    }
+    return { deep: parsed as SwingDeepCheck, modelUsed: model };
   }
-  return { deep: null, modelUsed: primaryModel, failure: "gemini_all_attempts_failed" };
+  return { deep: null, modelUsed: model, failure: `gemini_failed_status_${lastStatus ?? "unknown"}` };
 }
 
 function statusFromSuitability(s?: string): CheckedTicker["status"] {
@@ -302,6 +317,81 @@ function scoreDeep(deep: SwingDeepCheck): { news: number; peer: number; industry
     peer: s(deep.peer_check),
     industry: s(deep.industry_check),
     risk,
+  };
+}
+
+export type TradingPlan = {
+  currentPrice: number;
+  entryLow: number;
+  entryHigh: number;
+  targetLow: number;
+  targetHigh: number;
+  stopLoss: number;
+  riskReward?: number;
+  holdingWindow: string;
+  invalidation: string;
+};
+
+function round2(n: number): number { return Math.round(n * 100) / 100; }
+
+// Build a deterministic trading plan from the input's watchlist/chart fields.
+// Returns null when the setup lacks the fields needed to define entry, target,
+// and stop clearly — in that case, the ticker is NOT selected.
+function computeTradingPlan(t: SwingTickerInput, _d: SwingDeepCheck): TradingPlan | null {
+  const price = typeof t.price === "number" && t.price > 0 ? t.price : NaN;
+  if (!Number.isFinite(price)) return null;
+
+  // Prefer deterministic watchlist bands when available.
+  const lower = typeof t.lowerWatch === "number" && t.lowerWatch > 0 ? t.lowerWatch : NaN;
+  const upper = typeof t.upperWatch === "number" && t.upperWatch > 0 ? t.upperWatch : NaN;
+
+  let entryLow: number, entryHigh: number, targetLow: number, targetHigh: number, stopLoss: number;
+
+  if (Number.isFinite(lower) && Number.isFinite(upper) && upper > lower) {
+    // Entry: current price down to lowerWatch (buy pullback). Cap entry band at price.
+    entryHigh = Math.min(price, upper);
+    entryLow = Math.max(lower, Math.min(price * 0.98, entryHigh));
+    if (entryLow >= entryHigh) entryLow = round2(entryHigh * 0.98);
+    targetHigh = upper;
+    targetLow = round2(price + (upper - price) * 0.6);
+    if (targetLow <= entryHigh) targetLow = round2(entryHigh * 1.03);
+    stopLoss = round2(lower * 0.98);
+  } else {
+    // Fallback: derive from price only (~2% entry band, ~6-10% target, ~3% stop).
+    entryHigh = price;
+    entryLow = round2(price * 0.98);
+    targetLow = round2(price * 1.06);
+    targetHigh = round2(price * 1.10);
+    stopLoss = round2(price * 0.97);
+  }
+
+  if (!(stopLoss > 0 && stopLoss < entryLow && targetLow > entryHigh)) return null;
+
+  // Risk/reward from raw watchlist value if present, else compute.
+  let rr: number | undefined;
+  if (typeof t.riskRewardRaw === "number" && t.riskRewardRaw > 0 && Number.isFinite(t.riskRewardRaw)) {
+    rr = round2(t.riskRewardRaw);
+  } else {
+    const risk = entryHigh - stopLoss;
+    const reward = targetLow - entryHigh;
+    if (risk > 0) rr = round2(reward / risk);
+  }
+
+  const invalidation =
+    `Setup weakens if price closes below $${stopLoss.toFixed(2)}` +
+    (Number.isFinite(lower) ? ` (below key support $${lower.toFixed(2)})` : "") +
+    `, if fresh negative news appears, or if the peer group leads down on strong volume.`;
+
+  return {
+    currentPrice: round2(price),
+    entryLow: round2(entryLow),
+    entryHigh: round2(entryHigh),
+    targetLow: round2(targetLow),
+    targetHigh: round2(targetHigh),
+    stopLoss,
+    riskReward: rr,
+    holdingWindow: "3–10 trading days",
+    invalidation,
   };
 }
 
@@ -334,15 +424,19 @@ async function runOne(
     deep = cacheRow.payload as SwingDeepCheck;
     modelUsed = String(cacheRow.model || primaryModel);
     cacheHit = true;
-    console.log(JSON.stringify({ phase: "swing", ticker: input.ticker, cache_hit: true }));
+    console.log(JSON.stringify({ feature: "swing_trader_watch", ticker: input.ticker, model_used: modelUsed, cache_hit: true, status: "cache" }));
   } else {
-    console.log(JSON.stringify({ phase: "swing", ticker: input.ticker, cache_hit: false, model: primaryModel }));
-    const out = await callGeminiWithRetry(primaryModel, buildPrompt(input), apiKey);
+    console.log(`[swing] checking ${input.ticker} with model ${primaryModel}`);
+    const out = await callGeminiWithRetry(primaryModel, buildPrompt(input), apiKey, input.ticker);
     deep = out.deep;
     modelUsed = out.modelUsed;
     failure = out.failure;
+    console.log(JSON.stringify({
+      feature: "swing_trader_watch", ticker: input.ticker, model_used: modelUsed,
+      cache_hit: false, status: deep ? "ok" : "failed",
+      failure_category: failure ?? null,
+    }));
     if (deep) {
-      // Cache it.
       await admin.from("swing_ticker_cache").upsert({
         ticker: input.ticker,
         trading_date: today,
@@ -402,24 +496,18 @@ async function runOne(
   };
 }
 
-async function limitedParallel<T, R>(items: T[], limit: number, worker: (t: T, i: number) => Promise<R>): Promise<R[]> {
+// Strict serial pacer: enforces >= REQUEST_DELAY_MS between call STARTS.
+// With MAX_CONCURRENT=1 this guarantees no more than 60000/REQUEST_DELAY_MS
+// request starts per minute (well under the 15 RPM cap for gemini-3.1-flash-lite).
+async function limitedParallel<T, R>(items: T[], _limit: number, worker: (t: T, i: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
-  let cursor = 0;
   let lastStart = 0;
-  async function next() {
-    while (true) {
-      const i = cursor++;
-      if (i >= items.length) return;
-      // Pace: at least RPM_BUDGET_MS between call starts globally.
-      const wait = Math.max(0, RPM_BUDGET_MS - (Date.now() - lastStart));
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      lastStart = Date.now();
-      try { results[i] = await worker(items[i], i); } catch (e) {
-        results[i] = e as any;
-      }
-    }
+  for (let i = 0; i < items.length; i++) {
+    const wait = Math.max(0, REQUEST_DELAY_MS - (Date.now() - lastStart));
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastStart = Date.now();
+    try { results[i] = await worker(items[i], i); } catch (e) { results[i] = e as any; }
   }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => next()));
   return results;
 }
 
@@ -465,13 +553,28 @@ export async function runSwingTraderWatch(
   }
 
   // Pick highest-scoring "passed" with strong_candidate + news_check passed.
-  const eligible = passed
+  // Pick highest-scoring "passed" with strong_candidate + news_check passed +
+  // no red flags + a computable trading plan with clear entry/target/stop and RR>=2 where possible.
+  const eligibleAll = passed
     .filter((r) => r.deep?.swing_suitability === "strong_candidate")
     .filter((r) => r.deep?.news_check === "passed")
     .filter((r) => !Array.isArray(r.deep?.red_flags) || r.deep!.red_flags!.length === 0)
     .sort((a, b) => b.finalScore - a.finalScore);
 
-  let selected: CheckedTicker | undefined = eligible[0];
+  const inputByTicker = new Map(inputs.map((i) => [i.ticker, i]));
+  let selected: CheckedTicker | undefined;
+  let selectedPlan: TradingPlan | undefined;
+  for (const cand of eligibleAll) {
+    const inp = inputByTicker.get(cand.ticker);
+    if (!inp) continue;
+    const plan = computeTradingPlan(inp, cand.deep!);
+    if (!plan) continue;
+    // Require RR >= 2 when it can be computed; if RR unknown, still allow.
+    if (typeof plan.riskReward === "number" && plan.riskReward < 2) continue;
+    selected = cand;
+    selectedPlan = plan;
+    break;
+  }
   if (selected) {
     selected.status = "selected";
     const idx = passed.indexOf(selected);
@@ -502,6 +605,15 @@ export async function runSwingTraderWatch(
       peer_context: selected?.deep?.peer_context ?? null,
       industry_context: selected?.deep?.industry_context ?? null,
       key_risks: selected?.deep?.key_risks ?? null,
+      selected_price: selectedPlan?.currentPrice ?? null,
+      entry_zone_low: selectedPlan?.entryLow ?? null,
+      entry_zone_high: selectedPlan?.entryHigh ?? null,
+      target_zone_low: selectedPlan?.targetLow ?? null,
+      target_zone_high: selectedPlan?.targetHigh ?? null,
+      stop_loss: selectedPlan?.stopLoss ?? null,
+      holding_window: selectedPlan?.holdingWindow ?? null,
+      risk_reward: selectedPlan?.riskReward ?? null,
+      invalidation: selectedPlan?.invalidation ?? null,
       source_timestamp: new Date().toISOString(),
       elapsed_ms: Date.now() - started,
     };
@@ -570,7 +682,7 @@ export async function runSwingTraderWatch(
     totalWatchOnly: watchOnly.length + needsConf.length + newsUnavailable.length,
     totalFailed: failed.length,
     totalCacheHits, totalGeminiAttempts,
-    selected, passed, rejected, watchOnly: [...watchOnly, ...needsConf, ...newsUnavailable], failed,
+    selected, selectedPlan, passed, rejected, watchOnly: [...watchOnly, ...needsConf, ...newsUnavailable], failed,
     all: results.filter(Boolean) as CheckedTicker[],
     previous,
     elapsedMs: Date.now() - started,
@@ -641,19 +753,30 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
   let swingBlock = "";
   if (s && s.deep) {
     const d = s.deep;
+    const p = r.selectedPlan;
+    const fmt = (n?: number) => (typeof n === "number" ? `$${n.toFixed(2)}` : "—");
+    const planRows = p ? `
+          <tr><td style="padding:3px 0;color:#64748b;">Current price</td><td><strong>${fmt(p.currentPrice)}</strong></td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;">Entry zone</td><td>${fmt(p.entryLow)} – ${fmt(p.entryHigh)}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;">Target zone</td><td>${fmt(p.targetLow)} – ${fmt(p.targetHigh)}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;">Stop-loss zone</td><td>${fmt(p.stopLoss)}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;">Risk/reward</td><td>${typeof p.riskReward === "number" ? `${p.riskReward.toFixed(2)}R` : "—"}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;">Expected holding window</td><td>${esc(p.holdingWindow)}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Invalidation</td><td>${esc(p.invalidation)}</td></tr>` : `
+          <tr><td style="padding:3px 0;color:#64748b;">Holding window</td><td>3–10 trading days</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Invalidation</td><td>Watch for negative catalyst, break of support, or peer group leading down.</td></tr>`;
     swingBlock = `
       <div style="padding:16px;background:#ffffff;border:1px solid #bae6fd;border-left:4px solid #0891b2;border-radius:10px;">
         <p style="margin:0 0 6px 0;font-size:14px;color:#0c4a6e;font-weight:700;">${tickerLink(appBaseUrl, s.ticker)} · ${esc(s.company)}</p>
         <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">${esc(d.industry || "")}</p>
         <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;font-size:12px;color:#0f172a;">
           <tr><td style="padding:3px 0;color:#64748b;">Setup type</td><td>${esc(d.swing_suitability || "—")}</td></tr>
-          <tr><td style="padding:3px 0;color:#64748b;">Holding window</td><td>3–10 trading days</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;">Confidence</td><td>${esc(d.confidence || "—")}</td></tr>
+          ${planRows}
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Latest catalyst</td><td>${esc(d.latest_catalyst || "—")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Peer / competitor context</td><td>${esc(d.peer_context || "—")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Industry context</td><td>${esc(d.industry_context || "—")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Key risks</td><td>${(d.key_risks || []).map(esc).join("; ") || "—"}</td></tr>
-          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Invalidation</td><td>Watch for negative catalyst, break of support, or peer group leading down.</td></tr>
         </table>
         ${Array.isArray(d.sources) && d.sources.length > 0 ? `<p style="margin:8px 0 0 0;font-size:11px;color:#475569;">Sources: ${d.sources.slice(0, 4).map((x) => `<a href="${esc(x.url)}" style="color:#0891b2;">${esc(x.title || "source")}</a>`).join(" · ")}</p>` : ""}
         ${disclaimer}
