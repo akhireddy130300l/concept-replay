@@ -348,15 +348,19 @@ async function runOne(
     deep = cacheRow.payload as SwingDeepCheck;
     modelUsed = String(cacheRow.model || primaryModel);
     cacheHit = true;
-    console.log(JSON.stringify({ phase: "swing", ticker: input.ticker, cache_hit: true }));
+    console.log(JSON.stringify({ feature: "swing_trader_watch", ticker: input.ticker, model_used: modelUsed, cache_hit: true, status: "cache" }));
   } else {
-    console.log(JSON.stringify({ phase: "swing", ticker: input.ticker, cache_hit: false, model: primaryModel }));
-    const out = await callGeminiWithRetry(primaryModel, buildPrompt(input), apiKey);
+    console.log(`[swing] checking ${input.ticker} with model ${primaryModel}`);
+    const out = await callGeminiWithRetry(primaryModel, buildPrompt(input), apiKey, input.ticker);
     deep = out.deep;
     modelUsed = out.modelUsed;
     failure = out.failure;
+    console.log(JSON.stringify({
+      feature: "swing_trader_watch", ticker: input.ticker, model_used: modelUsed,
+      cache_hit: false, status: deep ? "ok" : "failed",
+      failure_category: failure ?? null,
+    }));
     if (deep) {
-      // Cache it.
       await admin.from("swing_ticker_cache").upsert({
         ticker: input.ticker,
         trading_date: today,
