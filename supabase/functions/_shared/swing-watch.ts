@@ -85,6 +85,7 @@ export type SwingResult = {
   totalCacheHits: number;
   totalGeminiAttempts: number;
   selected?: CheckedTicker;
+  selectedPlan?: TradingPlan;
   passed: CheckedTicker[]; // passed but not selected
   rejected: CheckedTicker[];
   watchOnly: CheckedTicker[];
