@@ -254,34 +254,46 @@ async function callGeminiOnce(model: string, prompt: string, apiKey: string, sig
   return { text, grounded, groundingChunks: chunks, httpStatus: res.status };
 }
 
-async function callGeminiWithRetry(primaryModel: string, prompt: string, apiKey: string): Promise<{ deep: SwingDeepCheck | null; modelUsed: string; failure?: string }> {
-  const models = primaryModel === FALLBACK_MODEL ? [primaryModel] : [primaryModel, FALLBACK_MODEL];
-  for (const model of models) {
-    let delay = 1500;
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      const r = await callGeminiOnce(model, prompt, apiKey);
-      if (r.httpStatus === 429) {
+async function callGeminiWithRetry(model: string, prompt: string, apiKey: string, ticker: string): Promise<{ deep: SwingDeepCheck | null; modelUsed: string; failure?: string }> {
+  let delay = 2000;
+  let lastStatus: number | null = null;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const started = Date.now();
+    console.log(JSON.stringify({
+      feature: "swing_trader_watch", ticker, model_used: model,
+      request_started: true, attempt,
+    }));
+    const r = await callGeminiOnce(model, prompt, apiKey);
+    lastStatus = r.httpStatus;
+    console.log(JSON.stringify({
+      feature: "swing_trader_watch", ticker, model_used: model,
+      request_finished: true, attempt, status: r.httpStatus, elapsed_ms: Date.now() - started,
+    }));
+    if (r.httpStatus === 429) {
+      if (attempt < MAX_RETRIES) {
         await new Promise((res) => setTimeout(res, delay));
         delay *= 2;
         continue;
       }
-      if (r.httpStatus >= 400) break; // try next model
-      if (!r.text) break;
-      let parsed: any;
-      try { parsed = JSON.parse(extractJson(r.text)); } catch { break; }
-      // Merge grounding sources.
-      if (Array.isArray(r.groundingChunks) && r.groundingChunks.length > 0) {
-        const extra = r.groundingChunks
-          .map((c: any) => c?.web ? { title: String(c.web.title || c.web.uri || "source"), url: String(c.web.uri || "") } : null)
-          .filter((x: any) => x && x.url);
-        if (!Array.isArray(parsed.sources)) parsed.sources = [];
-        const seen = new Set(parsed.sources.map((s: any) => s?.url).filter(Boolean));
-        for (const s of extra) if (!seen.has(s.url)) { parsed.sources.push(s); seen.add(s.url); }
-      }
-      return { deep: parsed as SwingDeepCheck, modelUsed: model };
+      return { deep: null, modelUsed: model, failure: `rate_limited_429` };
     }
+    if (r.httpStatus >= 400) {
+      return { deep: null, modelUsed: model, failure: `http_${r.httpStatus}` };
+    }
+    if (!r.text) return { deep: null, modelUsed: model, failure: "empty_response" };
+    let parsed: any;
+    try { parsed = JSON.parse(extractJson(r.text)); } catch { return { deep: null, modelUsed: model, failure: "invalid_json" }; }
+    if (Array.isArray(r.groundingChunks) && r.groundingChunks.length > 0) {
+      const extra = r.groundingChunks
+        .map((c: any) => c?.web ? { title: String(c.web.title || c.web.uri || "source"), url: String(c.web.uri || "") } : null)
+        .filter((x: any) => x && x.url);
+      if (!Array.isArray(parsed.sources)) parsed.sources = [];
+      const seen = new Set(parsed.sources.map((s: any) => s?.url).filter(Boolean));
+      for (const s of extra) if (!seen.has(s.url)) { parsed.sources.push(s); seen.add(s.url); }
+    }
+    return { deep: parsed as SwingDeepCheck, modelUsed: model };
   }
-  return { deep: null, modelUsed: primaryModel, failure: "gemini_all_attempts_failed" };
+  return { deep: null, modelUsed: model, failure: `gemini_failed_status_${lastStatus ?? "unknown"}` };
 }
 
 function statusFromSuitability(s?: string): CheckedTicker["status"] {
