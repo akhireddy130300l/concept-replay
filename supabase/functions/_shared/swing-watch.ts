@@ -682,7 +682,7 @@ export async function runSwingTraderWatch(
     totalWatchOnly: watchOnly.length + needsConf.length + newsUnavailable.length,
     totalFailed: failed.length,
     totalCacheHits, totalGeminiAttempts,
-    selected, passed, rejected, watchOnly: [...watchOnly, ...needsConf, ...newsUnavailable], failed,
+    selected, selectedPlan, passed, rejected, watchOnly: [...watchOnly, ...needsConf, ...newsUnavailable], failed,
     all: results.filter(Boolean) as CheckedTicker[],
     previous,
     elapsedMs: Date.now() - started,
