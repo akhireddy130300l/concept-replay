@@ -477,13 +477,28 @@ export async function runSwingTraderWatch(
   }
 
   // Pick highest-scoring "passed" with strong_candidate + news_check passed.
-  const eligible = passed
+  // Pick highest-scoring "passed" with strong_candidate + news_check passed +
+  // no red flags + a computable trading plan with clear entry/target/stop and RR>=2 where possible.
+  const eligibleAll = passed
     .filter((r) => r.deep?.swing_suitability === "strong_candidate")
     .filter((r) => r.deep?.news_check === "passed")
     .filter((r) => !Array.isArray(r.deep?.red_flags) || r.deep!.red_flags!.length === 0)
     .sort((a, b) => b.finalScore - a.finalScore);
 
-  let selected: CheckedTicker | undefined = eligible[0];
+  const inputByTicker = new Map(inputs.map((i) => [i.ticker, i]));
+  let selected: CheckedTicker | undefined;
+  let selectedPlan: TradingPlan | undefined;
+  for (const cand of eligibleAll) {
+    const inp = inputByTicker.get(cand.ticker);
+    if (!inp) continue;
+    const plan = computeTradingPlan(inp, cand.deep!);
+    if (!plan) continue;
+    // Require RR >= 2 when it can be computed; if RR unknown, still allow.
+    if (typeof plan.riskReward === "number" && plan.riskReward < 2) continue;
+    selected = cand;
+    selectedPlan = plan;
+    break;
+  }
   if (selected) {
     selected.status = "selected";
     const idx = passed.indexOf(selected);
