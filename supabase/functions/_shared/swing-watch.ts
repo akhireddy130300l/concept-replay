@@ -105,10 +105,12 @@ export type SwingResult = {
 };
 
 const DEFAULT_SWING_MODEL = "gemini-3.1-flash-lite";
-const FALLBACK_MODEL = "gemini-2.5-flash";
-const MAX_CONCURRENT = 3;
-const MAX_RETRIES = 3;
-const RPM_BUDGET_MS = 4200; // ~14 rpm safety pace between call starts
+// NOTE: No per-ticker model fallback. gemini-2.5-flash has only 20 RPD and would
+// exhaust after a few tickers. On primary-model failure a ticker is marked
+// deep_check_failed and we continue with the next one.
+const MAX_CONCURRENT = 1;
+const MAX_RETRIES = 2;
+const REQUEST_DELAY_MS = 4500; // strict: ~13.3 starts/min, well under 15 RPM cap
 
 function tradingDateNY(): string {
   const now = new Date();
