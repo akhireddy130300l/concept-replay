@@ -420,24 +420,18 @@ async function runOne(
   };
 }
 
-async function limitedParallel<T, R>(items: T[], limit: number, worker: (t: T, i: number) => Promise<R>): Promise<R[]> {
+// Strict serial pacer: enforces >= REQUEST_DELAY_MS between call STARTS.
+// With MAX_CONCURRENT=1 this guarantees no more than 60000/REQUEST_DELAY_MS
+// request starts per minute (well under the 15 RPM cap for gemini-3.1-flash-lite).
+async function limitedParallel<T, R>(items: T[], _limit: number, worker: (t: T, i: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
-  let cursor = 0;
   let lastStart = 0;
-  async function next() {
-    while (true) {
-      const i = cursor++;
-      if (i >= items.length) return;
-      // Pace: at least RPM_BUDGET_MS between call starts globally.
-      const wait = Math.max(0, RPM_BUDGET_MS - (Date.now() - lastStart));
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      lastStart = Date.now();
-      try { results[i] = await worker(items[i], i); } catch (e) {
-        results[i] = e as any;
-      }
-    }
+  for (let i = 0; i < items.length; i++) {
+    const wait = Math.max(0, REQUEST_DELAY_MS - (Date.now() - lastStart));
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastStart = Date.now();
+    try { results[i] = await worker(items[i], i); } catch (e) { results[i] = e as any; }
   }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => next()));
   return results;
 }
 
