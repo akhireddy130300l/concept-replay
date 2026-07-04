@@ -394,7 +394,7 @@ function computeTradingPlan(t: SwingTickerInput, _d: SwingDeepCheck): TradingPla
   };
 }
 
-
+async function runOne(
   admin: SupabaseClient,
   input: SwingTickerInput,
   primaryModel: string,
