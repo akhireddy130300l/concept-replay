@@ -753,19 +753,30 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
   let swingBlock = "";
   if (s && s.deep) {
     const d = s.deep;
+    const p = r.selectedPlan;
+    const fmt = (n?: number) => (typeof n === "number" ? `$${n.toFixed(2)}` : "—");
+    const planRows = p ? `
+          <tr><td style="padding:3px 0;color:#64748b;">Current price</td><td><strong>${fmt(p.currentPrice)}</strong></td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;">Entry zone</td><td>${fmt(p.entryLow)} – ${fmt(p.entryHigh)}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;">Target zone</td><td>${fmt(p.targetLow)} – ${fmt(p.targetHigh)}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;">Stop-loss zone</td><td>${fmt(p.stopLoss)}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;">Risk/reward</td><td>${typeof p.riskReward === "number" ? `${p.riskReward.toFixed(2)}R` : "—"}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;">Expected holding window</td><td>${esc(p.holdingWindow)}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Invalidation</td><td>${esc(p.invalidation)}</td></tr>` : `
+          <tr><td style="padding:3px 0;color:#64748b;">Holding window</td><td>3–10 trading days</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Invalidation</td><td>Watch for negative catalyst, break of support, or peer group leading down.</td></tr>`;
     swingBlock = `
       <div style="padding:16px;background:#ffffff;border:1px solid #bae6fd;border-left:4px solid #0891b2;border-radius:10px;">
         <p style="margin:0 0 6px 0;font-size:14px;color:#0c4a6e;font-weight:700;">${tickerLink(appBaseUrl, s.ticker)} · ${esc(s.company)}</p>
         <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">${esc(d.industry || "")}</p>
         <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;font-size:12px;color:#0f172a;">
           <tr><td style="padding:3px 0;color:#64748b;">Setup type</td><td>${esc(d.swing_suitability || "—")}</td></tr>
-          <tr><td style="padding:3px 0;color:#64748b;">Holding window</td><td>3–10 trading days</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;">Confidence</td><td>${esc(d.confidence || "—")}</td></tr>
+          ${planRows}
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Latest catalyst</td><td>${esc(d.latest_catalyst || "—")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Peer / competitor context</td><td>${esc(d.peer_context || "—")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Industry context</td><td>${esc(d.industry_context || "—")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Key risks</td><td>${(d.key_risks || []).map(esc).join("; ") || "—"}</td></tr>
-          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Invalidation</td><td>Watch for negative catalyst, break of support, or peer group leading down.</td></tr>
         </table>
         ${Array.isArray(d.sources) && d.sources.length > 0 ? `<p style="margin:8px 0 0 0;font-size:11px;color:#475569;">Sources: ${d.sources.slice(0, 4).map((x) => `<a href="${esc(x.url)}" style="color:#0891b2;">${esc(x.title || "source")}</a>`).join(" · ")}</p>` : ""}
         ${disclaimer}
