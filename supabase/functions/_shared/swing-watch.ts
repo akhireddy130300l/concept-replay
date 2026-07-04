@@ -319,7 +319,82 @@ function scoreDeep(deep: SwingDeepCheck): { news: number; peer: number; industry
   };
 }
 
-async function runOne(
+export type TradingPlan = {
+  currentPrice: number;
+  entryLow: number;
+  entryHigh: number;
+  targetLow: number;
+  targetHigh: number;
+  stopLoss: number;
+  riskReward?: number;
+  holdingWindow: string;
+  invalidation: string;
+};
+
+function round2(n: number): number { return Math.round(n * 100) / 100; }
+
+// Build a deterministic trading plan from the input's watchlist/chart fields.
+// Returns null when the setup lacks the fields needed to define entry, target,
+// and stop clearly — in that case, the ticker is NOT selected.
+function computeTradingPlan(t: SwingTickerInput, _d: SwingDeepCheck): TradingPlan | null {
+  const price = typeof t.price === "number" && t.price > 0 ? t.price : NaN;
+  if (!Number.isFinite(price)) return null;
+
+  // Prefer deterministic watchlist bands when available.
+  const lower = typeof t.lowerWatch === "number" && t.lowerWatch > 0 ? t.lowerWatch : NaN;
+  const upper = typeof t.upperWatch === "number" && t.upperWatch > 0 ? t.upperWatch : NaN;
+
+  let entryLow: number, entryHigh: number, targetLow: number, targetHigh: number, stopLoss: number;
+
+  if (Number.isFinite(lower) && Number.isFinite(upper) && upper > lower) {
+    // Entry: current price down to lowerWatch (buy pullback). Cap entry band at price.
+    entryHigh = Math.min(price, upper);
+    entryLow = Math.max(lower, Math.min(price * 0.98, entryHigh));
+    if (entryLow >= entryHigh) entryLow = round2(entryHigh * 0.98);
+    targetHigh = upper;
+    targetLow = round2(price + (upper - price) * 0.6);
+    if (targetLow <= entryHigh) targetLow = round2(entryHigh * 1.03);
+    stopLoss = round2(lower * 0.98);
+  } else {
+    // Fallback: derive from price only (~2% entry band, ~6-10% target, ~3% stop).
+    entryHigh = price;
+    entryLow = round2(price * 0.98);
+    targetLow = round2(price * 1.06);
+    targetHigh = round2(price * 1.10);
+    stopLoss = round2(price * 0.97);
+  }
+
+  if (!(stopLoss > 0 && stopLoss < entryLow && targetLow > entryHigh)) return null;
+
+  // Risk/reward from raw watchlist value if present, else compute.
+  let rr: number | undefined;
+  if (typeof t.riskRewardRaw === "number" && t.riskRewardRaw > 0 && Number.isFinite(t.riskRewardRaw)) {
+    rr = round2(t.riskRewardRaw);
+  } else {
+    const risk = entryHigh - stopLoss;
+    const reward = targetLow - entryHigh;
+    if (risk > 0) rr = round2(reward / risk);
+  }
+
+  const invalidation =
+    `Setup weakens if price closes below $${stopLoss.toFixed(2)}` +
+    (Number.isFinite(lower) ? ` (below key support $${lower.toFixed(2)})` : "") +
+    `, if fresh negative news appears, or if the peer group leads down on strong volume.`;
+
+  return {
+    currentPrice: round2(price),
+    entryLow: round2(entryLow),
+    entryHigh: round2(entryHigh),
+    targetLow: round2(targetLow),
+    targetHigh: round2(targetHigh),
+    stopLoss,
+    riskReward: rr,
+    holdingWindow: "3–10 trading days",
+    invalidation,
+  };
+}
+
+
   admin: SupabaseClient,
   input: SwingTickerInput,
   primaryModel: string,
