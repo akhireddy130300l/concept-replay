@@ -658,7 +658,11 @@ export async function runSwingTraderWatch(
           elapsed_ms: r!.elapsedMs,
         }));
       if (rows.length > 0) {
-        await admin.from("swing_trade_checked_tickers").insert(rows).catch(() => {});
+        try {
+          await admin.from("swing_trade_checked_tickers").insert(rows);
+        } catch (e) {
+          console.log(JSON.stringify({ phase: "swing", failure_category: "checked_tickers_insert_failed", message: (e as Error).message }));
+        }
       }
     }
   } catch (e) {
