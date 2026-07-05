@@ -2878,7 +2878,35 @@ serve(async (req) => {
     let emailsSent = 0;
 
     for (const [userId, topics] of Object.entries(topicsByUser)) {
-      const topicsArray = topics as any[];
+      let topicsArray = topics as any[];
+
+      // Dedupe stock/market-gainers topics per user per run.
+      // Keep earliest due (next_revision_date asc), tiebreak most recently created.
+      const stockTopics = topicsArray.filter((t) => isLatestMarketGainersRequest(t.title));
+      const nonStockTopics = topicsArray.filter((t) => !isLatestMarketGainersRequest(t.title));
+      let skippedStockIds: string[] = [];
+      if (stockTopics.length > 1) {
+        stockTopics.sort((a, b) => {
+          const ad = new Date(a.next_revision_date || 0).getTime();
+          const bd = new Date(b.next_revision_date || 0).getTime();
+          if (ad !== bd) return ad - bd;
+          const ac = new Date(a.created_at || 0).getTime();
+          const bc = new Date(b.created_at || 0).getTime();
+          return bc - ac;
+        });
+        const [selectedStock, ...skipped] = stockTopics;
+        skippedStockIds = skipped.map((s) => s.id);
+        console.log(`[email] duplicate_stock_topics_found count=${stockTopics.length} selected_topic_id=${selectedStock.id} skipped_topic_ids=${JSON.stringify(skippedStockIds)}`);
+        // Advance the skipped duplicates' next_revision_date so they don't re-fire immediately.
+        for (const s of skipped) {
+          const next = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+          try {
+            await supabase.from("learned_topics").update({ next_revision_date: next }).eq("id", s.id);
+          } catch (e) { console.error("Failed to advance skipped stock topic:", (e as Error).message); }
+        }
+        topicsArray = [...nonStockTopics, selectedStock];
+      }
+
       console.log("Processing user:", userId, "with", topicsArray.length, "topics");
 
       console.log("Fetching user email from Supabase...");
