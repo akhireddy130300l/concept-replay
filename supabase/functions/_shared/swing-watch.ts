@@ -790,12 +790,24 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
         ${disclaimer}
       </div>`;
   } else {
-    swingBlock = `
+    // Distinguish "all checks failed" (Gemini rate limit / model error) from
+    // "checks completed but nothing qualified".
+    const noRealChecks = r.uniqueChecked > 0 && r.totalFailed >= r.uniqueChecked;
+    if (noRealChecks) {
+      swingBlock = `
+      <div style="padding:16px;background:#fff7ed;border:1px solid #fdba74;border-radius:10px;">
+        <p style="margin:0;font-size:13px;color:#9a3412;font-weight:700;">🎯 Swing Trader Watch unavailable for this run</p>
+        <p style="margin:6px 0 0 0;font-size:12px;color:#7c2d12;line-height:1.6;">Deep checks could not complete (likely Gemini rate limit or model error). Existing stock tables below are unchanged.</p>
+        ${disclaimer}
+      </div>`;
+    } else {
+      swingBlock = `
       <div style="padding:16px;background:#ffffff;border:1px dashed #cbd5e1;border-radius:10px;">
         <p style="margin:0;font-size:13px;color:#0f172a;font-weight:700;">No high-quality swing setup today.</p>
         <p style="margin:6px 0 0 0;font-size:12px;color:#475569;line-height:1.6;">All checked stocks were rejected because they were extended, lacked clean risk/reward, had weak volume, had no clear target, or did not pass fresh news, peer, industry, or risk checks.</p>
         ${disclaimer}
       </div>`;
+    }
   }
 
   const swingSection = `
