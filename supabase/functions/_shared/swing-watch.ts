@@ -437,13 +437,17 @@ async function runOne(
       failure_category: failure ?? null,
     }));
     if (deep) {
-      await admin.from("swing_ticker_cache").upsert({
-        ticker: input.ticker,
-        trading_date: today,
-        model: modelUsed,
-        source_type: "swing_deep_check",
-        payload: deep,
-      }).catch(() => {});
+      try {
+        await admin.from("swing_ticker_cache").upsert({
+          ticker: input.ticker,
+          trading_date: today,
+          model: modelUsed,
+          source_type: "swing_deep_check",
+          payload: deep,
+        });
+      } catch (e) {
+        console.log(JSON.stringify({ phase: "swing", ticker: input.ticker, cache_upsert_failed: (e as Error).message }));
+      }
     }
   }
 
