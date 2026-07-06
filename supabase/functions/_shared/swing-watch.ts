@@ -1,11 +1,13 @@
 // Swing Trader Watch engine + email renderer.
-// Called by the daily stock email. Uses direct Gemini (GEMINI_API_KEY) with
-// Google Search grounding. Model comes from GEMINI_SWING_MODEL env; falls back
-// to gemini-2.5-flash on 4xx/5xx from the primary model.
+// v2: Uses Exa Search (EXA_API_KEY) for fresh news/context + deterministic
+// keyword scoring. No Gemini, no Google Search grounding.
 //
-// Safe execution: max 3 concurrent Gemini calls, exponential backoff on 429,
-// per-trading-day cache per (ticker, model, source_type=swing_deep_check).
-// One failed ticker never blocks the whole email.
+// - One Exa query per unique ticker.
+// - Per-trading-day cache in swing_ticker_cache (model="exa", source_type="swing_deep_check").
+// - On Exa rate-limit/error/timeout: stop remaining tickers, mark them
+//   "skipped_due_to_exa_limit", still send the normal stock email.
+// - If EXA_API_KEY missing: no calls, show "Swing Trader Watch unavailable"
+//   with reason=missing_exa_api_key.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -16,7 +18,7 @@ export type SwingTickerInput = {
   oneDayPct?: number;
   sevenDayPct?: number;
   twentyDayPct?: number;
-  volumeRatio?: number;   // vs 20-day avg, if known
+  volumeRatio?: number;
   marketCap?: number;
   analystLabel?: string;
   watchlistScore?: number;
@@ -25,7 +27,7 @@ export type SwingTickerInput = {
   upperWatch?: number;
   riskRewardRaw?: number;
   riskFlags?: string[];
-  sourceTables: string[]; // which tables this ticker appeared in
+  sourceTables: string[];
 };
 
 export type SwingDeepCheck = {
@@ -46,7 +48,7 @@ export type SwingDeepCheck = {
   swing_suitability?: "strong_candidate" | "possible_candidate" | "watch_only" | "rejected" | "needs_confirmation";
   rejection_reason?: string;
   confidence?: "Low" | "Medium" | "High";
-  sources?: { title: string; url: string }[];
+  sources?: { title: string; url: string; published?: string }[];
 };
 
 export type CheckedTicker = {
@@ -66,13 +68,20 @@ export type CheckedTicker = {
     | "watch_only"
     | "needs_confirmation"
     | "news_unavailable"
-    | "deep_check_failed";
+    | "deep_check_failed"
+    | "skipped_due_to_exa_limit";
   rejectionReason?: string;
   deep?: SwingDeepCheck;
   cacheHit: boolean;
   elapsedMs: number;
   modelUsed: string;
 };
+
+export type SwingUnavailableReason =
+  | "missing_exa_api_key"
+  | "exa_rate_limited"
+  | "exa_error"
+  | "exa_timeout";
 
 export type SwingResult = {
   runId?: string;
@@ -82,14 +91,17 @@ export type SwingResult = {
   totalRejected: number;
   totalWatchOnly: number;
   totalFailed: number;
+  totalSkipped: number;
   totalCacheHits: number;
-  totalGeminiAttempts: number;
+  totalExaAttempts: number;
+  unavailableReason?: SwingUnavailableReason;
   selected?: CheckedTicker;
   selectedPlan?: TradingPlan;
-  passed: CheckedTicker[]; // passed but not selected
+  passed: CheckedTicker[];
   rejected: CheckedTicker[];
   watchOnly: CheckedTicker[];
   failed: CheckedTicker[];
+  skipped: CheckedTicker[];
   all: CheckedTicker[];
   previous?: {
     ticker: string;
@@ -105,22 +117,14 @@ export type SwingResult = {
   elapsedMs: number;
 };
 
-const DEFAULT_SWING_MODEL = "gemini-3.1-flash-lite";
-// NOTE: No per-ticker model fallback. gemini-2.5-flash has only 20 RPD and would
-// exhaust after a few tickers. On primary-model failure a ticker is marked
-// deep_check_failed and we continue with the next one.
-const MAX_CONCURRENT = 1;
-const MAX_RETRIES = 2;
-const REQUEST_DELAY_MS = 4500; // strict: ~13.3 starts/min, well under 15 RPM cap
+const PROVIDER = "exa";
+const EXA_URL = "https://api.exa.ai/search";
+const EXA_TIMEOUT_MS = 15000;
+const REQUEST_DELAY_MS = 400; // gentle pacing between Exa calls
 
 function tradingDateNY(): string {
-  const now = new Date();
-  // Use New York date; not adjusting for weekends/holidays — cache scoped daily is enough.
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
-  const y = parts.find(p => p.type === "year")!.value;
-  const m = parts.find(p => p.type === "month")!.value;
-  const d = parts.find(p => p.type === "day")!.value;
-  return `${y}-${m}-${d}`;
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  return `${parts.find(p => p.type === "year")!.value}-${parts.find(p => p.type === "month")!.value}-${parts.find(p => p.type === "day")!.value}`;
 }
 
 function dedupeInputs(inputs: SwingTickerInput[]): SwingTickerInput[] {
@@ -133,7 +137,6 @@ function dedupeInputs(inputs: SwingTickerInput[]): SwingTickerInput[] {
       map.set(key, { ...raw, ticker: key, sourceTables: [...new Set(raw.sourceTables || [])] });
     } else {
       const merged = { ...existing };
-      // Merge source tables and fill missing fields.
       merged.sourceTables = Array.from(new Set([...(existing.sourceTables || []), ...(raw.sourceTables || [])]));
       for (const k of Object.keys(raw) as (keyof SwingTickerInput)[]) {
         if (k === "sourceTables" || k === "ticker") continue;
@@ -147,11 +150,10 @@ function dedupeInputs(inputs: SwingTickerInput[]): SwingTickerInput[] {
   return Array.from(map.values());
 }
 
-// Deterministic pre-scores 0..10 per axis.
 function preScore(t: SwingTickerInput): { technical: number; risk: number } {
   let tech = 5;
   if (typeof t.oneDayPct === "number") {
-    if (t.oneDayPct > 15) tech -= 2; // very extended
+    if (t.oneDayPct > 15) tech -= 2;
     else if (t.oneDayPct > 8) tech -= 1;
     else if (t.oneDayPct > 2) tech += 1;
   }
@@ -185,116 +187,210 @@ function preScore(t: SwingTickerInput): { technical: number; risk: number } {
   };
 }
 
-function extractJson(raw: string): string {
-  const t = raw.trim();
-  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) return fence[1].trim();
-  const i = t.indexOf("{");
-  const j = t.lastIndexOf("}");
-  if (i !== -1 && j !== -1 && j > i) return t.slice(i, j + 1);
-  return t;
+// ─── Exa Search ──────────────────────────────────────────────────────────
+
+type ExaResult = { title?: string; url?: string; publishedDate?: string; highlights?: string[] };
+type ExaCallOutcome =
+  | { ok: true; results: ExaResult[] }
+  | { ok: false; failure: SwingUnavailableReason; httpStatus?: number };
+
+function buildExaQuery(t: SwingTickerInput): string {
+  return `${t.ticker} ${t.company} stock latest news earnings analyst upgrade downgrade lawsuit regulation competitors industry today`;
 }
 
-function buildPrompt(t: SwingTickerInput): string {
-  return [
-    `You are a stock analyst evaluating "${t.ticker}" (${t.company}) for a 3–10 TRADING DAY swing setup.`,
-    `Use Google Search to fetch CURRENT public information. Do not rely on memory alone.`,
-    `Return ONLY strict JSON, no markdown, no commentary, matching this shape:`,
-    `{
-  "ticker": "${t.ticker}",
-  "company": "${t.company}",
-  "industry": string,
-  "latest_catalyst": string,
-  "news_check": "passed" | "failed" | "unavailable",
-  "peer_check": "passed" | "failed" | "unavailable",
-  "industry_check": "passed" | "failed" | "unavailable",
-  "risk_check": "passed" | "failed" | "unavailable",
-  "fundamental_check": "passed" | "failed" | "unavailable",
-  "peer_context": string,
-  "industry_context": string,
-  "key_risks": string[],
-  "red_flags": string[],
-  "positive_factors": string[],
-  "swing_suitability": "strong_candidate" | "possible_candidate" | "watch_only" | "rejected" | "needs_confirmation",
-  "rejection_reason": string,
-  "confidence": "Low" | "Medium" | "High",
-  "sources": [ { "title": string, "url": string } ]
-}`,
-    `Rules:`,
-    `- Check: latest news (past 14 days), catalyst, earnings/news risk, analyst upgrades/downgrades, regulatory/legal risks, fundamentals summary, industry condition, main peers, whether the move is with or against peers, geopolitical/country risk, sector-specific risks, whether the move is news-backed or speculative.`,
-    `- Apply industry-specific checks where relevant: biotech/pharma (pipeline, FDA, trials, patents, competitor drugs), tech/software (demand, AI/cloud trend, valuation, customer growth), financials (rates, credit, earnings quality), airlines/travel (fuel, demand, debt), EV/auto (deliveries, margins, cash burn, competition).`,
-    `- If no fresh news can be found, set news_check to "unavailable".`,
-    `- Reject if: major negative news, serious lawsuit or regulatory risk, earnings miss or guidance cut, extremely overextended, weak volume confirmation, peer group much stronger than candidate, move appears purely hype-based, high volatility without clear catalyst.`,
-    `- Every text field <= 500 chars. sources must contain real URLs from search.`,
-  ].join("\n");
-}
-
-async function callGeminiOnce(model: string, prompt: string, apiKey: string, signal?: AbortSignal): Promise<{ text: string; grounded: boolean; groundingChunks: any[]; httpStatus: number }> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      tools: [{ google_search: {} }],
-      generationConfig: { temperature: 0.4 },
-    }),
-    signal,
-  });
-  if (res.status === 429) return { text: "", grounded: false, groundingChunks: [], httpStatus: 429 };
-  if (!res.ok) return { text: "", grounded: false, groundingChunks: [], httpStatus: res.status };
-  const json: any = await res.json().catch(() => null);
-  const cand = json?.candidates?.[0];
-  const parts = cand?.content?.parts;
-  const text: string = Array.isArray(parts)
-    ? parts.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("").trim()
-    : "";
-  const gm = cand?.groundingMetadata;
-  const chunks = Array.isArray(gm?.groundingChunks) ? gm.groundingChunks : [];
-  const grounded = chunks.length > 0 || (Array.isArray(gm?.webSearchQueries) && gm.webSearchQueries.length > 0);
-  return { text, grounded, groundingChunks: chunks, httpStatus: res.status };
-}
-
-async function callGeminiWithRetry(model: string, prompt: string, apiKey: string, ticker: string): Promise<{ deep: SwingDeepCheck | null; modelUsed: string; failure?: string }> {
-  let delay = 2000;
-  let lastStatus: number | null = null;
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const started = Date.now();
-    console.log(JSON.stringify({
-      feature: "swing_trader_watch", ticker, model_used: model,
-      request_started: true, attempt,
-    }));
-    const r = await callGeminiOnce(model, prompt, apiKey);
-    lastStatus = r.httpStatus;
-    console.log(JSON.stringify({
-      feature: "swing_trader_watch", ticker, model_used: model,
-      request_finished: true, attempt, status: r.httpStatus, elapsed_ms: Date.now() - started,
-    }));
-    if (r.httpStatus === 429) {
-      if (attempt < MAX_RETRIES) {
-        await new Promise((res) => setTimeout(res, delay));
-        delay *= 2;
-        continue;
-      }
-      return { deep: null, modelUsed: model, failure: `rate_limited_429` };
-    }
-    if (r.httpStatus >= 400) {
-      return { deep: null, modelUsed: model, failure: `http_${r.httpStatus}` };
-    }
-    if (!r.text) return { deep: null, modelUsed: model, failure: "empty_response" };
-    let parsed: any;
-    try { parsed = JSON.parse(extractJson(r.text)); } catch { return { deep: null, modelUsed: model, failure: "invalid_json" }; }
-    if (Array.isArray(r.groundingChunks) && r.groundingChunks.length > 0) {
-      const extra = r.groundingChunks
-        .map((c: any) => c?.web ? { title: String(c.web.title || c.web.uri || "source"), url: String(c.web.uri || "") } : null)
-        .filter((x: any) => x && x.url);
-      if (!Array.isArray(parsed.sources)) parsed.sources = [];
-      const seen = new Set(parsed.sources.map((s: any) => s?.url).filter(Boolean));
-      for (const s of extra) if (!seen.has(s.url)) { parsed.sources.push(s); seen.add(s.url); }
-    }
-    return { deep: parsed as SwingDeepCheck, modelUsed: model };
+async function callExa(query: string, apiKey: string): Promise<ExaCallOutcome> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), EXA_TIMEOUT_MS);
+  try {
+    const res = await fetch(EXA_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        query,
+        type: "auto",
+        numResults: 10,
+        contents: { highlights: { numSentences: 3, highlightsPerUrl: 3 } },
+      }),
+      signal: ctrl.signal,
+    });
+    if (res.status === 429) { await res.text().catch(() => ""); return { ok: false, failure: "exa_rate_limited", httpStatus: 429 }; }
+    if (!res.ok) { await res.text().catch(() => ""); return { ok: false, failure: "exa_error", httpStatus: res.status }; }
+    const json: any = await res.json().catch(() => null);
+    const results: ExaResult[] = Array.isArray(json?.results) ? json.results : [];
+    return { ok: true, results };
+  } catch (e) {
+    const name = (e as Error)?.name || "";
+    if (name === "AbortError") return { ok: false, failure: "exa_timeout" };
+    return { ok: false, failure: "exa_error" };
+  } finally {
+    clearTimeout(timer);
   }
-  return { deep: null, modelUsed: model, failure: `gemini_failed_status_${lastStatus ?? "unknown"}` };
+}
+
+// ─── Deterministic keyword analysis ──────────────────────────────────────
+
+const POSITIVE_SIGNALS: { rx: RegExp; label: string }[] = [
+  { rx: /\braise[sd]?\s+(?:full[- ]?year\s+)?outlook|guidance\s+raise[sd]?|raise[sd]?\s+guidance\b/i, label: "raised outlook" },
+  { rx: /\bbeat[s]?\s+(?:on\s+)?earnings|earnings\s+beat|beat\s+estimates|tops?\s+estimates\b/i, label: "beat earnings" },
+  { rx: /\bupgrade[sd]?\b/i, label: "upgraded" },
+  { rx: /\bprice\s+target\s+(?:raise[sd]?|hike[sd]?|lift(?:ed)?|increase[sd]?)\b/i, label: "price target raised" },
+  { rx: /\bstrong\s+demand\b/i, label: "strong demand" },
+  { rx: /\brevenue\s+growth\b/i, label: "revenue growth" },
+  { rx: /\b(?:record\s+)?deliver(?:y|ies)\s+growth|deliveries?\s+jump\b/i, label: "delivery growth" },
+  { rx: /\bfda\s+approv(?:al|ed|es)\b/i, label: "FDA approval" },
+  { rx: /\bpositive\s+(?:phase\s+\d+\s+)?trial\s+(?:data|results)|hit\s+primary\s+endpoint\b/i, label: "positive trial data" },
+  { rx: /\bpartnership\s+with\b/i, label: "partnership" },
+  { rx: /\bcontract\s+win|awarded\s+contract\b/i, label: "contract win" },
+  { rx: /\bindex\s+inclusion|added\s+to\s+(?:the\s+)?s&p\b/i, label: "index inclusion" },
+  { rx: /\bmargin\s+(?:improvement|expansion)|expanding\s+margins\b/i, label: "margin improvement" },
+];
+
+const NEGATIVE_SIGNALS: { rx: RegExp; label: string }[] = [
+  { rx: /\blawsuit|sued\b|class[- ]action\b/i, label: "lawsuit" },
+  { rx: /\b(?:sec|doj|ftc)\s+investigation|investigat(?:ion|ing)\b/i, label: "investigation" },
+  { rx: /\bdowngrade[sd]?\b/i, label: "downgrade" },
+  { rx: /\bprice\s+target\s+(?:cut|lowered|reduced)\b/i, label: "price target cut" },
+  { rx: /\bearnings\s+miss|miss(?:es|ed)?\s+estimates\b/i, label: "earnings miss" },
+  { rx: /\bguidance\s+cut|cut\s+guidance|lowered\s+outlook\b/i, label: "guidance cut" },
+  { rx: /\bfda\s+reject(?:ion|ed|s)\b|crl\b/i, label: "FDA rejection" },
+  { rx: /\btrial\s+failure|failed\s+(?:phase\s+\d+\s+)?trial|missed\s+primary\s+endpoint\b/i, label: "trial failure" },
+  { rx: /\bregulatory\s+(?:issue|action|scrutiny)\b/i, label: "regulatory issue" },
+  { rx: /\bcash\s+burn\b/i, label: "cash burn" },
+  { rx: /\bdebt\s+(?:concern|load|burden)\b/i, label: "debt concern" },
+  { rx: /\binsider\s+selling\b/i, label: "insider selling" },
+  { rx: /\bcompetition\s+(?:pressure|intensif)|competitive\s+pressure\b/i, label: "competition pressure" },
+  { rx: /\bweak\s+demand|slowing\s+demand\b/i, label: "weak demand" },
+  { rx: /\bmargin\s+(?:pressure|compression|contraction)\b/i, label: "margin pressure" },
+  { rx: /\brecall(?:ed|s)?\b/i, label: "recall" },
+  { rx: /\bbankruptcy\s+(?:risk|filing|protection)\b/i, label: "bankruptcy risk" },
+];
+
+const SERIOUS_NEGATIVES = new Set([
+  "lawsuit", "investigation", "FDA rejection", "trial failure",
+  "regulatory issue", "guidance cut", "earnings miss", "bankruptcy risk", "recall",
+]);
+
+function analyseExaResults(input: SwingTickerInput, results: ExaResult[]): SwingDeepCheck {
+  const positive = new Set<string>();
+  const negative = new Set<string>();
+  const catalystSnippets: string[] = [];
+  const peerSnippets: string[] = [];
+  const industrySnippets: string[] = [];
+  const sources: { title: string; url: string; published?: string }[] = [];
+
+  const now = Date.now();
+  const fourteenDays = 14 * 24 * 60 * 60 * 1000;
+  let hasRecent = false;
+
+  for (const r of results) {
+    if (!r?.url) continue;
+    const title = String(r.title || "");
+    const highlights = Array.isArray(r.highlights) ? r.highlights.map((h) => String(h || "")) : [];
+    const combined = [title, ...highlights].join(" \n ");
+    if (!combined.trim()) continue;
+
+    if (r.publishedDate) {
+      const ts = Date.parse(r.publishedDate);
+      if (Number.isFinite(ts) && now - ts <= fourteenDays) hasRecent = true;
+    }
+
+    for (const p of POSITIVE_SIGNALS) if (p.rx.test(combined)) positive.add(p.label);
+    for (const n of NEGATIVE_SIGNALS) if (n.rx.test(combined)) negative.add(n.label);
+
+    const snip = (highlights[0] || title).slice(0, 240).trim();
+    if (snip) {
+      if (/\bpeer|competitor|rival|vs\s+[A-Z]{2,}/i.test(combined)) peerSnippets.push(snip);
+      else if (/\bindustry|sector|market\s+(?:for|of)\b/i.test(combined)) industrySnippets.push(snip);
+      else catalystSnippets.push(snip);
+    }
+    if (sources.length < 8) {
+      sources.push({ title: title || r.url, url: r.url, published: r.publishedDate });
+    }
+  }
+
+  const redFlags = Array.from(negative).filter((n) => SERIOUS_NEGATIVES.has(n));
+  const hasSerious = redFlags.length > 0;
+  const negScore = negative.size;
+  const posScore = positive.size;
+
+  const news_check: "passed" | "failed" | "unavailable" =
+    results.length === 0 ? "unavailable"
+    : hasSerious ? "failed"
+    : hasRecent || sources.length > 0 ? "passed"
+    : "unavailable";
+
+  const risk_check: "passed" | "failed" | "unavailable" =
+    hasSerious ? "failed" : negScore >= 3 ? "failed" : "passed";
+
+  const peer_check: "passed" | "failed" | "unavailable" =
+    peerSnippets.length > 0 ? "passed" : "unavailable";
+  const industry_check: "passed" | "failed" | "unavailable" =
+    industrySnippets.length > 0 ? "passed" : "unavailable";
+
+  let suitability: SwingDeepCheck["swing_suitability"];
+  let rejection: string | undefined;
+
+  if (hasSerious) {
+    suitability = "rejected";
+    rejection = `Serious negative signal detected: ${redFlags.join(", ")}.`;
+  } else if (negScore > posScore && negScore >= 2) {
+    suitability = "rejected";
+    rejection = `Negative signals outweigh positives (${negScore} vs ${posScore}).`;
+  } else if (posScore >= 2 && negScore === 0) {
+    suitability = "strong_candidate";
+  } else if (posScore >= 1 && negScore <= 1) {
+    suitability = "possible_candidate";
+  } else if (news_check === "unavailable") {
+    suitability = "needs_confirmation";
+  } else {
+    suitability = "watch_only";
+  }
+
+  const confidence: "Low" | "Medium" | "High" =
+    hasSerious ? "Low" :
+    posScore >= 3 && negScore === 0 ? "High" :
+    posScore >= 1 ? "Medium" : "Low";
+
+  const latest_catalyst =
+    catalystSnippets[0] ||
+    (positive.size > 0 ? `Positive signals: ${Array.from(positive).join(", ")}.` : "") ||
+    (results[0]?.title ? String(results[0].title) : "No fresh catalyst detected.");
+
+  return {
+    ticker: input.ticker,
+    company: input.company,
+    latest_catalyst,
+    news_check,
+    peer_check,
+    industry_check,
+    risk_check,
+    fundamental_check: "unavailable",
+    peer_context: peerSnippets[0] || "",
+    industry_context: industrySnippets[0] || "",
+    key_risks: Array.from(negative),
+    red_flags: redFlags,
+    positive_factors: Array.from(positive),
+    swing_suitability: suitability,
+    rejection_reason: rejection,
+    confidence,
+    sources: sources.slice(0, 6),
+  };
+}
+
+function scoreDeep(deep: SwingDeepCheck): { news: number; peer: number; industry: number; risk: number } {
+  const s = (c?: string) => (c === "passed" ? 8 : c === "unavailable" ? 4 : 1);
+  let risk = s(deep.risk_check);
+  if (Array.isArray(deep.red_flags) && deep.red_flags.length > 0) risk = Math.max(0, risk - 2);
+  const posBoost = Math.min(2, (deep.positive_factors?.length ?? 0) * 0.5);
+  return {
+    news: Math.min(10, s(deep.news_check) + posBoost),
+    peer: s(deep.peer_check),
+    industry: s(deep.industry_check),
+    risk,
+  };
 }
 
 function statusFromSuitability(s?: string): CheckedTicker["status"] {
@@ -306,18 +402,6 @@ function statusFromSuitability(s?: string): CheckedTicker["status"] {
     case "rejected": return "rejected";
     default: return "needs_confirmation";
   }
-}
-
-function scoreDeep(deep: SwingDeepCheck): { news: number; peer: number; industry: number; risk: number } {
-  const s = (c?: string) => (c === "passed" ? 8 : c === "unavailable" ? 4 : 1);
-  let risk = s(deep.risk_check);
-  if (Array.isArray(deep.red_flags) && deep.red_flags.length > 0) risk = Math.max(0, risk - 2);
-  return {
-    news: s(deep.news_check),
-    peer: s(deep.peer_check),
-    industry: s(deep.industry_check),
-    risk,
-  };
 }
 
 export type TradingPlan = {
@@ -334,21 +418,14 @@ export type TradingPlan = {
 
 function round2(n: number): number { return Math.round(n * 100) / 100; }
 
-// Build a deterministic trading plan from the input's watchlist/chart fields.
-// Returns null when the setup lacks the fields needed to define entry, target,
-// and stop clearly — in that case, the ticker is NOT selected.
 function computeTradingPlan(t: SwingTickerInput, _d: SwingDeepCheck): TradingPlan | null {
   const price = typeof t.price === "number" && t.price > 0 ? t.price : NaN;
   if (!Number.isFinite(price)) return null;
-
-  // Prefer deterministic watchlist bands when available.
   const lower = typeof t.lowerWatch === "number" && t.lowerWatch > 0 ? t.lowerWatch : NaN;
   const upper = typeof t.upperWatch === "number" && t.upperWatch > 0 ? t.upperWatch : NaN;
 
   let entryLow: number, entryHigh: number, targetLow: number, targetHigh: number, stopLoss: number;
-
   if (Number.isFinite(lower) && Number.isFinite(upper) && upper > lower) {
-    // Entry: current price down to lowerWatch (buy pullback). Cap entry band at price.
     entryHigh = Math.min(price, upper);
     entryLow = Math.max(lower, Math.min(price * 0.98, entryHigh));
     if (entryLow >= entryHigh) entryLow = round2(entryHigh * 0.98);
@@ -357,17 +434,14 @@ function computeTradingPlan(t: SwingTickerInput, _d: SwingDeepCheck): TradingPla
     if (targetLow <= entryHigh) targetLow = round2(entryHigh * 1.03);
     stopLoss = round2(lower * 0.98);
   } else {
-    // Fallback: derive from price only (~2% entry band, ~6-10% target, ~3% stop).
     entryHigh = price;
     entryLow = round2(price * 0.98);
     targetLow = round2(price * 1.06);
     targetHigh = round2(price * 1.10);
     stopLoss = round2(price * 0.97);
   }
-
   if (!(stopLoss > 0 && stopLoss < entryLow && targetLow > entryHigh)) return null;
 
-  // Risk/reward from raw watchlist value if present, else compute.
   let rr: number | undefined;
   if (typeof t.riskRewardRaw === "number" && t.riskRewardRaw > 0 && Number.isFinite(t.riskRewardRaw)) {
     rr = round2(t.riskRewardRaw);
@@ -395,13 +469,14 @@ function computeTradingPlan(t: SwingTickerInput, _d: SwingDeepCheck): TradingPla
   };
 }
 
+// ─── Per-ticker runner ───────────────────────────────────────────────────
+
 async function runOne(
   admin: SupabaseClient,
   input: SwingTickerInput,
-  primaryModel: string,
   apiKey: string,
   today: string,
-): Promise<CheckedTicker> {
+): Promise<{ result: CheckedTicker; exaFailure?: SwingUnavailableReason }> {
   const t0 = Date.now();
   const pre = preScore(input);
 
@@ -411,37 +486,38 @@ async function runOne(
     .select("payload, model")
     .eq("ticker", input.ticker)
     .eq("trading_date", today)
-    .eq("model", primaryModel)
+    .eq("model", PROVIDER)
     .eq("source_type", "swing_deep_check")
     .maybeSingle();
 
   let deep: SwingDeepCheck | null = null;
-  let modelUsed = primaryModel;
   let cacheHit = false;
-  let failure: string | undefined;
+  let exaFailure: SwingUnavailableReason | undefined;
 
   if (cacheRow) {
     deep = cacheRow.payload as SwingDeepCheck;
-    modelUsed = String(cacheRow.model || primaryModel);
     cacheHit = true;
-    console.log(JSON.stringify({ feature: "swing_trader_watch", ticker: input.ticker, model_used: modelUsed, cache_hit: true, status: "cache" }));
+    console.log(JSON.stringify({ feature: "swing_trader_watch", ticker: input.ticker, provider: PROVIDER, cache_hit: true }));
   } else {
-    console.log(`[swing] checking ${input.ticker} with model ${primaryModel}`);
-    const out = await callGeminiWithRetry(primaryModel, buildPrompt(input), apiKey, input.ticker);
-    deep = out.deep;
-    modelUsed = out.modelUsed;
-    failure = out.failure;
+    const query = buildExaQuery(input);
+    console.log(JSON.stringify({ feature: "swing_trader_watch", ticker: input.ticker, provider: PROVIDER, exa_request: true }));
+    const started = Date.now();
+    const out = await callExa(query, apiKey);
     console.log(JSON.stringify({
-      feature: "swing_trader_watch", ticker: input.ticker, model_used: modelUsed,
-      cache_hit: false, status: deep ? "ok" : "failed",
-      failure_category: failure ?? null,
+      feature: "swing_trader_watch", ticker: input.ticker, provider: PROVIDER,
+      exa_finished: true, ok: out.ok, status: (out as any).httpStatus ?? null,
+      results: out.ok ? out.results.length : 0, elapsed_ms: Date.now() - started,
     }));
-    if (deep) {
+
+    if (!out.ok) {
+      exaFailure = out.failure;
+    } else {
+      deep = analyseExaResults(input, out.results);
       try {
         await admin.from("swing_ticker_cache").upsert({
           ticker: input.ticker,
           trading_date: today,
-          model: modelUsed,
+          model: PROVIDER,
           source_type: "swing_deep_check",
           payload: deep,
         });
@@ -453,18 +529,21 @@ async function runOne(
 
   if (!deep) {
     return {
-      ticker: input.ticker,
-      company: input.company,
-      sourceTables: input.sourceTables,
-      technicalScore: pre.technical,
-      newsScore: 0, peerScore: 0, industryScore: 0,
-      riskScore: pre.risk,
-      finalScore: pre.technical + pre.risk,
-      status: "deep_check_failed",
-      rejectionReason: failure || "Deep check failed",
-      cacheHit,
-      elapsedMs: Date.now() - t0,
-      modelUsed,
+      result: {
+        ticker: input.ticker,
+        company: input.company,
+        sourceTables: input.sourceTables,
+        technicalScore: pre.technical,
+        newsScore: 0, peerScore: 0, industryScore: 0,
+        riskScore: pre.risk,
+        finalScore: pre.technical + pre.risk,
+        status: "deep_check_failed",
+        rejectionReason: exaFailure || "Deep check failed",
+        cacheHit,
+        elapsedMs: Date.now() - t0,
+        modelUsed: PROVIDER,
+      },
+      exaFailure,
     };
   }
 
@@ -482,38 +561,45 @@ async function runOne(
     (d.risk + pre.risk) / 2 * 1.2;
 
   return {
+    result: {
+      ticker: input.ticker,
+      company: input.company,
+      sourceTables: input.sourceTables,
+      technicalScore: pre.technical,
+      newsScore: d.news,
+      peerScore: d.peer,
+      industryScore: d.industry,
+      riskScore: (d.risk + pre.risk) / 2,
+      finalScore,
+      status,
+      rejectionReason: deep.rejection_reason || undefined,
+      deep,
+      cacheHit,
+      elapsedMs: Date.now() - t0,
+      modelUsed: PROVIDER,
+    },
+  };
+}
+
+function makeSkipped(input: SwingTickerInput, reason: SwingUnavailableReason): CheckedTicker {
+  const pre = preScore(input);
+  return {
     ticker: input.ticker,
     company: input.company,
     sourceTables: input.sourceTables,
     technicalScore: pre.technical,
-    newsScore: d.news,
-    peerScore: d.peer,
-    industryScore: d.industry,
-    riskScore: (d.risk + pre.risk) / 2,
-    finalScore,
-    status,
-    rejectionReason: deep.rejection_reason || undefined,
-    deep,
-    cacheHit,
-    elapsedMs: Date.now() - t0,
-    modelUsed,
+    newsScore: 0, peerScore: 0, industryScore: 0,
+    riskScore: pre.risk,
+    finalScore: 0,
+    status: "skipped_due_to_exa_limit",
+    rejectionReason: reason,
+    cacheHit: false,
+    elapsedMs: 0,
+    modelUsed: PROVIDER,
   };
 }
 
-// Strict serial pacer: enforces >= REQUEST_DELAY_MS between call STARTS.
-// With MAX_CONCURRENT=1 this guarantees no more than 60000/REQUEST_DELAY_MS
-// request starts per minute (well under the 15 RPM cap for gemini-3.1-flash-lite).
-async function limitedParallel<T, R>(items: T[], _limit: number, worker: (t: T, i: number) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let lastStart = 0;
-  for (let i = 0; i < items.length; i++) {
-    const wait = Math.max(0, REQUEST_DELAY_MS - (Date.now() - lastStart));
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    lastStart = Date.now();
-    try { results[i] = await worker(items[i], i); } catch (e) { results[i] = e as any; }
-  }
-  return results;
-}
+// ─── Orchestrator ────────────────────────────────────────────────────────
 
 export async function runSwingTraderWatch(
   admin: SupabaseClient,
@@ -521,31 +607,64 @@ export async function runSwingTraderWatch(
   emailRunId?: string,
 ): Promise<SwingResult> {
   const started = Date.now();
-  const primaryModel = Deno.env.get("GEMINI_SWING_MODEL") || DEFAULT_SWING_MODEL;
-  const apiKey = Deno.env.get("GEMINI_API_KEY") || "";
+  const apiKey = Deno.env.get("EXA_API_KEY") || "";
   const today = tradingDateNY();
   const inputs = dedupeInputs(rawInputs);
 
-  console.log(JSON.stringify({ phase: "swing", event: "start", unique_tickers: inputs.length, model: primaryModel }));
+  console.log(JSON.stringify({ phase: "swing", event: "start", provider: PROVIDER, unique_tickers: inputs.length, has_key: !!apiKey }));
 
-  if (!apiKey || inputs.length === 0) {
+  const emptyBase = (): Omit<SwingResult, "previous" | "elapsedMs"> => ({
+    modelUsed: PROVIDER, uniqueChecked: inputs.length,
+    totalSelected: 0, totalRejected: 0, totalWatchOnly: 0, totalFailed: 0, totalSkipped: 0,
+    totalCacheHits: 0, totalExaAttempts: 0,
+    passed: [], rejected: [], watchOnly: [], failed: [], skipped: [], all: [],
+  });
+
+  if (!apiKey) {
     return {
-      modelUsed: primaryModel, uniqueChecked: inputs.length, totalSelected: 0,
-      totalRejected: 0, totalWatchOnly: 0, totalFailed: inputs.length, totalCacheHits: 0,
-      totalGeminiAttempts: 0, passed: [], rejected: [], watchOnly: [], failed: [], all: [],
-      previous: await loadPrevious(admin), elapsedMs: Date.now() - started,
+      ...emptyBase(),
+      unavailableReason: "missing_exa_api_key",
+      previous: await loadPrevious(admin),
+      elapsedMs: Date.now() - started,
     };
   }
+  if (inputs.length === 0) {
+    return { ...emptyBase(), previous: await loadPrevious(admin), elapsedMs: Date.now() - started };
+  }
 
-  const results = await limitedParallel(inputs, MAX_CONCURRENT, (inp) => runOne(admin, inp, primaryModel, apiKey, today));
+  const results: CheckedTicker[] = [];
+  let exaFailureSeen: SwingUnavailableReason | undefined;
+  let lastStart = 0;
+  for (let i = 0; i < inputs.length; i++) {
+    const inp = inputs[i];
+    if (exaFailureSeen) {
+      results.push(makeSkipped(inp, exaFailureSeen));
+      continue;
+    }
+    const wait = Math.max(0, REQUEST_DELAY_MS - (Date.now() - lastStart));
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastStart = Date.now();
+    try {
+      const { result, exaFailure } = await runOne(admin, inp, apiKey, today);
+      results.push(result);
+      if (exaFailure) {
+        exaFailureSeen = exaFailure;
+        console.log(JSON.stringify({ phase: "swing", event: "exa_stop", reason: exaFailure, remaining: inputs.length - i - 1 }));
+      }
+    } catch (e) {
+      console.log(JSON.stringify({ phase: "swing", ticker: inp.ticker, runOne_threw: (e as Error).message }));
+      results.push(makeSkipped(inp, "exa_error"));
+      exaFailureSeen = "exa_error";
+    }
+  }
 
-  // Bucket by status.
   const rejected: CheckedTicker[] = [];
   const watchOnly: CheckedTicker[] = [];
   const failed: CheckedTicker[] = [];
   const passed: CheckedTicker[] = [];
   const needsConf: CheckedTicker[] = [];
   const newsUnavailable: CheckedTicker[] = [];
+  const skipped: CheckedTicker[] = [];
   for (const r of results) {
     if (!r) continue;
     if (r.status === "rejected") rejected.push(r);
@@ -553,12 +672,10 @@ export async function runSwingTraderWatch(
     else if (r.status === "deep_check_failed") failed.push(r);
     else if (r.status === "needs_confirmation") needsConf.push(r);
     else if (r.status === "news_unavailable") newsUnavailable.push(r);
+    else if (r.status === "skipped_due_to_exa_limit") skipped.push(r);
     else passed.push(r);
   }
 
-  // Pick highest-scoring "passed" with strong_candidate + news_check passed.
-  // Pick highest-scoring "passed" with strong_candidate + news_check passed +
-  // no red flags + a computable trading plan with clear entry/target/stop and RR>=2 where possible.
   const eligibleAll = passed
     .filter((r) => r.deep?.swing_suitability === "strong_candidate")
     .filter((r) => r.deep?.news_check === "passed")
@@ -573,7 +690,6 @@ export async function runSwingTraderWatch(
     if (!inp) continue;
     const plan = computeTradingPlan(inp, cand.deep!);
     if (!plan) continue;
-    // Require RR >= 2 when it can be computed; if RR unknown, still allow.
     if (typeof plan.riskReward === "number" && plan.riskReward < 2) continue;
     selected = cand;
     selectedPlan = plan;
@@ -585,22 +701,29 @@ export async function runSwingTraderWatch(
     if (idx >= 0) passed.splice(idx, 1);
   }
 
-  const totalCacheHits = results.filter((r) => r?.cacheHit).length;
-  const totalGeminiAttempts = results.length - totalCacheHits;
+  const totalCacheHits = results.filter((r) => r.cacheHit).length;
+  const totalExaAttempts = results.filter((r) => !r.cacheHit && r.status !== "skipped_due_to_exa_limit").length;
 
-  // Persist run + rows.
+  // If every ticker was either skipped or hit a real Exa failure and we have no
+  // successful checks, mark the whole run unavailable.
+  const anySuccessful = results.some((r) => r.deep && r.status !== "skipped_due_to_exa_limit");
+  const unavailableReason: SwingUnavailableReason | undefined =
+    !anySuccessful && exaFailureSeen ? exaFailureSeen :
+    !anySuccessful && failed.length > 0 ? "exa_error" :
+    undefined;
+
   let runId: string | undefined;
   try {
     const runRow: any = {
       email_run_id: emailRunId ?? null,
       run_date: today,
-      model_used: primaryModel,
+      model_used: PROVIDER,
       unique_tickers_checked: inputs.length,
       total_selected: selected ? 1 : 0,
       total_rejected: rejected.length,
       total_watch_only: watchOnly.length + needsConf.length + newsUnavailable.length,
-      total_failed: failed.length,
-      final_status: selected ? "candidate_selected" : "no_candidate",
+      total_failed: failed.length + skipped.length,
+      final_status: selected ? "candidate_selected" : (unavailableReason ? "unavailable" : "no_candidate"),
       selected_ticker: selected?.ticker ?? null,
       selected_company: selected?.company ?? null,
       confidence: selected?.deep?.confidence ?? null,
@@ -624,7 +747,7 @@ export async function runSwingTraderWatch(
     const { data: runIns } = await admin.from("swing_trade_runs").insert(runRow).select("id").maybeSingle();
     runId = runIns?.id;
     if (runId) {
-      const rows = [selected, ...passed, ...rejected, ...watchOnly, ...needsConf, ...newsUnavailable, ...failed]
+      const rows = [selected, ...passed, ...rejected, ...watchOnly, ...needsConf, ...newsUnavailable, ...failed, ...skipped]
         .filter(Boolean)
         .map((r) => ({
           run_id: runId,
@@ -672,26 +795,29 @@ export async function runSwingTraderWatch(
   const previous = await loadPrevious(admin);
 
   console.log(JSON.stringify({
-    phase: "swing", event: "done",
+    phase: "swing", event: "done", provider: PROVIDER,
     unique_checked: inputs.length,
     selected: selected?.ticker || "no_candidate",
-    rejected: rejected.length,
-    watch_only: watchOnly.length,
-    failed: failed.length,
-    cache_hits: totalCacheHits,
-    gemini_attempts: totalGeminiAttempts,
+    rejected: rejected.length, watch_only: watchOnly.length,
+    failed: failed.length, skipped: skipped.length,
+    cache_hits: totalCacheHits, exa_attempts: totalExaAttempts,
+    unavailable_reason: unavailableReason ?? null,
     elapsed_ms: Date.now() - started,
   }));
 
   return {
-    runId, modelUsed: primaryModel, uniqueChecked: inputs.length,
+    runId, modelUsed: PROVIDER, uniqueChecked: inputs.length,
     totalSelected: selected ? 1 : 0,
     totalRejected: rejected.length,
     totalWatchOnly: watchOnly.length + needsConf.length + newsUnavailable.length,
     totalFailed: failed.length,
-    totalCacheHits, totalGeminiAttempts,
-    selected, selectedPlan, passed, rejected, watchOnly: [...watchOnly, ...needsConf, ...newsUnavailable], failed,
-    all: results.filter(Boolean) as CheckedTicker[],
+    totalSkipped: skipped.length,
+    totalCacheHits, totalExaAttempts,
+    unavailableReason,
+    selected, selectedPlan,
+    passed, rejected, watchOnly: [...watchOnly, ...needsConf, ...newsUnavailable],
+    failed, skipped,
+    all: results,
     previous,
     elapsedMs: Date.now() - started,
   };
@@ -734,8 +860,9 @@ function statusBadge(s: CheckedTicker["status"]): string {
     rejected: { label: "Rejected", bg: "#fee2e2", color: "#b91c1c" },
     watch_only: { label: "Watch only", bg: "#fef3c7", color: "#92400e" },
     needs_confirmation: { label: "Needs more confirmation", bg: "#fef3c7", color: "#92400e" },
-    news_unavailable: { label: "News check unavailable", bg: "#e2e8f0", color: "#475569" },
+    news_unavailable: { label: "Search unavailable", bg: "#e2e8f0", color: "#475569" },
     deep_check_failed: { label: "Deep check failed", bg: "#e2e8f0", color: "#475569" },
+    skipped_due_to_exa_limit: { label: "Skipped due to Exa limit", bg: "#e2e8f0", color: "#475569" },
   };
   const m = map[s] || map.needs_confirmation;
   return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${m.bg};color:${m.color};font-size:11px;font-weight:600;">${m.label}</span>`;
@@ -754,7 +881,6 @@ function tickerLink(base: string, ticker: string): string {
 }
 
 export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): string {
-  // 🎯 Swing Trader Watch
   const s = r.selected;
   const disclaimer = `<p style="margin:10px 0 0 0;font-size:11px;color:#7f1d1d;line-height:1.5;">This is not financial advice. This setup can fail. Use position sizing, stop discipline, and your own research before making any trade.</p>`;
 
@@ -789,42 +915,36 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
         ${Array.isArray(d.sources) && d.sources.length > 0 ? `<p style="margin:8px 0 0 0;font-size:11px;color:#475569;">Sources: ${d.sources.slice(0, 4).map((x) => `<a href="${esc(x.url)}" style="color:#0891b2;">${esc(x.title || "source")}</a>`).join(" · ")}</p>` : ""}
         ${disclaimer}
       </div>`;
-  } else {
-    // Distinguish "all checks failed" (Gemini rate limit / model error) from
-    // "checks completed but nothing qualified".
-    const noRealChecks = r.uniqueChecked > 0 && r.totalFailed >= r.uniqueChecked;
-    if (noRealChecks) {
-      swingBlock = `
+  } else if (r.unavailableReason) {
+    swingBlock = `
       <div style="padding:16px;background:#fff7ed;border:1px solid #fdba74;border-radius:10px;">
         <p style="margin:0;font-size:13px;color:#9a3412;font-weight:700;">🎯 Swing Trader Watch unavailable for this run</p>
-        <p style="margin:6px 0 0 0;font-size:12px;color:#7c2d12;line-height:1.6;">Deep checks could not complete (likely Gemini rate limit or model error). Existing stock tables below are unchanged.</p>
+        <p style="margin:6px 0 0 0;font-size:12px;color:#7c2d12;line-height:1.6;">Reason: <code>${esc(r.unavailableReason)}</code>. Existing stock tables below are unchanged.</p>
         ${disclaimer}
       </div>`;
-    } else {
-      swingBlock = `
+  } else {
+    swingBlock = `
       <div style="padding:16px;background:#ffffff;border:1px dashed #cbd5e1;border-radius:10px;">
         <p style="margin:0;font-size:13px;color:#0f172a;font-weight:700;">No high-quality swing setup today.</p>
         <p style="margin:6px 0 0 0;font-size:12px;color:#475569;line-height:1.6;">All checked stocks were rejected because they were extended, lacked clean risk/reward, had weak volume, had no clear target, or did not pass fresh news, peer, industry, or risk checks.</p>
         ${disclaimer}
       </div>`;
-    }
   }
 
   const swingSection = `
-    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Swing Trader Watch <span style="font-weight:400;color:#64748b;font-size:13px;">(3–10 trading day watch)</span></h3>
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Swing Trader Watch <span style="font-weight:400;color:#64748b;font-size:13px;">(3–10 trading day watch · powered by Exa Search)</span></h3>
     ${swingBlock}`;
 
-  // 🔎 Tickers Checked Today (top 10 rows)
   const combined = [
     ...(r.selected ? [r.selected] : []),
-    ...r.passed, ...r.rejected, ...r.watchOnly, ...r.failed,
+    ...r.passed, ...r.rejected, ...r.watchOnly, ...r.failed, ...r.skipped,
   ].slice(0, 10);
 
   const rowsHtml = combined.map((t) => {
     const d = t.deep;
     const checks = d
       ? `Tech ✅ · News ${checkIcon(d.news_check)} · Peers ${checkIcon(d.peer_check)} · Industry ${checkIcon(d.industry_check)} · Risk ${checkIcon(d.risk_check)}`
-      : "Deep check failed";
+      : (t.status === "skipped_due_to_exa_limit" ? "Skipped (Exa limit)" : "Deep check failed");
     const reason = t.rejectionReason || (d?.news_check === "unavailable" ? "Fresh news check unavailable" : (d?.positive_factors?.[0] || ""));
     return `<tr>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:700;">${tickerLink(appBaseUrl, t.ticker)}</td>
@@ -837,7 +957,7 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
 
   const checkedSection = `
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🔎 Tickers Checked Today</h3>
-    <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">Full checked ticker count: ${r.uniqueChecked} unique tickers · ${r.totalCacheHits} cache hits · ${r.totalGeminiAttempts} deep checks · ${r.totalRejected} rejected · ${r.totalWatchOnly} watch only · ${r.totalFailed} failed.</p>
+    <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">Provider: Exa · ${r.uniqueChecked} unique tickers · ${r.totalCacheHits} cache hits · ${r.totalExaAttempts} Exa searches · ${r.totalSelected} selected · ${r.totalRejected} rejected · ${r.totalWatchOnly} watch only · ${r.totalFailed} failed${r.totalSkipped ? ` · ${r.totalSkipped} skipped` : ""}.</p>
     <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
@@ -853,7 +973,6 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
       </table>
     </div>`;
 
-  // 📌 Previous Swing Candidate Check
   const p = r.previous;
   const prevSection = p ? `
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">📌 Previous Swing Candidate Check</h3>
