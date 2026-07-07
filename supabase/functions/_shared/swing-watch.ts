@@ -687,10 +687,11 @@ export async function runSwingTraderWatch(
 ): Promise<SwingResult> {
   const started = Date.now();
   const apiKey = Deno.env.get("EXA_API_KEY") || "";
-  const today = tradingDateNY();
+  const today = swingCacheBucket();
   const inputs = dedupeInputs(rawInputs);
 
-  console.log(JSON.stringify({ phase: "swing", event: "start", provider: PROVIDER, unique_tickers: inputs.length, has_key: !!apiKey }));
+  console.log(`[swing-cache] now_et=${nowETString()} cache_bucket=${today} unique_tickers=${inputs.length}`);
+  console.log(JSON.stringify({ phase: "swing", event: "start", provider: PROVIDER, unique_tickers: inputs.length, has_key: !!apiKey, cache_bucket: today }));
 
   const emptyBase = (): Omit<SwingResult, "previous" | "elapsedMs"> => ({
     modelUsed: PROVIDER, uniqueChecked: inputs.length,
