@@ -3037,6 +3037,38 @@ serve(async (req) => {
       const fromEmail = "onboarding@resend.dev";
       const toEmail = userEmail;
 
+      // ── Stock-email idempotency claim ──
+      // If a stock (market-gainers) topic is present, atomically advance its
+      // next_revision_date so a concurrent invocation cannot send a duplicate
+      // stock email. If the claim fails, drop stock topics from this run.
+      let stockClaimedTopicId: string | null = null;
+      if (hasMarketGainersTopics) {
+        const stockTopic = marketGainersTopics[0];
+        const claimUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        const nowIso = new Date().toISOString();
+        const { data: claimed, error: claimErr } = await supabase
+          .from("learned_topics")
+          .update({
+            next_revision_date: claimUntil,
+            revision_count: (stockTopic.revision_count || 0) + 1,
+          })
+          .eq("id", stockTopic.id)
+          .lte("next_revision_date", nowIso)
+          .select("id");
+        if (claimErr || !claimed || claimed.length === 0) {
+          const bucket = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+          const idemKey = `${userId}:stock_gainers_email:${bucket}:${stockTopic.id}`;
+          console.log(`[stock-email] duplicate_send_skipped user_id=${userId} idempotency_key=${idemKey} err=${claimErr?.message || "already_claimed"}`);
+          // Skip entire email for this user if stock was the only topic; otherwise, re-send with regular topics only.
+          if (!hasRegularTopics) continue;
+        } else {
+          stockClaimedTopicId = stockTopic.id;
+          const bucket = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+          const idemKey = `${userId}:stock_gainers_email:${bucket}:${stockTopic.id}`;
+          console.log(`[stock-email] sending_once user_id=${userId} idempotency_key=${idemKey}`);
+        }
+      }
+
       const topicNames = topicsArray.map(t => escapeHtml(t.title));
       let emailSubject: string;
       if (topicNames.length === 1) {
