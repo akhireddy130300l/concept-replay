@@ -627,6 +627,15 @@ async function runOne(
     d.industry * 0.8 +
     (d.risk + pre.risk) / 2 * 1.2;
 
+  // Prefer a more specific reason string than "Serious negative signal detected: lawsuit"
+  // when the only red flag is a generic lawsuit mention with no positive counterweight.
+  let refinedReason = deep.rejection_reason || undefined;
+  const redFlags = deep.red_flags || [];
+  const positives = deep.positive_factors || [];
+  if (refinedReason && redFlags.length === 1 && redFlags[0] === "lawsuit" && positives.length === 0) {
+    refinedReason = "Generic lawsuit noise — no fresh company-specific catalyst.";
+  }
+
   return {
     result: {
       ticker: input.ticker,
@@ -639,17 +648,19 @@ async function runOne(
       riskScore: (d.risk + pre.risk) / 2,
       finalScore,
       status,
-      rejectionReason: deep.rejection_reason || undefined,
+      rejectionReason: refinedReason,
       deep,
       cacheHit,
       elapsedMs: Date.now() - t0,
       modelUsed: PROVIDER,
+      bestWindow: bw.window,
     },
   };
 }
 
 function makeSkipped(input: SwingTickerInput, reason: SwingUnavailableReason): CheckedTicker {
   const pre = preScore(input);
+  const bw = evaluateBestWindow(input);
   return {
     ticker: input.ticker,
     company: input.company,
@@ -663,6 +674,7 @@ function makeSkipped(input: SwingTickerInput, reason: SwingUnavailableReason): C
     cacheHit: false,
     elapsedMs: 0,
     modelUsed: PROVIDER,
+    bestWindow: bw.window,
   };
 }
 
