@@ -1012,24 +1012,28 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
   }
 
   const swingSection = `
-    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Swing Trader Watch <span style="font-weight:400;color:#64748b;font-size:13px;">(3–10 trading day watch · powered by Exa Search)</span></h3>
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Swing Trader Watch <span style="font-weight:400;color:#64748b;font-size:13px;">(multi-window: 3–10 · 11–20 · 20–40+ sessions · powered by Exa Search)</span></h3>
     ${swingBlock}`;
 
+  // Show ALL checked tickers — no slice/limit.
   const combined = [
     ...(r.selected ? [r.selected] : []),
     ...r.passed, ...r.rejected, ...r.watchOnly, ...r.failed, ...r.skipped,
-  ].slice(0, 10);
+  ];
 
   const rowsHtml = combined.map((t) => {
     const d = t.deep;
     const checks = d
       ? `Tech ✅ · News ${checkIcon(d.news_check)} · Peers ${checkIcon(d.peer_check)} · Industry ${checkIcon(d.industry_check)} · Risk ${checkIcon(d.risk_check)}`
       : (t.status === "skipped_due_to_exa_limit" ? "Skipped (Exa limit)" : "Deep check failed");
-    const reason = t.rejectionReason || (d?.news_check === "unavailable" ? "Fresh news check unavailable" : (d?.positive_factors?.[0] || ""));
+    let reason = t.rejectionReason || (d?.news_check === "unavailable" ? "Fresh news check unavailable" : (d?.positive_factors?.[0] || ""));
+    if (t.status === "passed_not_selected" && !reason) reason = "Strong setup but selected ticker ranked higher.";
+    if (t.cacheHit) reason = reason ? `${reason} (cache used)` : "Cache used";
     return `<tr>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:700;">${tickerLink(appBaseUrl, t.ticker)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;color:#334155;">${esc(t.company)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${statusBadge(t.status)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">${esc(t.bestWindow || "N/A")}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">${esc(checks)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">${esc(reason || "—")}</td>
       </tr>`;
@@ -1037,7 +1041,7 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
 
   const checkedSection = `
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🔎 Tickers Checked Today</h3>
-    <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">Provider: Exa · ${r.uniqueChecked} unique tickers · ${r.totalCacheHits} cache hits · ${r.totalExaAttempts} Exa searches · ${r.totalSelected} selected · ${r.totalRejected} rejected · ${r.totalWatchOnly} watch only · ${r.totalFailed} failed${r.totalSkipped ? ` · ${r.totalSkipped} skipped` : ""}.</p>
+    <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">Provider: Exa · ${r.uniqueChecked} unique tickers · ${r.totalExaAttempts} fresh Exa searches · ${r.totalCacheHits} cache hits · ${r.totalSelected} selected · ${r.totalRejected} rejected · ${r.totalWatchOnly} watch only · ${r.totalFailed} failed${r.totalSkipped ? ` · ${r.totalSkipped} skipped` : ""}. Showing all ${combined.length} rows.</p>
     <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
@@ -1045,11 +1049,12 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
             <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">TICKER</th>
             <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">COMPANY</th>
             <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">STATUS</th>
+            <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">BEST WINDOW</th>
             <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">CHECKS</th>
             <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">REASON</th>
           </tr>
         </thead>
-        <tbody>${rowsHtml || `<tr><td colspan="5" style="padding:12px;color:#64748b;">No tickers checked.</td></tr>`}</tbody>
+        <tbody>${rowsHtml || `<tr><td colspan="6" style="padding:12px;color:#64748b;">No tickers checked.</td></tr>`}</tbody>
       </table>
     </div>`;
 
