@@ -223,6 +223,37 @@ type ExaCallOutcome =
   | { ok: true; results: ExaResult[] }
   | { ok: false; failure: SwingUnavailableReason; httpStatus?: number };
 
+// Multi-window evaluator: picks the best holding window (3–10, 11–20, 20–40+
+// sessions) for a ticker using its 1d/7d/20d moves and volume/RR context.
+// Fully deterministic, no extra API calls.
+function evaluateBestWindow(t: SwingTickerInput): {
+  window: string;
+  reason: string;
+} {
+  const v1 = typeof t.oneDayPct === "number" ? t.oneDayPct : NaN;
+  const v7 = typeof t.sevenDayPct === "number" ? t.sevenDayPct : NaN;
+  const v20 = typeof t.twentyDayPct === "number" ? t.twentyDayPct : NaN;
+  const vol = typeof t.volumeRatio === "number" ? t.volumeRatio : NaN;
+  const rr = typeof t.riskRewardRaw === "number" ? t.riskRewardRaw : NaN;
+
+  // Longer swing: 20-day trend clearly up but not overextended in 7d.
+  if (Number.isFinite(v20) && v20 > 8 && (!Number.isFinite(v7) || v7 < 15)) {
+    return { window: "20–40+ sessions", reason: "Sustained 20-session uptrend without near-term overextension." };
+  }
+  // Medium swing: strong 7-day trend, moderate 1-day.
+  if (Number.isFinite(v7) && v7 > 4 && (!Number.isFinite(v1) || v1 < 10)) {
+    return { window: "11–20 sessions", reason: "Constructive 7-session trend with room to run." };
+  }
+  // Short swing: fresh 1-day breakout with volume/RR support.
+  if (Number.isFinite(v1) && v1 > 2 && ((Number.isFinite(vol) && vol > 1.2) || (Number.isFinite(rr) && rr >= 2))) {
+    return { window: "3–10 sessions", reason: "Fresh breakout with above-average volume or ≥2R setup." };
+  }
+  if (Number.isFinite(v1) || Number.isFinite(v7) || Number.isFinite(v20)) {
+    return { window: "3–10 sessions", reason: "Default short-swing window (limited multi-window signal)." };
+  }
+  return { window: "N/A", reason: "Insufficient trend data to evaluate a window." };
+}
+
 function buildExaQuery(t: SwingTickerInput): string {
   return `${t.ticker} ${t.company} stock latest news earnings analyst upgrade downgrade lawsuit regulation competitors industry today`;
 }
