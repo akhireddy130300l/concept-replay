@@ -2907,6 +2907,38 @@ serve(async (req) => {
         topicsArray = [...nonStockTopics, selectedStock];
       }
 
+      // ── Stock-email idempotency claim ──
+      // If a stock (market-gainers) topic is present, atomically advance its
+      // next_revision_date so a concurrent invocation cannot send a duplicate
+      // stock email. If the claim fails, drop stock topics from this run entirely.
+      let stockClaimedTopicId: string | null = null;
+      {
+        const stockCandidate = topicsArray.find((t) => isLatestMarketGainersRequest(t.title));
+        if (stockCandidate) {
+          const claimUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+          const nowIso = new Date().toISOString();
+          const nyBucket = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+          const idemKey = `${userId}:stock_gainers_email:${nyBucket}:${stockCandidate.id}`;
+          const { data: claimed, error: claimErr } = await supabase
+            .from("learned_topics")
+            .update({
+              next_revision_date: claimUntil,
+              revision_count: (stockCandidate.revision_count || 0) + 1,
+            })
+            .eq("id", stockCandidate.id)
+            .lte("next_revision_date", nowIso)
+            .select("id");
+          if (claimErr || !claimed || claimed.length === 0) {
+            console.log(`[stock-email] duplicate_send_skipped user_id=${userId} idempotency_key=${idemKey} err=${claimErr?.message || "already_claimed"}`);
+            topicsArray = topicsArray.filter((t) => !isLatestMarketGainersRequest(t.title));
+            if (topicsArray.length === 0) continue;
+          } else {
+            stockClaimedTopicId = stockCandidate.id;
+            console.log(`[stock-email] sending_once user_id=${userId} idempotency_key=${idemKey}`);
+          }
+        }
+      }
+
       console.log("Processing user:", userId, "with", topicsArray.length, "topics");
 
       console.log("Fetching user email from Supabase...");
