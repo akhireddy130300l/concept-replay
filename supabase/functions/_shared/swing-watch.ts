@@ -779,6 +779,9 @@ export async function runSwingTraderWatch(
     selected.status = "selected";
     const idx = passed.indexOf(selected);
     if (idx >= 0) passed.splice(idx, 1);
+    if (selectedPlan && selected.bestWindow && selected.bestWindow !== "N/A") {
+      selectedPlan.holdingWindow = selected.bestWindow;
+    }
   }
 
   const totalCacheHits = results.filter((r) => r.cacheHit).length;
