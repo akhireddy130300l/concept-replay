@@ -122,10 +122,38 @@ const EXA_URL = "https://api.exa.ai/search";
 const EXA_TIMEOUT_MS = 15000;
 const REQUEST_DELAY_MS = 400; // gentle pacing between Exa calls
 
-function tradingDateNY(): string {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  return `${parts.find(p => p.type === "year")!.value}-${parts.find(p => p.type === "month")!.value}-${parts.find(p => p.type === "day")!.value}`;
+// Cache bucket resets daily at 8:00 AM America/New_York.
+// Before 8 AM ET on date D, bucket = D-1. At/after 8 AM ET, bucket = D.
+function swingCacheBucket(now: Date = new Date()): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", hour12: false,
+  });
+  const parts = fmt.formatToParts(now);
+  const y = parts.find(p => p.type === "year")!.value;
+  const mo = parts.find(p => p.type === "month")!.value;
+  const d = parts.find(p => p.type === "day")!.value;
+  const h = Number(parts.find(p => p.type === "hour")!.value);
+  let bucket = `${y}-${mo}-${d}`;
+  if (h < 8) {
+    const dt = new Date(`${bucket}T12:00:00Z`);
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    bucket = dt.toISOString().slice(0, 10);
+  }
+  return bucket;
 }
+
+function nowETString(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  }).format(now);
+}
+
+// Legacy alias — trading-day-like key used across the codebase.
+function tradingDateNY(): string { return swingCacheBucket(); }
 
 function dedupeInputs(inputs: SwingTickerInput[]): SwingTickerInput[] {
   const map = new Map<string, SwingTickerInput>();
