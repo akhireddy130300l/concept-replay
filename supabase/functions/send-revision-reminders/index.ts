@@ -3105,9 +3105,12 @@ serve(async (req) => {
 
       console.log("Updating next revision dates for topics...");
       for (const topic of topicsArray) {
+        if (stockClaimedTopicId && topic.id === stockClaimedTopicId) {
+          console.log(`Skipping post-send date update for already-claimed stock topic ${topic.id}`);
+          continue;
+        }
         const now = new Date();
         if (topic.is_daily) {
-          // Rolling 24h schedule from when the reminder was sent
           const nextRevisionDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
           console.log(`Topic ${topic.id} is daily - scheduling 24h from now: ${nextRevisionDate.toISOString()}`);
           await supabase
@@ -3119,7 +3122,6 @@ serve(async (req) => {
           const nextCount = currentCount + 1;
           const intervalIndex = Math.min(nextCount, REVISION_INTERVALS.length - 1);
           const daysUntilNext = REVISION_INTERVALS[intervalIndex];
-          // Rolling schedule: exactly N * 24h from this send, not pinned to a fixed hour
           const nextRevisionDate = new Date(now.getTime() + daysUntilNext * 24 * 60 * 60 * 1000);
           console.log(`Updating topic ${topic.id} next_revision_date to ${nextRevisionDate.toISOString()} (${daysUntilNext} days from now)`);
           await supabase
