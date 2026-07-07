@@ -553,14 +553,20 @@ async function runOne(
   let deep: SwingDeepCheck | null = null;
   let cacheHit = false;
   let exaFailure: SwingUnavailableReason | undefined;
+  const bw = evaluateBestWindow(input);
 
   if (cacheRow) {
     deep = cacheRow.payload as SwingDeepCheck;
     cacheHit = true;
-    console.log(JSON.stringify({ feature: "swing_trader_watch", ticker: input.ticker, provider: PROVIDER, cache_hit: true }));
+    let ageMin: number | null = null;
+    try {
+      const created = (cacheRow as any).updated_at || (cacheRow as any).created_at;
+      if (created) ageMin = Math.round((Date.now() - new Date(created).getTime()) / 60000);
+    } catch { /* noop */ }
+    console.log(`[swing-cache] hit ticker=${input.ticker} provider=${PROVIDER} cache_bucket=${today}${ageMin !== null ? ` age_minutes=${ageMin}` : ""}`);
   } else {
+    console.log(`[swing-cache] fresh_search ticker=${input.ticker} provider=${PROVIDER} cache_bucket=${today}`);
     const query = buildExaQuery(input);
-    console.log(JSON.stringify({ feature: "swing_trader_watch", ticker: input.ticker, provider: PROVIDER, exa_request: true }));
     const started = Date.now();
     const out = await callExa(query, apiKey);
     console.log(JSON.stringify({
@@ -602,6 +608,7 @@ async function runOne(
         cacheHit,
         elapsedMs: Date.now() - t0,
         modelUsed: PROVIDER,
+        bestWindow: bw.window,
       },
       exaFailure,
     };
