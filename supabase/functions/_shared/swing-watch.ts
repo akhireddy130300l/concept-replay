@@ -75,6 +75,7 @@ export type CheckedTicker = {
   cacheHit: boolean;
   elapsedMs: number;
   modelUsed: string;
+  bestWindow: string;
 };
 
 export type SwingUnavailableReason =
@@ -122,10 +123,38 @@ const EXA_URL = "https://api.exa.ai/search";
 const EXA_TIMEOUT_MS = 15000;
 const REQUEST_DELAY_MS = 400; // gentle pacing between Exa calls
 
-function tradingDateNY(): string {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  return `${parts.find(p => p.type === "year")!.value}-${parts.find(p => p.type === "month")!.value}-${parts.find(p => p.type === "day")!.value}`;
+// Cache bucket resets daily at 8:00 AM America/New_York.
+// Before 8 AM ET on date D, bucket = D-1. At/after 8 AM ET, bucket = D.
+function swingCacheBucket(now: Date = new Date()): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", hour12: false,
+  });
+  const parts = fmt.formatToParts(now);
+  const y = parts.find(p => p.type === "year")!.value;
+  const mo = parts.find(p => p.type === "month")!.value;
+  const d = parts.find(p => p.type === "day")!.value;
+  const h = Number(parts.find(p => p.type === "hour")!.value);
+  let bucket = `${y}-${mo}-${d}`;
+  if (h < 8) {
+    const dt = new Date(`${bucket}T12:00:00Z`);
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    bucket = dt.toISOString().slice(0, 10);
+  }
+  return bucket;
 }
+
+function nowETString(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  }).format(now);
+}
+
+// Legacy alias — trading-day-like key used across the codebase.
+function tradingDateNY(): string { return swingCacheBucket(); }
 
 function dedupeInputs(inputs: SwingTickerInput[]): SwingTickerInput[] {
   const map = new Map<string, SwingTickerInput>();
@@ -193,6 +222,37 @@ type ExaResult = { title?: string; url?: string; publishedDate?: string; highlig
 type ExaCallOutcome =
   | { ok: true; results: ExaResult[] }
   | { ok: false; failure: SwingUnavailableReason; httpStatus?: number };
+
+// Multi-window evaluator: picks the best holding window (3–10, 11–20, 20–40+
+// sessions) for a ticker using its 1d/7d/20d moves and volume/RR context.
+// Fully deterministic, no extra API calls.
+function evaluateBestWindow(t: SwingTickerInput): {
+  window: string;
+  reason: string;
+} {
+  const v1 = typeof t.oneDayPct === "number" ? t.oneDayPct : NaN;
+  const v7 = typeof t.sevenDayPct === "number" ? t.sevenDayPct : NaN;
+  const v20 = typeof t.twentyDayPct === "number" ? t.twentyDayPct : NaN;
+  const vol = typeof t.volumeRatio === "number" ? t.volumeRatio : NaN;
+  const rr = typeof t.riskRewardRaw === "number" ? t.riskRewardRaw : NaN;
+
+  // Longer swing: 20-day trend clearly up but not overextended in 7d.
+  if (Number.isFinite(v20) && v20 > 8 && (!Number.isFinite(v7) || v7 < 15)) {
+    return { window: "20–40+ sessions", reason: "Sustained 20-session uptrend without near-term overextension." };
+  }
+  // Medium swing: strong 7-day trend, moderate 1-day.
+  if (Number.isFinite(v7) && v7 > 4 && (!Number.isFinite(v1) || v1 < 10)) {
+    return { window: "11–20 sessions", reason: "Constructive 7-session trend with room to run." };
+  }
+  // Short swing: fresh 1-day breakout with volume/RR support.
+  if (Number.isFinite(v1) && v1 > 2 && ((Number.isFinite(vol) && vol > 1.2) || (Number.isFinite(rr) && rr >= 2))) {
+    return { window: "3–10 sessions", reason: "Fresh breakout with above-average volume or ≥2R setup." };
+  }
+  if (Number.isFinite(v1) || Number.isFinite(v7) || Number.isFinite(v20)) {
+    return { window: "3–10 sessions", reason: "Default short-swing window (limited multi-window signal)." };
+  }
+  return { window: "N/A", reason: "Insufficient trend data to evaluate a window." };
+}
 
 function buildExaQuery(t: SwingTickerInput): string {
   return `${t.ticker} ${t.company} stock latest news earnings analyst upgrade downgrade lawsuit regulation competitors industry today`;
@@ -493,14 +553,20 @@ async function runOne(
   let deep: SwingDeepCheck | null = null;
   let cacheHit = false;
   let exaFailure: SwingUnavailableReason | undefined;
+  const bw = evaluateBestWindow(input);
 
   if (cacheRow) {
     deep = cacheRow.payload as SwingDeepCheck;
     cacheHit = true;
-    console.log(JSON.stringify({ feature: "swing_trader_watch", ticker: input.ticker, provider: PROVIDER, cache_hit: true }));
+    let ageMin: number | null = null;
+    try {
+      const created = (cacheRow as any).updated_at || (cacheRow as any).created_at;
+      if (created) ageMin = Math.round((Date.now() - new Date(created).getTime()) / 60000);
+    } catch { /* noop */ }
+    console.log(`[swing-cache] hit ticker=${input.ticker} provider=${PROVIDER} cache_bucket=${today}${ageMin !== null ? ` age_minutes=${ageMin}` : ""}`);
   } else {
+    console.log(`[swing-cache] fresh_search ticker=${input.ticker} provider=${PROVIDER} cache_bucket=${today}`);
     const query = buildExaQuery(input);
-    console.log(JSON.stringify({ feature: "swing_trader_watch", ticker: input.ticker, provider: PROVIDER, exa_request: true }));
     const started = Date.now();
     const out = await callExa(query, apiKey);
     console.log(JSON.stringify({
@@ -542,6 +608,7 @@ async function runOne(
         cacheHit,
         elapsedMs: Date.now() - t0,
         modelUsed: PROVIDER,
+        bestWindow: bw.window,
       },
       exaFailure,
     };
@@ -560,6 +627,15 @@ async function runOne(
     d.industry * 0.8 +
     (d.risk + pre.risk) / 2 * 1.2;
 
+  // Prefer a more specific reason string than "Serious negative signal detected: lawsuit"
+  // when the only red flag is a generic lawsuit mention with no positive counterweight.
+  let refinedReason = deep.rejection_reason || undefined;
+  const redFlags = deep.red_flags || [];
+  const positives = deep.positive_factors || [];
+  if (refinedReason && redFlags.length === 1 && redFlags[0] === "lawsuit" && positives.length === 0) {
+    refinedReason = "Generic lawsuit noise — no fresh company-specific catalyst.";
+  }
+
   return {
     result: {
       ticker: input.ticker,
@@ -572,17 +648,19 @@ async function runOne(
       riskScore: (d.risk + pre.risk) / 2,
       finalScore,
       status,
-      rejectionReason: deep.rejection_reason || undefined,
+      rejectionReason: refinedReason,
       deep,
       cacheHit,
       elapsedMs: Date.now() - t0,
       modelUsed: PROVIDER,
+      bestWindow: bw.window,
     },
   };
 }
 
 function makeSkipped(input: SwingTickerInput, reason: SwingUnavailableReason): CheckedTicker {
   const pre = preScore(input);
+  const bw = evaluateBestWindow(input);
   return {
     ticker: input.ticker,
     company: input.company,
@@ -596,6 +674,7 @@ function makeSkipped(input: SwingTickerInput, reason: SwingUnavailableReason): C
     cacheHit: false,
     elapsedMs: 0,
     modelUsed: PROVIDER,
+    bestWindow: bw.window,
   };
 }
 
@@ -608,10 +687,11 @@ export async function runSwingTraderWatch(
 ): Promise<SwingResult> {
   const started = Date.now();
   const apiKey = Deno.env.get("EXA_API_KEY") || "";
-  const today = tradingDateNY();
+  const today = swingCacheBucket();
   const inputs = dedupeInputs(rawInputs);
 
-  console.log(JSON.stringify({ phase: "swing", event: "start", provider: PROVIDER, unique_tickers: inputs.length, has_key: !!apiKey }));
+  console.log(`[swing-cache] now_et=${nowETString()} cache_bucket=${today} unique_tickers=${inputs.length}`);
+  console.log(JSON.stringify({ phase: "swing", event: "start", provider: PROVIDER, unique_tickers: inputs.length, has_key: !!apiKey, cache_bucket: today }));
 
   const emptyBase = (): Omit<SwingResult, "previous" | "elapsedMs"> => ({
     modelUsed: PROVIDER, uniqueChecked: inputs.length,
@@ -699,6 +779,9 @@ export async function runSwingTraderWatch(
     selected.status = "selected";
     const idx = passed.indexOf(selected);
     if (idx >= 0) passed.splice(idx, 1);
+    if (selectedPlan && selected.bestWindow && selected.bestWindow !== "N/A") {
+      selectedPlan.holdingWindow = selected.bestWindow;
+    }
   }
 
   const totalCacheHits = results.filter((r) => r.cacheHit).length;
@@ -932,24 +1015,28 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
   }
 
   const swingSection = `
-    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Swing Trader Watch <span style="font-weight:400;color:#64748b;font-size:13px;">(3–10 trading day watch · powered by Exa Search)</span></h3>
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Swing Trader Watch <span style="font-weight:400;color:#64748b;font-size:13px;">(multi-window: 3–10 · 11–20 · 20–40+ sessions · powered by Exa Search)</span></h3>
     ${swingBlock}`;
 
+  // Show ALL checked tickers — no slice/limit.
   const combined = [
     ...(r.selected ? [r.selected] : []),
     ...r.passed, ...r.rejected, ...r.watchOnly, ...r.failed, ...r.skipped,
-  ].slice(0, 10);
+  ];
 
   const rowsHtml = combined.map((t) => {
     const d = t.deep;
     const checks = d
       ? `Tech ✅ · News ${checkIcon(d.news_check)} · Peers ${checkIcon(d.peer_check)} · Industry ${checkIcon(d.industry_check)} · Risk ${checkIcon(d.risk_check)}`
       : (t.status === "skipped_due_to_exa_limit" ? "Skipped (Exa limit)" : "Deep check failed");
-    const reason = t.rejectionReason || (d?.news_check === "unavailable" ? "Fresh news check unavailable" : (d?.positive_factors?.[0] || ""));
+    let reason = t.rejectionReason || (d?.news_check === "unavailable" ? "Fresh news check unavailable" : (d?.positive_factors?.[0] || ""));
+    if (t.status === "passed_not_selected" && !reason) reason = "Strong setup but selected ticker ranked higher.";
+    if (t.cacheHit) reason = reason ? `${reason} (cache used)` : "Cache used";
     return `<tr>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-weight:700;">${tickerLink(appBaseUrl, t.ticker)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;color:#334155;">${esc(t.company)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">${statusBadge(t.status)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">${esc(t.bestWindow || "N/A")}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">${esc(checks)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">${esc(reason || "—")}</td>
       </tr>`;
@@ -957,7 +1044,7 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
 
   const checkedSection = `
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🔎 Tickers Checked Today</h3>
-    <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">Provider: Exa · ${r.uniqueChecked} unique tickers · ${r.totalCacheHits} cache hits · ${r.totalExaAttempts} Exa searches · ${r.totalSelected} selected · ${r.totalRejected} rejected · ${r.totalWatchOnly} watch only · ${r.totalFailed} failed${r.totalSkipped ? ` · ${r.totalSkipped} skipped` : ""}.</p>
+    <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">Provider: Exa · ${r.uniqueChecked} unique tickers · ${r.totalExaAttempts} fresh Exa searches · ${r.totalCacheHits} cache hits · ${r.totalSelected} selected · ${r.totalRejected} rejected · ${r.totalWatchOnly} watch only · ${r.totalFailed} failed${r.totalSkipped ? ` · ${r.totalSkipped} skipped` : ""}. Showing all ${combined.length} rows.</p>
     <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
@@ -965,11 +1052,12 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
             <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">TICKER</th>
             <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">COMPANY</th>
             <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">STATUS</th>
+            <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">BEST WINDOW</th>
             <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">CHECKS</th>
             <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569;">REASON</th>
           </tr>
         </thead>
-        <tbody>${rowsHtml || `<tr><td colspan="5" style="padding:12px;color:#64748b;">No tickers checked.</td></tr>`}</tbody>
+        <tbody>${rowsHtml || `<tr><td colspan="6" style="padding:12px;color:#64748b;">No tickers checked.</td></tr>`}</tbody>
       </table>
     </div>`;
 

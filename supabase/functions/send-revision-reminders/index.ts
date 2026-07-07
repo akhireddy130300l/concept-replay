@@ -2907,6 +2907,38 @@ serve(async (req) => {
         topicsArray = [...nonStockTopics, selectedStock];
       }
 
+      // ── Stock-email idempotency claim ──
+      // If a stock (market-gainers) topic is present, atomically advance its
+      // next_revision_date so a concurrent invocation cannot send a duplicate
+      // stock email. If the claim fails, drop stock topics from this run entirely.
+      let stockClaimedTopicId: string | null = null;
+      {
+        const stockCandidate = topicsArray.find((t) => isLatestMarketGainersRequest(t.title));
+        if (stockCandidate) {
+          const claimUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+          const nowIso = new Date().toISOString();
+          const nyBucket = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+          const idemKey = `${userId}:stock_gainers_email:${nyBucket}:${stockCandidate.id}`;
+          const { data: claimed, error: claimErr } = await supabase
+            .from("learned_topics")
+            .update({
+              next_revision_date: claimUntil,
+              revision_count: (stockCandidate.revision_count || 0) + 1,
+            })
+            .eq("id", stockCandidate.id)
+            .lte("next_revision_date", nowIso)
+            .select("id");
+          if (claimErr || !claimed || claimed.length === 0) {
+            console.log(`[stock-email] duplicate_send_skipped user_id=${userId} idempotency_key=${idemKey} err=${claimErr?.message || "already_claimed"}`);
+            topicsArray = topicsArray.filter((t) => !isLatestMarketGainersRequest(t.title));
+            if (topicsArray.length === 0) continue;
+          } else {
+            stockClaimedTopicId = stockCandidate.id;
+            console.log(`[stock-email] sending_once user_id=${userId} idempotency_key=${idemKey}`);
+          }
+        }
+      }
+
       console.log("Processing user:", userId, "with", topicsArray.length, "topics");
 
       console.log("Fetching user email from Supabase...");
@@ -3037,6 +3069,9 @@ serve(async (req) => {
       const fromEmail = "onboarding@resend.dev";
       const toEmail = userEmail;
 
+      // Idempotency claim was performed earlier (before content generation).
+      // stockClaimedTopicId is in scope from the block above.
+
       const topicNames = topicsArray.map(t => escapeHtml(t.title));
       let emailSubject: string;
       if (topicNames.length === 1) {
@@ -3073,9 +3108,12 @@ serve(async (req) => {
 
       console.log("Updating next revision dates for topics...");
       for (const topic of topicsArray) {
+        if (stockClaimedTopicId && topic.id === stockClaimedTopicId) {
+          console.log(`Skipping post-send date update for already-claimed stock topic ${topic.id}`);
+          continue;
+        }
         const now = new Date();
         if (topic.is_daily) {
-          // Rolling 24h schedule from when the reminder was sent
           const nextRevisionDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
           console.log(`Topic ${topic.id} is daily - scheduling 24h from now: ${nextRevisionDate.toISOString()}`);
           await supabase
@@ -3087,7 +3125,6 @@ serve(async (req) => {
           const nextCount = currentCount + 1;
           const intervalIndex = Math.min(nextCount, REVISION_INTERVALS.length - 1);
           const daysUntilNext = REVISION_INTERVALS[intervalIndex];
-          // Rolling schedule: exactly N * 24h from this send, not pinned to a fixed hour
           const nextRevisionDate = new Date(now.getTime() + daysUntilNext * 24 * 60 * 60 * 1000);
           console.log(`Updating topic ${topic.id} next_revision_date to ${nextRevisionDate.toISOString()} (${daysUntilNext} days from now)`);
           await supabase
