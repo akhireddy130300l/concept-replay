@@ -75,6 +75,7 @@ export type CheckedTicker = {
   cacheHit: boolean;
   elapsedMs: number;
   modelUsed: string;
+  bestWindow: string;
 };
 
 export type SwingUnavailableReason =
