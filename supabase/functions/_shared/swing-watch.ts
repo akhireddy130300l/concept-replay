@@ -10,6 +10,8 @@
 //   with reason=missing_exa_api_key.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { fetchFinnhubBundle, scoreFinnhub, type FinnhubBundle, type FinnhubScoring } from "./finnhub-swing.ts";
+import { saveTrainingExamples, updateOutcomes, getMLTrainingStats, buildMLTrainingSectionHTML, type MLTrainingStats } from "./swing-ml.ts";
 
 export type SwingTickerInput = {
   ticker: string;
