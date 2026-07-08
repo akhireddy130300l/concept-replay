@@ -78,6 +78,7 @@ export type CheckedTicker = {
   elapsedMs: number;
   modelUsed: string;
   bestWindow: string;
+  finnhub?: (FinnhubScoring & { available: boolean; peerCount: number }) | null;
 };
 
 export type SwingUnavailableReason =
