@@ -1143,5 +1143,6 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
       Last candidate: <strong>${tickerLink(appBaseUrl, p.ticker)}</strong>${p.company ? ` · ${esc(p.company)}` : ""} · selected on ${esc(p.selectedDate)}${typeof p.selectedPrice === "number" ? ` at $${p.selectedPrice.toFixed(2)}` : ""}. Status: <strong>${esc(p.status)}</strong>. Target hit: ${p.targetHit ? "yes" : "no"} · Stop hit: ${p.stopHit ? "yes" : "no"}.
     </div>` : "";
 
-  return `${swingSection}\n${checkedSection}\n${prevSection}`;
+  const mlSection = r.mlStats ? buildMLTrainingSectionHTML(r.mlStats) : "";
+  return `${swingSection}\n${checkedSection}\n${prevSection}\n${mlSection}`;
 }
