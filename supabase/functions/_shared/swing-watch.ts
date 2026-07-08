@@ -733,14 +733,20 @@ export async function runSwingTraderWatch(
   admin: SupabaseClient,
   rawInputs: SwingTickerInput[],
   emailRunId?: string,
+  userId?: string,
 ): Promise<SwingResult> {
   const started = Date.now();
   const apiKey = Deno.env.get("EXA_API_KEY") || "";
   const today = swingCacheBucket();
   const inputs = dedupeInputs(rawInputs);
 
+  // Best-effort outcome update for older training examples. Never blocks email.
+  try { await updateOutcomes(admin); } catch (e) {
+    console.log(`[ml-training] outcome_update_wrapper_failed reason=${(e as Error).message}`);
+  }
+
   console.log(`[swing-cache] now_et=${nowETString()} cache_bucket=${today} unique_tickers=${inputs.length}`);
-  console.log(JSON.stringify({ phase: "swing", event: "start", provider: PROVIDER, unique_tickers: inputs.length, has_key: !!apiKey, cache_bucket: today }));
+  console.log(JSON.stringify({ phase: "swing", event: "start", provider: PROVIDER, unique_tickers: inputs.length, has_key: !!apiKey, cache_bucket: today, has_finnhub_key: !!Deno.env.get("FINNHUB_API_KEY") }));
 
   const emptyBase = (): Omit<SwingResult, "previous" | "elapsedMs"> => ({
     modelUsed: PROVIDER, uniqueChecked: inputs.length,
