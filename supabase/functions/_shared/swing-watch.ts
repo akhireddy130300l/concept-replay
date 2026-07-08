@@ -1098,8 +1098,11 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
 
   const rowsHtml = combined.map((t) => {
     const d = t.deep;
+    const fnAvail = t.finnhub?.available;
+    const fnPeers = fnAvail ? "✅" : "❔";
+    const fnAnalyst = fnAvail ? "✅" : "❔";
     const checks = d
-      ? `Tech ✅ · News ${checkIcon(d.news_check)} · Peers ${checkIcon(d.peer_check)} · Industry ${checkIcon(d.industry_check)} · Risk ${checkIcon(d.risk_check)}`
+      ? `Tech ✅ · Exa News ${checkIcon(d.news_check)} · Finnhub Peers ${fnPeers} · Finnhub Analyst ${fnAnalyst} · Risk ${checkIcon(d.risk_check)}`
       : (t.status === "skipped_due_to_exa_limit" ? "Skipped (Exa limit)" : "Deep check failed");
     let reason = t.rejectionReason || (d?.news_check === "unavailable" ? "Fresh news check unavailable" : (d?.positive_factors?.[0] || ""));
     if (t.status === "passed_not_selected" && !reason) reason = "Strong setup but selected ticker ranked higher.";
