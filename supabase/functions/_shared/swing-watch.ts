@@ -597,6 +597,25 @@ async function runOne(
     }
   }
 
+  // Finnhub structured data (non-fatal, cached).
+  let finnhubBundle: FinnhubBundle | null = null;
+  let finnhubScoring: FinnhubScoring | null = null;
+  try {
+    finnhubBundle = await fetchFinnhubBundle(admin, input.ticker);
+    if (finnhubBundle.available) {
+      finnhubScoring = scoreFinnhub(finnhubBundle, input.price, input.oneDayPct);
+    } else {
+      console.log(`[finnhub] ticker=${input.ticker} finnhub_unavailable reason=${finnhubBundle.reason || "unknown"}`);
+    }
+  } catch (e) {
+    console.log(`[finnhub] ticker=${input.ticker} finnhub_unavailable reason=${(e as Error).message}`);
+  }
+  const finnhubMeta = finnhubScoring
+    ? { ...finnhubScoring, available: true, peerCount: finnhubBundle?.peers?.length || 0 }
+    : { peerScore: 0, peerConfirmation: "Peer confirmation: Not available", peerLabel: "not_available" as const,
+        analystScore: 0, analystContext: "Analyst context: Not available", analystLabel: "not_available" as const,
+        buyCount: 0, holdCount: 0, sellCount: 0, available: false, peerCount: 0 };
+
   if (!deep) {
     return {
       result: {
@@ -604,7 +623,7 @@ async function runOne(
         company: input.company,
         sourceTables: input.sourceTables,
         technicalScore: pre.technical,
-        newsScore: 0, peerScore: 0, industryScore: 0,
+        newsScore: 0, peerScore: finnhubMeta.peerScore, industryScore: 0,
         riskScore: pre.risk,
         finalScore: pre.technical + pre.risk,
         status: "deep_check_failed",
@@ -613,6 +632,7 @@ async function runOne(
         elapsedMs: Date.now() - t0,
         modelUsed: PROVIDER,
         bestWindow: bw.window,
+        finnhub: finnhubMeta,
       },
       exaFailure,
     };
@@ -624,12 +644,36 @@ async function runOne(
       ? "news_unavailable"
       : statusFromSuitability(deep.swing_suitability);
 
-  const finalScore =
-    pre.technical * 1.2 +
-    d.news * 1.5 +
-    d.peer * 0.8 +
-    d.industry * 0.8 +
-    (d.risk + pre.risk) / 2 * 1.2;
+  // Blend Finnhub sector/industry back into deep view.
+  if (finnhubScoring?.industry) deep.industry = finnhubScoring.industry;
+
+  // Weighted final score. If Finnhub unavailable, redistribute across tech/exa.
+  const techNorm = pre.technical / 10;
+  const newsNorm = d.news / 10;
+  const riskNorm = ((d.risk + pre.risk) / 2) / 10;
+  const peerNorm = finnhubMeta.available ? finnhubMeta.peerScore / 10 : 0;
+  const analystNorm = finnhubMeta.available ? finnhubMeta.analystScore / 10 : 0;
+  const weights = finnhubMeta.available
+    ? { tech: 0.35, news: 0.25, risk: 0.15, peer: 0.10, analyst: 0.10, learn: 0.05 }
+    : { tech: 0.45, news: 0.30, risk: 0.20, peer: 0.00, analyst: 0.00, learn: 0.05 };
+  const finalScore = (
+    techNorm * weights.tech +
+    newsNorm * weights.news +
+    riskNorm * weights.risk +
+    peerNorm * weights.peer +
+    analystNorm * weights.analyst +
+    0.5 * weights.learn
+  ) * 10;
+
+  // Refine confidence downward if Finnhub strongly contradicts the trade.
+  if (deep.confidence === "High" && finnhubMeta.available) {
+    if (finnhubMeta.analystLabel === "negative" || finnhubMeta.peerLabel === "negative") {
+      deep.confidence = "Medium";
+    }
+    if (finnhubMeta.targetSupportsTrade === false && typeof finnhubMeta.targetUpsidePct === "number" && finnhubMeta.targetUpsidePct < -3) {
+      deep.confidence = "Low";
+    }
+  }
 
   // Prefer a more specific reason string than "Serious negative signal detected: lawsuit"
   // when the only red flag is a generic lawsuit mention with no positive counterweight.
@@ -647,7 +691,7 @@ async function runOne(
       sourceTables: input.sourceTables,
       technicalScore: pre.technical,
       newsScore: d.news,
-      peerScore: d.peer,
+      peerScore: finnhubMeta.available ? finnhubMeta.peerScore : d.peer,
       industryScore: d.industry,
       riskScore: (d.risk + pre.risk) / 2,
       finalScore,
@@ -658,6 +702,7 @@ async function runOne(
       elapsedMs: Date.now() - t0,
       modelUsed: PROVIDER,
       bestWindow: bw.window,
+      finnhub: finnhubMeta,
     },
   };
 }
