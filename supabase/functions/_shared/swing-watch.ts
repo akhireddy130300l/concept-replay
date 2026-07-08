@@ -107,6 +107,7 @@ export type SwingResult = {
   failed: CheckedTicker[];
   skipped: CheckedTicker[];
   all: CheckedTicker[];
+  mlStats?: MLTrainingStats;
   previous?: {
     ticker: string;
     company?: string;
