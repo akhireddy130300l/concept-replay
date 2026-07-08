@@ -932,18 +932,7 @@ export async function runSwingTraderWatch(
 
   const previous = await loadPrevious(admin);
 
-  console.log(JSON.stringify({
-    phase: "swing", event: "done", provider: PROVIDER,
-    unique_checked: inputs.length,
-    selected: selected?.ticker || "no_candidate",
-    rejected: rejected.length, watch_only: watchOnly.length,
-    failed: failed.length, skipped: skipped.length,
-    cache_hits: totalCacheHits, exa_attempts: totalExaAttempts,
-    unavailable_reason: unavailableReason ?? null,
-    elapsed_ms: Date.now() - started,
-  }));
-
-  return {
+  const preliminary: SwingResult = {
     runId, modelUsed: PROVIDER, uniqueChecked: inputs.length,
     totalSelected: selected ? 1 : 0,
     totalRejected: rejected.length,
@@ -959,6 +948,31 @@ export async function runSwingTraderWatch(
     previous,
     elapsedMs: Date.now() - started,
   };
+
+  // Save one training example per checked ticker. Best-effort.
+  try {
+    await saveTrainingExamples(admin, preliminary, inputs, userId ?? null, runId ?? null);
+  } catch (e) {
+    console.log(`[ml-training] save_wrapper_failed reason=${(e as Error).message}`);
+  }
+  try {
+    preliminary.mlStats = await getMLTrainingStats(admin);
+  } catch { /* noop */ }
+
+  console.log(JSON.stringify({
+    phase: "swing", event: "done", provider: PROVIDER,
+    unique_checked: inputs.length,
+    selected: selected?.ticker || "no_candidate",
+    rejected: rejected.length, watch_only: watchOnly.length,
+    failed: failed.length, skipped: skipped.length,
+    cache_hits: totalCacheHits, exa_attempts: totalExaAttempts,
+    unavailable_reason: unavailableReason ?? null,
+    ml_saved_today: preliminary.mlStats?.savedToday ?? null,
+    ml_completed: preliminary.mlStats?.completed ?? null,
+    elapsed_ms: Date.now() - started,
+  }));
+
+  return preliminary;
 }
 
 async function loadPrevious(admin: SupabaseClient): Promise<SwingResult["previous"]> {
