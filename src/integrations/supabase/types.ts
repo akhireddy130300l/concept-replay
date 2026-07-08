@@ -446,6 +446,42 @@ export type Database = {
         }
         Relationships: []
       }
+      stock_provider_cache: {
+        Row: {
+          cache_type: string
+          created_at: string
+          data_json: Json
+          expires_at: string
+          fetched_at: string
+          id: string
+          provider: string
+          ticker: string
+          updated_at: string
+        }
+        Insert: {
+          cache_type: string
+          created_at?: string
+          data_json: Json
+          expires_at: string
+          fetched_at?: string
+          id?: string
+          provider: string
+          ticker: string
+          updated_at?: string
+        }
+        Update: {
+          cache_type?: string
+          created_at?: string
+          data_json?: Json
+          expires_at?: string
+          fetched_at?: string
+          id?: string
+          provider?: string
+          ticker?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       stock_ticker_insight_cache: {
         Row: {
           created_by: string | null
@@ -690,6 +726,356 @@ export type Database = {
           unique_tickers_checked?: number
         }
         Relationships: []
+      }
+      swing_training_examples: {
+        Row: {
+          analyst_buy_count: number | null
+          analyst_hold_count: number | null
+          analyst_score: number | null
+          analyst_sell_count: number | null
+          analyst_signal: string | null
+          best_window: string | null
+          catalyst_summary: string | null
+          checked_at: string
+          checked_date_et: string | null
+          company: string | null
+          confidence: string | null
+          created_at: string
+          current_price: number | null
+          distance_from_support_pct: number | null
+          distance_to_resistance_pct: number | null
+          entry_status: string | null
+          exa_negative_signal_count: number | null
+          exa_neutral_signal_count: number | null
+          exa_positive_signal_count: number | null
+          exa_query: string | null
+          exa_result_count: number | null
+          exa_source_quality_score: number | null
+          extended_flag: boolean | null
+          final_swing_score: number | null
+          finnhub_available: boolean | null
+          has_analyst_upgrade_signal: boolean | null
+          has_cash_burn_signal: boolean | null
+          has_contract_win_signal: boolean | null
+          has_downgrade_signal: boolean | null
+          has_earnings_beat_signal: boolean | null
+          has_earnings_miss_signal: boolean | null
+          has_fda_approval_signal: boolean | null
+          has_generic_lawsuit_noise: boolean | null
+          has_guidance_cut_signal: boolean | null
+          has_high_valuation_signal: boolean | null
+          has_insider_selling_signal: boolean | null
+          has_investigation_signal: boolean | null
+          has_lawsuit_signal: boolean | null
+          has_margin_pressure_signal: boolean | null
+          has_material_lawsuit_signal: boolean | null
+          has_partnership_signal: boolean | null
+          has_price_target_raise_signal: boolean | null
+          has_raised_outlook_signal: boolean | null
+          has_revenue_growth_signal: boolean | null
+          high_volatility_flag: boolean | null
+          id: string
+          industry: string | null
+          key_risks: Json | null
+          learning_bonus: number | null
+          learning_penalty: number | null
+          lower_watch_area: number | null
+          market_cap: number | null
+          momentum_status: string | null
+          near_resistance_flag: boolean | null
+          one_session_return_pct: number | null
+          overbought_flag: boolean | null
+          peer_confirmation_score: number | null
+          peer_count: number | null
+          provider: string | null
+          rejection_reason: string | null
+          risk_reward: number | null
+          rule_based_final_score: number | null
+          run_id: string | null
+          sector: string | null
+          selected_window: string | null
+          seven_session_return_pct: number | null
+          status_at_check: string | null
+          target_mean: number | null
+          target_supports_trade: boolean | null
+          target_upside_pct: number | null
+          technical_score: number | null
+          ticker: string
+          twenty_session_return_pct: number | null
+          updated_at: string
+          upper_watch_area: number | null
+          upside_vs_risk: number | null
+          user_id: string | null
+          volatility_score: number | null
+          volume_confirmation: string | null
+          volume_strength: number | null
+          was_selected: boolean
+          weak_volume_flag: boolean | null
+        }
+        Insert: {
+          analyst_buy_count?: number | null
+          analyst_hold_count?: number | null
+          analyst_score?: number | null
+          analyst_sell_count?: number | null
+          analyst_signal?: string | null
+          best_window?: string | null
+          catalyst_summary?: string | null
+          checked_at?: string
+          checked_date_et?: string | null
+          company?: string | null
+          confidence?: string | null
+          created_at?: string
+          current_price?: number | null
+          distance_from_support_pct?: number | null
+          distance_to_resistance_pct?: number | null
+          entry_status?: string | null
+          exa_negative_signal_count?: number | null
+          exa_neutral_signal_count?: number | null
+          exa_positive_signal_count?: number | null
+          exa_query?: string | null
+          exa_result_count?: number | null
+          exa_source_quality_score?: number | null
+          extended_flag?: boolean | null
+          final_swing_score?: number | null
+          finnhub_available?: boolean | null
+          has_analyst_upgrade_signal?: boolean | null
+          has_cash_burn_signal?: boolean | null
+          has_contract_win_signal?: boolean | null
+          has_downgrade_signal?: boolean | null
+          has_earnings_beat_signal?: boolean | null
+          has_earnings_miss_signal?: boolean | null
+          has_fda_approval_signal?: boolean | null
+          has_generic_lawsuit_noise?: boolean | null
+          has_guidance_cut_signal?: boolean | null
+          has_high_valuation_signal?: boolean | null
+          has_insider_selling_signal?: boolean | null
+          has_investigation_signal?: boolean | null
+          has_lawsuit_signal?: boolean | null
+          has_margin_pressure_signal?: boolean | null
+          has_material_lawsuit_signal?: boolean | null
+          has_partnership_signal?: boolean | null
+          has_price_target_raise_signal?: boolean | null
+          has_raised_outlook_signal?: boolean | null
+          has_revenue_growth_signal?: boolean | null
+          high_volatility_flag?: boolean | null
+          id?: string
+          industry?: string | null
+          key_risks?: Json | null
+          learning_bonus?: number | null
+          learning_penalty?: number | null
+          lower_watch_area?: number | null
+          market_cap?: number | null
+          momentum_status?: string | null
+          near_resistance_flag?: boolean | null
+          one_session_return_pct?: number | null
+          overbought_flag?: boolean | null
+          peer_confirmation_score?: number | null
+          peer_count?: number | null
+          provider?: string | null
+          rejection_reason?: string | null
+          risk_reward?: number | null
+          rule_based_final_score?: number | null
+          run_id?: string | null
+          sector?: string | null
+          selected_window?: string | null
+          seven_session_return_pct?: number | null
+          status_at_check?: string | null
+          target_mean?: number | null
+          target_supports_trade?: boolean | null
+          target_upside_pct?: number | null
+          technical_score?: number | null
+          ticker: string
+          twenty_session_return_pct?: number | null
+          updated_at?: string
+          upper_watch_area?: number | null
+          upside_vs_risk?: number | null
+          user_id?: string | null
+          volatility_score?: number | null
+          volume_confirmation?: string | null
+          volume_strength?: number | null
+          was_selected?: boolean
+          weak_volume_flag?: boolean | null
+        }
+        Update: {
+          analyst_buy_count?: number | null
+          analyst_hold_count?: number | null
+          analyst_score?: number | null
+          analyst_sell_count?: number | null
+          analyst_signal?: string | null
+          best_window?: string | null
+          catalyst_summary?: string | null
+          checked_at?: string
+          checked_date_et?: string | null
+          company?: string | null
+          confidence?: string | null
+          created_at?: string
+          current_price?: number | null
+          distance_from_support_pct?: number | null
+          distance_to_resistance_pct?: number | null
+          entry_status?: string | null
+          exa_negative_signal_count?: number | null
+          exa_neutral_signal_count?: number | null
+          exa_positive_signal_count?: number | null
+          exa_query?: string | null
+          exa_result_count?: number | null
+          exa_source_quality_score?: number | null
+          extended_flag?: boolean | null
+          final_swing_score?: number | null
+          finnhub_available?: boolean | null
+          has_analyst_upgrade_signal?: boolean | null
+          has_cash_burn_signal?: boolean | null
+          has_contract_win_signal?: boolean | null
+          has_downgrade_signal?: boolean | null
+          has_earnings_beat_signal?: boolean | null
+          has_earnings_miss_signal?: boolean | null
+          has_fda_approval_signal?: boolean | null
+          has_generic_lawsuit_noise?: boolean | null
+          has_guidance_cut_signal?: boolean | null
+          has_high_valuation_signal?: boolean | null
+          has_insider_selling_signal?: boolean | null
+          has_investigation_signal?: boolean | null
+          has_lawsuit_signal?: boolean | null
+          has_margin_pressure_signal?: boolean | null
+          has_material_lawsuit_signal?: boolean | null
+          has_partnership_signal?: boolean | null
+          has_price_target_raise_signal?: boolean | null
+          has_raised_outlook_signal?: boolean | null
+          has_revenue_growth_signal?: boolean | null
+          high_volatility_flag?: boolean | null
+          id?: string
+          industry?: string | null
+          key_risks?: Json | null
+          learning_bonus?: number | null
+          learning_penalty?: number | null
+          lower_watch_area?: number | null
+          market_cap?: number | null
+          momentum_status?: string | null
+          near_resistance_flag?: boolean | null
+          one_session_return_pct?: number | null
+          overbought_flag?: boolean | null
+          peer_confirmation_score?: number | null
+          peer_count?: number | null
+          provider?: string | null
+          rejection_reason?: string | null
+          risk_reward?: number | null
+          rule_based_final_score?: number | null
+          run_id?: string | null
+          sector?: string | null
+          selected_window?: string | null
+          seven_session_return_pct?: number | null
+          status_at_check?: string | null
+          target_mean?: number | null
+          target_supports_trade?: boolean | null
+          target_upside_pct?: number | null
+          technical_score?: number | null
+          ticker?: string
+          twenty_session_return_pct?: number | null
+          updated_at?: string
+          upper_watch_area?: number | null
+          upside_vs_risk?: number | null
+          user_id?: string | null
+          volatility_score?: number | null
+          volume_confirmation?: string | null
+          volume_strength?: number | null
+          was_selected?: boolean
+          weak_volume_flag?: boolean | null
+        }
+        Relationships: []
+      }
+      swing_training_outcomes: {
+        Row: {
+          checked_at: string
+          created_at: string
+          current_price: number | null
+          final_label: string | null
+          id: string
+          label_10_session: string | null
+          label_20_session: string | null
+          label_3_session: string | null
+          label_40_session: string | null
+          max_drawdown_pct: number | null
+          max_gain_pct: number | null
+          max_high_since_check: number | null
+          min_low_since_check: number | null
+          outcome_10_session: number | null
+          outcome_20_session: number | null
+          outcome_3_session: number | null
+          outcome_40_session: number | null
+          outcome_checked_at: string
+          price_at_check: number | null
+          return_pct_current: number | null
+          sessions_elapsed: number | null
+          stop_hit: boolean | null
+          target_hit: boolean | null
+          ticker: string
+          training_example_id: string
+          updated_at: string
+        }
+        Insert: {
+          checked_at: string
+          created_at?: string
+          current_price?: number | null
+          final_label?: string | null
+          id?: string
+          label_10_session?: string | null
+          label_20_session?: string | null
+          label_3_session?: string | null
+          label_40_session?: string | null
+          max_drawdown_pct?: number | null
+          max_gain_pct?: number | null
+          max_high_since_check?: number | null
+          min_low_since_check?: number | null
+          outcome_10_session?: number | null
+          outcome_20_session?: number | null
+          outcome_3_session?: number | null
+          outcome_40_session?: number | null
+          outcome_checked_at?: string
+          price_at_check?: number | null
+          return_pct_current?: number | null
+          sessions_elapsed?: number | null
+          stop_hit?: boolean | null
+          target_hit?: boolean | null
+          ticker: string
+          training_example_id: string
+          updated_at?: string
+        }
+        Update: {
+          checked_at?: string
+          created_at?: string
+          current_price?: number | null
+          final_label?: string | null
+          id?: string
+          label_10_session?: string | null
+          label_20_session?: string | null
+          label_3_session?: string | null
+          label_40_session?: string | null
+          max_drawdown_pct?: number | null
+          max_gain_pct?: number | null
+          max_high_since_check?: number | null
+          min_low_since_check?: number | null
+          outcome_10_session?: number | null
+          outcome_20_session?: number | null
+          outcome_3_session?: number | null
+          outcome_40_session?: number | null
+          outcome_checked_at?: string
+          price_at_check?: number | null
+          return_pct_current?: number | null
+          sessions_elapsed?: number | null
+          stop_hit?: boolean | null
+          target_hit?: boolean | null
+          ticker?: string
+          training_example_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "swing_training_outcomes_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: true
+            referencedRelation: "swing_training_examples"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_portfolio_settings: {
         Row: {

@@ -10,6 +10,8 @@
 //   with reason=missing_exa_api_key.
 
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { fetchFinnhubBundle, scoreFinnhub, type FinnhubBundle, type FinnhubScoring } from "./finnhub-swing.ts";
+import { saveTrainingExamples, updateOutcomes, getMLTrainingStats, buildMLTrainingSectionHTML, type MLTrainingStats } from "./swing-ml.ts";
 
 export type SwingTickerInput = {
   ticker: string;
@@ -76,6 +78,7 @@ export type CheckedTicker = {
   elapsedMs: number;
   modelUsed: string;
   bestWindow: string;
+  finnhub?: (FinnhubScoring & { available: boolean; peerCount: number }) | null;
 };
 
 export type SwingUnavailableReason =
@@ -104,6 +107,7 @@ export type SwingResult = {
   failed: CheckedTicker[];
   skipped: CheckedTicker[];
   all: CheckedTicker[];
+  mlStats?: MLTrainingStats;
   previous?: {
     ticker: string;
     company?: string;
@@ -593,6 +597,25 @@ async function runOne(
     }
   }
 
+  // Finnhub structured data (non-fatal, cached).
+  let finnhubBundle: FinnhubBundle | null = null;
+  let finnhubScoring: FinnhubScoring | null = null;
+  try {
+    finnhubBundle = await fetchFinnhubBundle(admin, input.ticker);
+    if (finnhubBundle.available) {
+      finnhubScoring = scoreFinnhub(finnhubBundle, input.price, input.oneDayPct);
+    } else {
+      console.log(`[finnhub] ticker=${input.ticker} finnhub_unavailable reason=${finnhubBundle.reason || "unknown"}`);
+    }
+  } catch (e) {
+    console.log(`[finnhub] ticker=${input.ticker} finnhub_unavailable reason=${(e as Error).message}`);
+  }
+  const finnhubMeta = finnhubScoring
+    ? { ...finnhubScoring, available: true, peerCount: finnhubBundle?.peers?.length || 0 }
+    : { peerScore: 0, peerConfirmation: "Peer confirmation: Not available", peerLabel: "not_available" as const,
+        analystScore: 0, analystContext: "Analyst context: Not available", analystLabel: "not_available" as const,
+        buyCount: 0, holdCount: 0, sellCount: 0, available: false, peerCount: 0 };
+
   if (!deep) {
     return {
       result: {
@@ -600,7 +623,7 @@ async function runOne(
         company: input.company,
         sourceTables: input.sourceTables,
         technicalScore: pre.technical,
-        newsScore: 0, peerScore: 0, industryScore: 0,
+        newsScore: 0, peerScore: finnhubMeta.peerScore, industryScore: 0,
         riskScore: pre.risk,
         finalScore: pre.technical + pre.risk,
         status: "deep_check_failed",
@@ -609,6 +632,7 @@ async function runOne(
         elapsedMs: Date.now() - t0,
         modelUsed: PROVIDER,
         bestWindow: bw.window,
+        finnhub: finnhubMeta,
       },
       exaFailure,
     };
@@ -620,12 +644,36 @@ async function runOne(
       ? "news_unavailable"
       : statusFromSuitability(deep.swing_suitability);
 
-  const finalScore =
-    pre.technical * 1.2 +
-    d.news * 1.5 +
-    d.peer * 0.8 +
-    d.industry * 0.8 +
-    (d.risk + pre.risk) / 2 * 1.2;
+  // Blend Finnhub sector/industry back into deep view.
+  if (finnhubScoring?.industry) deep.industry = finnhubScoring.industry;
+
+  // Weighted final score. If Finnhub unavailable, redistribute across tech/exa.
+  const techNorm = pre.technical / 10;
+  const newsNorm = d.news / 10;
+  const riskNorm = ((d.risk + pre.risk) / 2) / 10;
+  const peerNorm = finnhubMeta.available ? finnhubMeta.peerScore / 10 : 0;
+  const analystNorm = finnhubMeta.available ? finnhubMeta.analystScore / 10 : 0;
+  const weights = finnhubMeta.available
+    ? { tech: 0.35, news: 0.25, risk: 0.15, peer: 0.10, analyst: 0.10, learn: 0.05 }
+    : { tech: 0.45, news: 0.30, risk: 0.20, peer: 0.00, analyst: 0.00, learn: 0.05 };
+  const finalScore = (
+    techNorm * weights.tech +
+    newsNorm * weights.news +
+    riskNorm * weights.risk +
+    peerNorm * weights.peer +
+    analystNorm * weights.analyst +
+    0.5 * weights.learn
+  ) * 10;
+
+  // Refine confidence downward if Finnhub strongly contradicts the trade.
+  if (deep.confidence === "High" && finnhubMeta.available) {
+    if (finnhubMeta.analystLabel === "negative" || finnhubMeta.peerLabel === "negative") {
+      deep.confidence = "Medium";
+    }
+    if (finnhubMeta.targetSupportsTrade === false && typeof finnhubMeta.targetUpsidePct === "number" && finnhubMeta.targetUpsidePct < -3) {
+      deep.confidence = "Low";
+    }
+  }
 
   // Prefer a more specific reason string than "Serious negative signal detected: lawsuit"
   // when the only red flag is a generic lawsuit mention with no positive counterweight.
@@ -643,7 +691,7 @@ async function runOne(
       sourceTables: input.sourceTables,
       technicalScore: pre.technical,
       newsScore: d.news,
-      peerScore: d.peer,
+      peerScore: finnhubMeta.available ? finnhubMeta.peerScore : d.peer,
       industryScore: d.industry,
       riskScore: (d.risk + pre.risk) / 2,
       finalScore,
@@ -654,6 +702,7 @@ async function runOne(
       elapsedMs: Date.now() - t0,
       modelUsed: PROVIDER,
       bestWindow: bw.window,
+      finnhub: finnhubMeta,
     },
   };
 }
@@ -684,14 +733,20 @@ export async function runSwingTraderWatch(
   admin: SupabaseClient,
   rawInputs: SwingTickerInput[],
   emailRunId?: string,
+  userId?: string,
 ): Promise<SwingResult> {
   const started = Date.now();
   const apiKey = Deno.env.get("EXA_API_KEY") || "";
   const today = swingCacheBucket();
   const inputs = dedupeInputs(rawInputs);
 
+  // Best-effort outcome update for older training examples. Never blocks email.
+  try { await updateOutcomes(admin); } catch (e) {
+    console.log(`[ml-training] outcome_update_wrapper_failed reason=${(e as Error).message}`);
+  }
+
   console.log(`[swing-cache] now_et=${nowETString()} cache_bucket=${today} unique_tickers=${inputs.length}`);
-  console.log(JSON.stringify({ phase: "swing", event: "start", provider: PROVIDER, unique_tickers: inputs.length, has_key: !!apiKey, cache_bucket: today }));
+  console.log(JSON.stringify({ phase: "swing", event: "start", provider: PROVIDER, unique_tickers: inputs.length, has_key: !!apiKey, cache_bucket: today, has_finnhub_key: !!Deno.env.get("FINNHUB_API_KEY") }));
 
   const emptyBase = (): Omit<SwingResult, "previous" | "elapsedMs"> => ({
     modelUsed: PROVIDER, uniqueChecked: inputs.length,
@@ -877,18 +932,7 @@ export async function runSwingTraderWatch(
 
   const previous = await loadPrevious(admin);
 
-  console.log(JSON.stringify({
-    phase: "swing", event: "done", provider: PROVIDER,
-    unique_checked: inputs.length,
-    selected: selected?.ticker || "no_candidate",
-    rejected: rejected.length, watch_only: watchOnly.length,
-    failed: failed.length, skipped: skipped.length,
-    cache_hits: totalCacheHits, exa_attempts: totalExaAttempts,
-    unavailable_reason: unavailableReason ?? null,
-    elapsed_ms: Date.now() - started,
-  }));
-
-  return {
+  const preliminary: SwingResult = {
     runId, modelUsed: PROVIDER, uniqueChecked: inputs.length,
     totalSelected: selected ? 1 : 0,
     totalRejected: rejected.length,
@@ -904,6 +948,31 @@ export async function runSwingTraderWatch(
     previous,
     elapsedMs: Date.now() - started,
   };
+
+  // Save one training example per checked ticker. Best-effort.
+  try {
+    await saveTrainingExamples(admin, preliminary, inputs, userId ?? null, runId ?? null);
+  } catch (e) {
+    console.log(`[ml-training] save_wrapper_failed reason=${(e as Error).message}`);
+  }
+  try {
+    preliminary.mlStats = await getMLTrainingStats(admin);
+  } catch { /* noop */ }
+
+  console.log(JSON.stringify({
+    phase: "swing", event: "done", provider: PROVIDER,
+    unique_checked: inputs.length,
+    selected: selected?.ticker || "no_candidate",
+    rejected: rejected.length, watch_only: watchOnly.length,
+    failed: failed.length, skipped: skipped.length,
+    cache_hits: totalCacheHits, exa_attempts: totalExaAttempts,
+    unavailable_reason: unavailableReason ?? null,
+    ml_saved_today: preliminary.mlStats?.savedToday ?? null,
+    ml_completed: preliminary.mlStats?.completed ?? null,
+    elapsed_ms: Date.now() - started,
+  }));
+
+  return preliminary;
 }
 
 async function loadPrevious(admin: SupabaseClient): Promise<SwingResult["previous"]> {
@@ -991,8 +1060,11 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
           <tr><td style="padding:3px 0;color:#64748b;">Confidence</td><td>${esc(d.confidence || "—")}</td></tr>
           ${planRows}
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Latest catalyst</td><td>${esc(d.latest_catalyst || "—")}</td></tr>
-          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Peer / competitor context</td><td>${esc(d.peer_context || "—")}</td></tr>
-          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Industry context</td><td>${esc(d.industry_context || "—")}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Sector / industry</td><td>${esc(s.finnhub?.sector || s.finnhub?.industry || d.industry || "Not available")}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Peer confirmation</td><td>${esc(s.finnhub?.peerConfirmation || "Peer confirmation: Not available")}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Analyst context</td><td>${esc(s.finnhub?.analystContext || "Analyst context: Not available")}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Peer / competitor context (Exa)</td><td>${esc(d.peer_context || "—")}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Industry context (Exa)</td><td>${esc(d.industry_context || "—")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Key risks</td><td>${(d.key_risks || []).map(esc).join("; ") || "—"}</td></tr>
         </table>
         ${Array.isArray(d.sources) && d.sources.length > 0 ? `<p style="margin:8px 0 0 0;font-size:11px;color:#475569;">Sources: ${d.sources.slice(0, 4).map((x) => `<a href="${esc(x.url)}" style="color:#0891b2;">${esc(x.title || "source")}</a>`).join(" · ")}</p>` : ""}
@@ -1026,8 +1098,11 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
 
   const rowsHtml = combined.map((t) => {
     const d = t.deep;
+    const fnAvail = t.finnhub?.available;
+    const fnPeers = fnAvail ? "✅" : "❔";
+    const fnAnalyst = fnAvail ? "✅" : "❔";
     const checks = d
-      ? `Tech ✅ · News ${checkIcon(d.news_check)} · Peers ${checkIcon(d.peer_check)} · Industry ${checkIcon(d.industry_check)} · Risk ${checkIcon(d.risk_check)}`
+      ? `Tech ✅ · Exa News ${checkIcon(d.news_check)} · Finnhub Peers ${fnPeers} · Finnhub Analyst ${fnAnalyst} · Risk ${checkIcon(d.risk_check)}`
       : (t.status === "skipped_due_to_exa_limit" ? "Skipped (Exa limit)" : "Deep check failed");
     let reason = t.rejectionReason || (d?.news_check === "unavailable" ? "Fresh news check unavailable" : (d?.positive_factors?.[0] || ""));
     if (t.status === "passed_not_selected" && !reason) reason = "Strong setup but selected ticker ranked higher.";
@@ -1068,5 +1143,6 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
       Last candidate: <strong>${tickerLink(appBaseUrl, p.ticker)}</strong>${p.company ? ` · ${esc(p.company)}` : ""} · selected on ${esc(p.selectedDate)}${typeof p.selectedPrice === "number" ? ` at $${p.selectedPrice.toFixed(2)}` : ""}. Status: <strong>${esc(p.status)}</strong>. Target hit: ${p.targetHit ? "yes" : "no"} · Stop hit: ${p.stopHit ? "yes" : "no"}.
     </div>` : "";
 
-  return `${swingSection}\n${checkedSection}\n${prevSection}`;
+  const mlSection = r.mlStats ? buildMLTrainingSectionHTML(r.mlStats) : "";
+  return `${swingSection}\n${checkedSection}\n${prevSection}\n${mlSection}`;
 }
