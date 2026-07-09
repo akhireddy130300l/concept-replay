@@ -106,8 +106,8 @@ export async function saveTrainingExamples(
         catalyst_summary: d?.latest_catalyst ?? null,
         key_risks: d?.key_risks ?? null,
         ...signalFlags,
-        has_material_lawsuit_signal: material,
-        has_generic_lawsuit_noise: lawsuit && (d?.positive_factors?.length || 0) === 0,
+        has_material_lawsuit_signal: (d as any)?.legal_classification === "material_company_lawsuit",
+        has_generic_lawsuit_noise: (d as any)?.legal_classification === "generic_law_firm_noise",
         has_high_valuation_signal: null,
 
         finnhub_available: (r as any).finnhub?.available ?? null,
@@ -132,13 +132,45 @@ export async function saveTrainingExamples(
       });
     }
     if (rows.length === 0) return 0;
-    const { error } = await admin.from("swing_training_examples").insert(rows);
+    const { data: inserted, error } = await admin
+      .from("swing_training_examples")
+      .insert(rows)
+      .select("id, ticker, checked_at, current_price, upper_watch_area, lower_watch_area");
     if (error) {
       console.log(`[ml-training] insert_failed reason=${error.message}`);
       return 0;
     }
-    console.log(`[ml-training] examples_saved count=${rows.length} run_id=${runId ?? "null"}`);
-    return rows.length;
+    const insertedCount = inserted?.length ?? 0;
+    console.log(`[ml-training] examples_inserted count=${insertedCount} run_id=${runId ?? "null"}`);
+
+    // Immediately create one pending outcome row per new training example
+    // so the ML pipeline is easy to verify. Best-effort.
+    if (inserted && inserted.length > 0) {
+      const pendingRows = inserted.map((ex: any) => ({
+        training_example_id: ex.id,
+        ticker: ex.ticker,
+        checked_at: ex.checked_at,
+        sessions_elapsed: 0,
+        price_at_check: ex.current_price ?? null,
+        current_price: ex.current_price ?? null,
+        target_hit: false,
+        stop_hit: false,
+        label_3_session: "pending",
+        label_10_session: "pending",
+        label_20_session: "pending",
+        label_40_session: "pending",
+        final_label: "pending",
+      }));
+      const { error: outErr } = await admin
+        .from("swing_training_outcomes")
+        .upsert(pendingRows, { onConflict: "training_example_id" });
+      if (outErr) {
+        console.log(`[ml-training] pending_outcomes_failed reason=${outErr.message}`);
+      } else {
+        console.log(`[ml-training] pending_outcomes_created count=${pendingRows.length}`);
+      }
+    }
+    return insertedCount;
   } catch (e) {
     console.log(`[ml-training] insert_threw reason=${(e as Error).message}`);
     return 0;
