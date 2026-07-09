@@ -746,14 +746,9 @@ async function runOne(
     }
   }
 
-  // Prefer a more specific reason string than "Serious negative signal detected: lawsuit"
-  // when the only red flag is a generic lawsuit mention with no positive counterweight.
-  let refinedReason = deep.rejection_reason || undefined;
-  const redFlags = deep.red_flags || [];
-  const positives = deep.positive_factors || [];
-  if (refinedReason && redFlags.length === 1 && redFlags[0] === "lawsuit" && positives.length === 0) {
-    refinedReason = "Generic lawsuit noise — no fresh company-specific catalyst.";
-  }
+  // Legal-noise refinement is now handled in analyseExaResults via
+  // legal_classification. Keep the deep.rejection_reason as-is.
+  const refinedReason = deep.rejection_reason || undefined;
 
   return {
     result: {
