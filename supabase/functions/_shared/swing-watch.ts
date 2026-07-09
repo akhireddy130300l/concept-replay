@@ -1134,7 +1134,7 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Analyst context</td><td>${esc(s.finnhub?.analystContext || "Analyst context: Not available")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Peer / competitor context (Exa)</td><td>${esc(d.peer_context || "—")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Industry context (Exa)</td><td>${esc(d.industry_context || "—")}</td></tr>
-          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Key risks</td><td>${(d.key_risks || []).map(esc).join("; ") || "—"}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Key risks</td><td>${(d.key_risks && d.key_risks.length > 0) ? d.key_risks.map(esc).join("; ") : "No material risks detected"}</td></tr>
         </table>
         ${Array.isArray(d.sources) && d.sources.length > 0 ? `<p style="margin:8px 0 0 0;font-size:11px;color:#475569;">Sources: ${d.sources.slice(0, 4).map((x) => `<a href="${esc(x.url)}" style="color:#0891b2;">${esc(x.title || "source")}</a>`).join(" · ")}</p>` : ""}
         ${disclaimer}
