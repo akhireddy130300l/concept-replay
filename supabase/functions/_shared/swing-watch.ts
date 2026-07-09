@@ -1024,6 +1024,8 @@ export async function runSwingTraderWatch(
   try {
     preliminary.mlStats = await getMLTrainingStats(admin);
   } catch { /* noop */ }
+  console.log(`[ml-export] dataset_view_ready name=swing_ml_training_dataset_v1`);
+
 
   console.log(JSON.stringify({
     phase: "swing", event: "done", provider: PROVIDER,
