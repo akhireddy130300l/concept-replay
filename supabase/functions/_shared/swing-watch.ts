@@ -47,6 +47,7 @@ export type SwingDeepCheck = {
   key_risks?: string[];
   red_flags?: string[];
   positive_factors?: string[];
+  legal_classification?: "generic_law_firm_noise" | "material_company_lawsuit" | "regulatory_investigation" | null;
   swing_suitability?: "strong_candidate" | "possible_candidate" | "watch_only" | "rejected" | "needs_confirmation";
   rejection_reason?: string;
   confidence?: "Low" | "Medium" | "High";
