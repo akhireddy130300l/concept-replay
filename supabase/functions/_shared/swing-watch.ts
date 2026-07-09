@@ -47,6 +47,7 @@ export type SwingDeepCheck = {
   key_risks?: string[];
   red_flags?: string[];
   positive_factors?: string[];
+  legal_classification?: "generic_law_firm_noise" | "material_company_lawsuit" | "regulatory_investigation" | null;
   swing_suitability?: "strong_candidate" | "possible_candidate" | "watch_only" | "rejected" | "needs_confirmation";
   rejection_reason?: string;
   confidence?: "Low" | "Medium" | "High";
@@ -337,6 +338,50 @@ const SERIOUS_NEGATIVES = new Set([
   "regulatory issue", "guidance cut", "earnings miss", "bankruptcy risk", "recall",
 ]);
 
+// Generic law-firm/class-action solicitation noise: shareholder alerts, law-firm
+// press releases, "investigation on behalf of" — do NOT auto-reject on these.
+const GENERIC_LEGAL_RX = /shareholder\s+alert|encourages?\s+investors|investigation\s+on\s+behalf\s+of|contact(?:\s+us)?\s+(?:to\s+discuss|about\s+your)|notice\s+of\s+pendency|(?:rosen|schall|pomerantz|bragar\s+eagel|levi\s*&\s*korsinsky|robbins\s+geller|kessler\s+topaz|faruqi|kirby\s+mcinerney|hagens\s+berman|glancy\s+prongay|bronstein\s+gewirtz|holzer|johnson\s+fistel|the\s+gross\s+law|schall\s+law|the\s+klein\s+law)\s+(?:law|firm|pllc|llp)?|law\s+firm\s+(?:investigating|announces)|deadline\s+to\s+(?:contact|join)\s+(?:the\s+)?law|lead\s+plaintiff\s+deadline|class[- ]action\s+(?:reminder|deadline)/i;
+
+// Material company-specific legal/regulatory risk indicators.
+const MATERIAL_LEGAL_RX = /sec\s+(?:charges|files|complaint|enforcement|subpoena|fines?)|doj\s+(?:charges|indict|investigation|probe)|ftc\s+(?:sues|complaint|blocks)|(?:court|judge)\s+(?:ruling|orders?|verdict|judgment|injunction)|jury\s+(?:verdict|awards)|settle(?:s|d|ment)\s+(?:for\s+)?\$|files?\s+for\s+bankruptcy|antitrust\s+(?:lawsuit|charges|suit|action)|patent\s+infringement\s+(?:verdict|ruling)|guilty\s+plea|criminal\s+(?:charges|indictment)/i;
+
+const LAWSUIT_HIT_RX = /\blawsuit|sued\b|class[- ]action\b/i;
+
+type LegalClassification = SwingDeepCheck["legal_classification"];
+
+function classifyLegalRisk(results: ExaResult[]): { classification: LegalClassification; materialSourceUrl?: string } {
+  let sawGeneric = false;
+  let sawMaterial = false;
+  let materialUrl: string | undefined;
+  const CREDIBLE_HOST_RX = /(sec\.gov|reuters\.com|bloomberg\.com|wsj\.com|ft\.com|nytimes\.com|cnbc\.com|apnews\.com)/i;
+
+  for (const r of results) {
+    const title = String(r?.title || "");
+    const highlights = Array.isArray(r?.highlights) ? r.highlights.join(" ") : "";
+    const combined = `${title} ${highlights}`;
+    if (!LAWSUIT_HIT_RX.test(combined) && !/investigat(?:ion|ing)/i.test(combined)) continue;
+    const isGeneric = GENERIC_LEGAL_RX.test(combined);
+    const isMaterial = MATERIAL_LEGAL_RX.test(combined) || (CREDIBLE_HOST_RX.test(String(r?.url || "")) && !isGeneric);
+    if (isMaterial) { sawMaterial = true; materialUrl = materialUrl || r?.url; }
+    else if (isGeneric) sawGeneric = true;
+  }
+  if (sawMaterial) return { classification: "material_company_lawsuit", materialSourceUrl: materialUrl };
+  if (sawGeneric) return { classification: "generic_law_firm_noise" };
+  return { classification: null };
+}
+
+const SERIOUS_REASON_MAP: Record<string, string> = {
+  "lawsuit": "Material legal/regulatory risk confirmed",
+  "investigation": "SEC/DOJ/FTC investigation reported",
+  "FDA rejection": "Material regulatory issue confirmed (FDA rejection)",
+  "trial failure": "Clinical trial failure reported",
+  "regulatory issue": "Material regulatory issue confirmed",
+  "guidance cut": "Earnings/guidance risk outweighs setup (guidance cut)",
+  "earnings miss": "Earnings/guidance risk outweighs setup (earnings miss)",
+  "bankruptcy risk": "Bankruptcy risk reported",
+  "recall": "Product recall reported",
+};
+
 function analyseExaResults(input: SwingTickerInput, results: ExaResult[]): SwingDeepCheck {
   const positive = new Set<string>();
   const negative = new Set<string>();
@@ -375,6 +420,26 @@ function analyseExaResults(input: SwingTickerInput, results: ExaResult[]): Swing
     }
   }
 
+  // ── Legal risk classification (generic law-firm noise vs material) ────
+  let legalClassification: LegalClassification = null;
+  if (negative.has("lawsuit") || negative.has("investigation")) {
+    const { classification } = classifyLegalRisk(results);
+    legalClassification = classification;
+    console.log(`[risk-classifier] ticker=${input.ticker} legal_classification=${classification ?? "unclassified"} material=${classification === "material_company_lawsuit"}`);
+    if (classification === "generic_law_firm_noise") {
+      // Downgrade: not serious, not counted as negative.
+      negative.delete("lawsuit");
+      negative.delete("investigation");
+      negative.add("generic lawsuit noise");
+    } else if (classification === "material_company_lawsuit") {
+      // Keep 'lawsuit' as a serious red flag.
+    } else if (!classification) {
+      // Neither generic nor material clearly confirmed — treat as caution, not auto-reject.
+      negative.delete("lawsuit");
+      negative.add("unconfirmed legal mention");
+    }
+  }
+
   const redFlags = Array.from(negative).filter((n) => SERIOUS_NEGATIVES.has(n));
   const hasSerious = redFlags.length > 0;
   const negScore = negative.size;
@@ -399,34 +464,39 @@ function analyseExaResults(input: SwingTickerInput, results: ExaResult[]): Swing
 
   if (hasSerious) {
     suitability = "rejected";
-    rejection = `Serious negative signal detected: ${redFlags.join(", ")}.`;
+    rejection = redFlags.map((f) => SERIOUS_REASON_MAP[f] || `Material risk: ${f}`).join("; ");
   } else if (negScore > posScore && negScore >= 2) {
     suitability = "rejected";
-    rejection = `Negative signals outweigh positives (${negScore} vs ${posScore}).`;
+    const topNeg = Array.from(negative).slice(0, 3).join(", ");
+    rejection = `News mixed; ${negScore} negative signals (${topNeg}) outweigh ${posScore} positive.`;
   } else if (posScore >= 2 && negScore === 0) {
     suitability = "strong_candidate";
   } else if (posScore >= 1 && negScore <= 1) {
     suitability = "possible_candidate";
   } else if (news_check === "unavailable") {
     suitability = "needs_confirmation";
+  } else if (legalClassification === "generic_law_firm_noise" && posScore === 0) {
+    suitability = "watch_only";
+    rejection = "Generic lawsuit noise ignored; no clean fresh catalyst found.";
   } else {
     suitability = "watch_only";
   }
 
   const confidence: "Low" | "Medium" | "High" =
     hasSerious ? "Low" :
+    legalClassification === "generic_law_firm_noise" ? "Medium" :
     posScore >= 3 && negScore === 0 ? "High" :
     posScore >= 1 ? "Medium" : "Low";
 
-  const latest_catalyst =
-    catalystSnippets[0] ||
+  const cleanCatalyst =
+    catalystSnippets.find((s) => !LAWSUIT_HIT_RX.test(s)) ||
     (positive.size > 0 ? `Positive signals: ${Array.from(positive).join(", ")}.` : "") ||
-    (results[0]?.title ? String(results[0].title) : "No fresh catalyst detected.");
+    (legalClassification === "generic_law_firm_noise" ? "No clean fresh catalyst found (only generic legal noise)." : "No fresh catalyst detected.");
 
   return {
     ticker: input.ticker,
     company: input.company,
-    latest_catalyst,
+    latest_catalyst: cleanCatalyst,
     news_check,
     peer_check,
     industry_check,
@@ -437,6 +507,7 @@ function analyseExaResults(input: SwingTickerInput, results: ExaResult[]): Swing
     key_risks: Array.from(negative),
     red_flags: redFlags,
     positive_factors: Array.from(positive),
+    legal_classification: legalClassification,
     swing_suitability: suitability,
     rejection_reason: rejection,
     confidence,
@@ -675,14 +746,9 @@ async function runOne(
     }
   }
 
-  // Prefer a more specific reason string than "Serious negative signal detected: lawsuit"
-  // when the only red flag is a generic lawsuit mention with no positive counterweight.
-  let refinedReason = deep.rejection_reason || undefined;
-  const redFlags = deep.red_flags || [];
-  const positives = deep.positive_factors || [];
-  if (refinedReason && redFlags.length === 1 && redFlags[0] === "lawsuit" && positives.length === 0) {
-    refinedReason = "Generic lawsuit noise — no fresh company-specific catalyst.";
-  }
+  // Legal-noise refinement is now handled in analyseExaResults via
+  // legal_classification. Keep the deep.rejection_reason as-is.
+  const refinedReason = deep.rejection_reason || undefined;
 
   return {
     result: {
@@ -958,6 +1024,8 @@ export async function runSwingTraderWatch(
   try {
     preliminary.mlStats = await getMLTrainingStats(admin);
   } catch { /* noop */ }
+  console.log(`[ml-export] dataset_view_ready name=swing_ml_training_dataset_v1`);
+
 
   console.log(JSON.stringify({
     phase: "swing", event: "done", provider: PROVIDER,
@@ -968,6 +1036,7 @@ export async function runSwingTraderWatch(
     cache_hits: totalCacheHits, exa_attempts: totalExaAttempts,
     unavailable_reason: unavailableReason ?? null,
     ml_saved_today: preliminary.mlStats?.savedToday ?? null,
+    ml_total_outcomes: preliminary.mlStats?.totalOutcomes ?? null,
     ml_completed: preliminary.mlStats?.completed ?? null,
     elapsed_ms: Date.now() - started,
   }));
@@ -1065,7 +1134,7 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Analyst context</td><td>${esc(s.finnhub?.analystContext || "Analyst context: Not available")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Peer / competitor context (Exa)</td><td>${esc(d.peer_context || "—")}</td></tr>
           <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Industry context (Exa)</td><td>${esc(d.industry_context || "—")}</td></tr>
-          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Key risks</td><td>${(d.key_risks || []).map(esc).join("; ") || "—"}</td></tr>
+          <tr><td style="padding:3px 0;color:#64748b;vertical-align:top;">Key risks</td><td>${(d.key_risks && d.key_risks.length > 0) ? d.key_risks.map(esc).join("; ") : "No material risks detected"}</td></tr>
         </table>
         ${Array.isArray(d.sources) && d.sources.length > 0 ? `<p style="margin:8px 0 0 0;font-size:11px;color:#475569;">Sources: ${d.sources.slice(0, 4).map((x) => `<a href="${esc(x.url)}" style="color:#0891b2;">${esc(x.title || "source")}</a>`).join(" · ")}</p>` : ""}
         ${disclaimer}

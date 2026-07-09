@@ -13,6 +13,7 @@ export type MLTrainingStats = {
   pending: number;
   completed: number;
   totalRows: number;
+  totalOutcomes: number;
 };
 
 const KEYWORD_SIGNAL_KEYS: Record<string, string> = {
@@ -57,8 +58,6 @@ export async function saveTrainingExamples(
       for (const [kw, key] of Object.entries(KEYWORD_SIGNAL_KEYS)) {
         signalFlags[key] = positives.has(kw) || negatives.has(kw);
       }
-      const lawsuit = negatives.has("lawsuit");
-      const material = lawsuit && (d?.red_flags || []).includes("lawsuit") && (d?.positive_factors?.length || 0) === 0 === false;
 
       rows.push({
         user_id: userId,
@@ -105,8 +104,8 @@ export async function saveTrainingExamples(
         catalyst_summary: d?.latest_catalyst ?? null,
         key_risks: d?.key_risks ?? null,
         ...signalFlags,
-        has_material_lawsuit_signal: material,
-        has_generic_lawsuit_noise: lawsuit && (d?.positive_factors?.length || 0) === 0,
+        has_material_lawsuit_signal: (d as any)?.legal_classification === "material_company_lawsuit",
+        has_generic_lawsuit_noise: (d as any)?.legal_classification === "generic_law_firm_noise",
         has_high_valuation_signal: null,
 
         finnhub_available: (r as any).finnhub?.available ?? null,
@@ -131,13 +130,45 @@ export async function saveTrainingExamples(
       });
     }
     if (rows.length === 0) return 0;
-    const { error } = await admin.from("swing_training_examples").insert(rows);
+    const { data: inserted, error } = await admin
+      .from("swing_training_examples")
+      .insert(rows)
+      .select("id, ticker, checked_at, current_price, upper_watch_area, lower_watch_area");
     if (error) {
       console.log(`[ml-training] insert_failed reason=${error.message}`);
       return 0;
     }
-    console.log(`[ml-training] examples_saved count=${rows.length} run_id=${runId ?? "null"}`);
-    return rows.length;
+    const insertedCount = inserted?.length ?? 0;
+    console.log(`[ml-training] examples_inserted count=${insertedCount} run_id=${runId ?? "null"}`);
+
+    // Immediately create one pending outcome row per new training example
+    // so the ML pipeline is easy to verify. Best-effort.
+    if (inserted && inserted.length > 0) {
+      const pendingRows = inserted.map((ex: any) => ({
+        training_example_id: ex.id,
+        ticker: ex.ticker,
+        checked_at: ex.checked_at,
+        sessions_elapsed: 0,
+        price_at_check: ex.current_price ?? null,
+        current_price: ex.current_price ?? null,
+        target_hit: false,
+        stop_hit: false,
+        label_3_session: "pending",
+        label_10_session: "pending",
+        label_20_session: "pending",
+        label_40_session: "pending",
+        final_label: "pending",
+      }));
+      const { error: outErr } = await admin
+        .from("swing_training_outcomes")
+        .upsert(pendingRows, { onConflict: "training_example_id" });
+      if (outErr) {
+        console.log(`[ml-training] pending_outcomes_failed reason=${outErr.message}`);
+      } else {
+        console.log(`[ml-training] pending_outcomes_created count=${pendingRows.length}`);
+      }
+    }
+    return insertedCount;
   } catch (e) {
     console.log(`[ml-training] insert_threw reason=${(e as Error).message}`);
     return 0;
@@ -257,31 +288,34 @@ export async function getMLTrainingStats(admin: SupabaseClient): Promise<MLTrain
   try {
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
-    const [savedToday, totalRows, completed, pending] = await Promise.all([
+    const [savedToday, totalRows, completed, pending, totalOutcomes] = await Promise.all([
       admin.from("swing_training_examples").select("id", { count: "exact", head: true }).gte("created_at", startOfDay.toISOString()),
       admin.from("swing_training_examples").select("id", { count: "exact", head: true }),
       admin.from("swing_training_outcomes").select("id", { count: "exact", head: true }).neq("final_label", "pending"),
       admin.from("swing_training_outcomes").select("id", { count: "exact", head: true }).eq("final_label", "pending"),
+      admin.from("swing_training_outcomes").select("id", { count: "exact", head: true }),
     ]);
     return {
       savedToday: savedToday.count || 0,
       totalRows: totalRows.count || 0,
       completed: completed.count || 0,
       pending: pending.count || 0,
+      totalOutcomes: totalOutcomes.count || 0,
     };
   } catch {
-    return { savedToday: 0, totalRows: 0, completed: 0, pending: 0 };
+    return { savedToday: 0, totalRows: 0, completed: 0, pending: 0, totalOutcomes: 0 };
   }
 }
 
 export function buildMLTrainingSectionHTML(stats: MLTrainingStats): string {
-  const warning = stats.completed < 1000
-    ? ` Model training will become useful after about 1,000+ completed examples.`
+  const readiness = stats.completed < 1000
+    ? ` ML model not trained yet. Collecting training data. Useful model training typically starts after about 1,000+ completed outcome examples.`
     : "";
   return `
     <h3 style="margin:20px 0 6px 0;color:#0f172a;font-size:14px;">🧠 ML Training Data</h3>
     <p style="margin:0;font-size:12px;color:#475569;line-height:1.6;">
-      ${stats.savedToday} examples saved today · ${stats.pending} pending outcomes · ${stats.completed} completed outcomes · ${stats.totalRows} total rows.${warning}
+      ${stats.savedToday} examples saved today · ${stats.pending} pending outcome rows · ${stats.completed} completed outcomes · ${stats.totalRows} total training examples · ${stats.totalOutcomes} total outcome rows.${readiness}
       <br><em style="color:#94a3b8;">This is not financial advice. Model output will be an AI probability estimate, not a guaranteed prediction.</em>
     </p>`;
 }
+
