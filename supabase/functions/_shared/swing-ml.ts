@@ -58,8 +58,6 @@ export async function saveTrainingExamples(
       for (const [kw, key] of Object.entries(KEYWORD_SIGNAL_KEYS)) {
         signalFlags[key] = positives.has(kw) || negatives.has(kw);
       }
-      const lawsuit = negatives.has("lawsuit");
-      const material = lawsuit && (d?.red_flags || []).includes("lawsuit") && (d?.positive_factors?.length || 0) === 0 === false;
 
       rows.push({
         user_id: userId,
