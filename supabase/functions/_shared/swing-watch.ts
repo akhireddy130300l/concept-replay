@@ -1034,6 +1034,7 @@ export async function runSwingTraderWatch(
     cache_hits: totalCacheHits, exa_attempts: totalExaAttempts,
     unavailable_reason: unavailableReason ?? null,
     ml_saved_today: preliminary.mlStats?.savedToday ?? null,
+    ml_total_outcomes: preliminary.mlStats?.totalOutcomes ?? null,
     ml_completed: preliminary.mlStats?.completed ?? null,
     elapsed_ms: Date.now() - started,
   }));
