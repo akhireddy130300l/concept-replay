@@ -13,6 +13,7 @@ export type MLTrainingStats = {
   pending: number;
   completed: number;
   totalRows: number;
+  totalOutcomes: number;
 };
 
 const KEYWORD_SIGNAL_KEYS: Record<string, string> = {
