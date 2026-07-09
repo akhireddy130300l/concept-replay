@@ -288,31 +288,34 @@ export async function getMLTrainingStats(admin: SupabaseClient): Promise<MLTrain
   try {
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
-    const [savedToday, totalRows, completed, pending] = await Promise.all([
+    const [savedToday, totalRows, completed, pending, totalOutcomes] = await Promise.all([
       admin.from("swing_training_examples").select("id", { count: "exact", head: true }).gte("created_at", startOfDay.toISOString()),
       admin.from("swing_training_examples").select("id", { count: "exact", head: true }),
       admin.from("swing_training_outcomes").select("id", { count: "exact", head: true }).neq("final_label", "pending"),
       admin.from("swing_training_outcomes").select("id", { count: "exact", head: true }).eq("final_label", "pending"),
+      admin.from("swing_training_outcomes").select("id", { count: "exact", head: true }),
     ]);
     return {
       savedToday: savedToday.count || 0,
       totalRows: totalRows.count || 0,
       completed: completed.count || 0,
       pending: pending.count || 0,
+      totalOutcomes: totalOutcomes.count || 0,
     };
   } catch {
-    return { savedToday: 0, totalRows: 0, completed: 0, pending: 0 };
+    return { savedToday: 0, totalRows: 0, completed: 0, pending: 0, totalOutcomes: 0 };
   }
 }
 
 export function buildMLTrainingSectionHTML(stats: MLTrainingStats): string {
-  const warning = stats.completed < 1000
-    ? ` Model training will become useful after about 1,000+ completed examples.`
+  const readiness = stats.completed < 1000
+    ? ` ML model not trained yet. Collecting training data. Useful model training typically starts after about 1,000+ completed outcome examples.`
     : "";
   return `
     <h3 style="margin:20px 0 6px 0;color:#0f172a;font-size:14px;">🧠 ML Training Data</h3>
     <p style="margin:0;font-size:12px;color:#475569;line-height:1.6;">
-      ${stats.savedToday} examples saved today · ${stats.pending} pending outcomes · ${stats.completed} completed outcomes · ${stats.totalRows} total rows.${warning}
+      ${stats.savedToday} examples saved today · ${stats.pending} pending outcome rows · ${stats.completed} completed outcomes · ${stats.totalRows} total training examples · ${stats.totalOutcomes} total outcome rows.${readiness}
       <br><em style="color:#94a3b8;">This is not financial advice. Model output will be an AI probability estimate, not a guaranteed prediction.</em>
     </p>`;
 }
+
