@@ -1206,7 +1206,7 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
 
   const checkedSection = `
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🔎 Tickers Checked Today</h3>
-    <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">Provider: Exa · ${r.uniqueChecked} unique tickers · ${r.totalExaAttempts} fresh Exa searches · ${r.totalCacheHits} cache hits · ${r.totalSelected} selected · ${r.totalRejected} rejected · ${r.totalWatchOnly} watch only · ${r.totalFailed} failed${r.totalSkipped ? ` · ${r.totalSkipped} skipped` : ""}. Showing all ${combined.length} rows.</p>
+    <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">Provider: Exa · ${r.uniqueChecked} unique tickers · ${r.totalExaAttempts} fresh Exa searches · ${r.totalCacheHits} cache hits · ${r.totalSelected} selected · ${r.totalPassedNotSelected} passed (not selected) · ${r.totalRejected} rejected · ${r.totalWatchOnly} watch only · ${r.totalFailed} failed${r.totalSkipped ? ` · ${r.totalSkipped} skipped` : ""}. Showing all ${combined.length} rows.</p>
     <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
