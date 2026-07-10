@@ -93,6 +93,7 @@ export type SwingResult = {
   modelUsed: string;
   uniqueChecked: number;
   totalSelected: number;
+  totalPassedNotSelected: number;
   totalRejected: number;
   totalWatchOnly: number;
   totalFailed: number;
@@ -816,7 +817,7 @@ export async function runSwingTraderWatch(
 
   const emptyBase = (): Omit<SwingResult, "previous" | "elapsedMs"> => ({
     modelUsed: PROVIDER, uniqueChecked: inputs.length,
-    totalSelected: 0, totalRejected: 0, totalWatchOnly: 0, totalFailed: 0, totalSkipped: 0,
+    totalSelected: 0, totalPassedNotSelected: 0, totalRejected: 0, totalWatchOnly: 0, totalFailed: 0, totalSkipped: 0,
     totalCacheHits: 0, totalExaAttempts: 0,
     passed: [], rejected: [], watchOnly: [], failed: [], skipped: [], all: [],
   });
@@ -903,6 +904,10 @@ export async function runSwingTraderWatch(
     if (selectedPlan && selected.bestWindow && selected.bestWindow !== "N/A") {
       selectedPlan.holdingWindow = selected.bestWindow;
     }
+  }
+  // Any remaining "passed" rows are strong candidates that lost the tie-break.
+  for (const p of passed) {
+    if (p.status !== "passed_not_selected") p.status = "passed_not_selected";
   }
 
   const totalCacheHits = results.filter((r) => r.cacheHit).length;
@@ -1001,6 +1006,7 @@ export async function runSwingTraderWatch(
   const preliminary: SwingResult = {
     runId, modelUsed: PROVIDER, uniqueChecked: inputs.length,
     totalSelected: selected ? 1 : 0,
+    totalPassedNotSelected: passed.length,
     totalRejected: rejected.length,
     totalWatchOnly: watchOnly.length + needsConf.length + newsUnavailable.length,
     totalFailed: failed.length,
@@ -1016,28 +1022,40 @@ export async function runSwingTraderWatch(
   };
 
   // Save one training example per checked ticker. Best-effort.
+  let savedThisRun = 0;
   try {
-    await saveTrainingExamples(admin, preliminary, inputs, userId ?? null, runId ?? null);
+    savedThisRun = await saveTrainingExamples(admin, preliminary, inputs, userId ?? null, runId ?? null);
   } catch (e) {
     console.log(`[ml-training] save_wrapper_failed reason=${(e as Error).message}`);
   }
   try {
-    preliminary.mlStats = await getMLTrainingStats(admin);
+    preliminary.mlStats = await getMLTrainingStats(admin, savedThisRun);
   } catch { /* noop */ }
   console.log(`[ml-export] dataset_view_ready name=swing_ml_training_dataset_v1`);
 
+  // Count-consistency check for the email summary line.
+  const summed = preliminary.totalSelected + preliminary.totalPassedNotSelected
+    + preliminary.totalRejected + preliminary.totalWatchOnly
+    + preliminary.totalFailed + preliminary.totalSkipped;
+  if (summed !== preliminary.uniqueChecked) {
+    console.log(`[swing-counts] mismatch unique=${preliminary.uniqueChecked} summed=${summed} selected=${preliminary.totalSelected} passed_not_selected=${preliminary.totalPassedNotSelected} rejected=${preliminary.totalRejected} watch_only=${preliminary.totalWatchOnly} failed=${preliminary.totalFailed} skipped=${preliminary.totalSkipped}`);
+  }
 
   console.log(JSON.stringify({
     phase: "swing", event: "done", provider: PROVIDER,
     unique_checked: inputs.length,
     selected: selected?.ticker || "no_candidate",
+    passed_not_selected: preliminary.totalPassedNotSelected,
     rejected: rejected.length, watch_only: watchOnly.length,
     failed: failed.length, skipped: skipped.length,
     cache_hits: totalCacheHits, exa_attempts: totalExaAttempts,
     unavailable_reason: unavailableReason ?? null,
+    ml_saved_this_run: savedThisRun,
     ml_saved_today: preliminary.mlStats?.savedToday ?? null,
     ml_total_outcomes: preliminary.mlStats?.totalOutcomes ?? null,
     ml_completed: preliminary.mlStats?.completed ?? null,
+    ml_completed_10: preliminary.mlStats?.completed10Session ?? null,
+    ml_ready: preliminary.mlStats?.ready ?? null,
     elapsed_ms: Date.now() - started,
   }));
 
@@ -1188,7 +1206,7 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
 
   const checkedSection = `
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🔎 Tickers Checked Today</h3>
-    <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">Provider: Exa · ${r.uniqueChecked} unique tickers · ${r.totalExaAttempts} fresh Exa searches · ${r.totalCacheHits} cache hits · ${r.totalSelected} selected · ${r.totalRejected} rejected · ${r.totalWatchOnly} watch only · ${r.totalFailed} failed${r.totalSkipped ? ` · ${r.totalSkipped} skipped` : ""}. Showing all ${combined.length} rows.</p>
+    <p style="margin:0 0 8px 0;font-size:12px;color:#475569;">Provider: Exa · ${r.uniqueChecked} unique tickers · ${r.totalExaAttempts} fresh Exa searches · ${r.totalCacheHits} cache hits · ${r.totalSelected} selected · ${r.totalPassedNotSelected} passed (not selected) · ${r.totalRejected} rejected · ${r.totalWatchOnly} watch only · ${r.totalFailed} failed${r.totalSkipped ? ` · ${r.totalSkipped} skipped` : ""}. Showing all ${combined.length} rows.</p>
     <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>

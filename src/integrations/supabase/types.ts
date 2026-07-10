@@ -1191,6 +1191,58 @@ export type Database = {
       }
     }
     Views: {
+      swing_ml_feature_quality_v1: {
+        Row: {
+          checked_date_et: string | null
+          exa_complete_rows: number | null
+          finnhub_complete_rows: number | null
+          rows_missing_analyst_score: number | null
+          rows_missing_final_score: number | null
+          rows_missing_news_score: number | null
+          rows_missing_peer_score: number | null
+          rows_missing_price: number | null
+          rows_missing_risk_reward: number | null
+          rows_missing_risk_score: number | null
+          rows_missing_volume_strength: number | null
+          total_rows: number | null
+          yahoo_complete_rows: number | null
+        }
+        Relationships: []
+      }
+      swing_ml_readiness_summary_v1: {
+        Row: {
+          completed_10_session: number | null
+          completed_20_session: number | null
+          completed_3_session: number | null
+          completed_40_session: number | null
+          distinct_tickers: number | null
+          earliest_example_date: string | null
+          flat_10_session: number | null
+          flat_20_session: number | null
+          flat_3_session: number | null
+          flat_40_session: number | null
+          latest_example_date: string | null
+          negative_10_session: number | null
+          negative_20_session: number | null
+          negative_3_session: number | null
+          negative_40_session: number | null
+          passed_examples: number | null
+          pending_10_session: number | null
+          pending_20_session: number | null
+          pending_3_session: number | null
+          pending_40_session: number | null
+          positive_10_session: number | null
+          positive_20_session: number | null
+          positive_3_session: number | null
+          positive_40_session: number | null
+          rejected_examples: number | null
+          selected_examples: number | null
+          total_outcome_rows: number | null
+          total_training_examples: number | null
+          watch_only_examples: number | null
+        }
+        Relationships: []
+      }
       swing_ml_training_dataset_v1: {
         Row: {
           analyst_buy_count: number | null
