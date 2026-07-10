@@ -342,37 +342,54 @@ export async function updateOutcomes(admin: SupabaseClient): Promise<{ updated: 
   return { updated, failed };
 }
 
-export async function getMLTrainingStats(admin: SupabaseClient): Promise<MLTrainingStats> {
+export async function getMLTrainingStats(admin: SupabaseClient, savedThisRun = 0): Promise<MLTrainingStats> {
+  const empty: MLTrainingStats = {
+    savedThisRun, savedToday: 0, totalRows: 0, completed: 0, pending: 0, totalOutcomes: 0,
+    completed10Session: 0, ready: false,
+    readinessMessage: "ML model not trained yet. Collecting training data. Useful model training typically starts after about 1,000+ completed outcome examples.",
+  };
   try {
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
-    const [savedToday, totalRows, completed, pending, totalOutcomes] = await Promise.all([
+    const [savedToday, totalRows, completed, pending, totalOutcomes, completed10] = await Promise.all([
       admin.from("swing_training_examples").select("id", { count: "exact", head: true }).gte("created_at", startOfDay.toISOString()),
       admin.from("swing_training_examples").select("id", { count: "exact", head: true }),
       admin.from("swing_training_outcomes").select("id", { count: "exact", head: true }).neq("final_label", "pending"),
       admin.from("swing_training_outcomes").select("id", { count: "exact", head: true }).eq("final_label", "pending"),
       admin.from("swing_training_outcomes").select("id", { count: "exact", head: true }),
+      admin.from("swing_training_outcomes").select("id", { count: "exact", head: true }).neq("label_10_session", "pending"),
     ]);
+    const c10 = completed10.count || 0;
+    const ready = c10 >= 1000;
+    const readinessMessage = ready
+      ? `Ready to train first model: ${c10.toLocaleString()} completed 10-session outcomes available. See docs/swing-ml-roadmap.md for the next steps.`
+      : `Not ready yet: ${c10.toLocaleString()} / 1,000 completed 10-session outcomes. ML model not trained yet. Collecting training data.`;
+    console.log(`[ml-readiness] completed_10=${c10} ready=${ready}`);
     return {
+      savedThisRun,
       savedToday: savedToday.count || 0,
       totalRows: totalRows.count || 0,
       completed: completed.count || 0,
       pending: pending.count || 0,
       totalOutcomes: totalOutcomes.count || 0,
+      completed10Session: c10,
+      ready,
+      readinessMessage,
     };
   } catch {
-    return { savedToday: 0, totalRows: 0, completed: 0, pending: 0, totalOutcomes: 0 };
+    return empty;
   }
 }
 
 export function buildMLTrainingSectionHTML(stats: MLTrainingStats): string {
-  const readiness = stats.completed < 1000
-    ? ` ML model not trained yet. Collecting training data. Useful model training typically starts after about 1,000+ completed outcome examples.`
-    : "";
+  const badge = stats.ready
+    ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#dcfce7;color:#047857;font-size:11px;font-weight:600;">Ready to train baseline model</span>`
+    : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600;">Collecting data</span>`;
   return `
-    <h3 style="margin:20px 0 6px 0;color:#0f172a;font-size:14px;">🧠 ML Training Data</h3>
+    <h3 style="margin:20px 0 6px 0;color:#0f172a;font-size:14px;">🧠 ML Training Data ${badge}</h3>
     <p style="margin:0;font-size:12px;color:#475569;line-height:1.6;">
-      ${stats.savedToday} examples saved today · ${stats.pending} pending outcome rows · ${stats.completed} completed outcomes · ${stats.totalRows} total training examples · ${stats.totalOutcomes} total outcome rows.${readiness}
+      ${stats.savedThisRun} examples saved this run · ${stats.savedToday} saved today · ${stats.pending} pending outcome rows · ${stats.completed} completed outcomes (${stats.completed10Session} at the 10-session window) · ${stats.totalRows} total training examples · ${stats.totalOutcomes} total outcome rows.
+      <br>${stats.readinessMessage}
       <br><em style="color:#94a3b8;">This is not financial advice. Model output will be an AI probability estimate, not a guaranteed prediction.</em>
     </p>`;
 }
