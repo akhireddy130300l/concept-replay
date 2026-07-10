@@ -109,10 +109,42 @@ A starter script is provided at:
 
 ## ML readiness warning (email)
 
-The email footer shows honest wording:
+The email footer shows honest wording and a readiness badge:
 
-> ML model not trained yet. Collecting training data. Useful model training
-> typically starts after about 1,000+ completed outcome examples.
+> Not ready yet: N / 1,000 completed 10-session outcomes. ML model not trained
+> yet. Collecting training data.
+
+Once N ≥ 1,000, the badge flips to **Ready to train baseline model** and the
+message points here.
 
 Do **not** say "AI model is trained" until a model has actually been trained,
 evaluated, and deployed.
+
+---
+
+## Monitoring views
+
+Two read-only Postgres views are available for diagnostics:
+
+- `swing_ml_readiness_summary_v1` — pending/completed/positive/negative/flat
+  counts per window (3/10/20/40 sessions), plus distinct tickers and
+  status breakdown.
+- `swing_ml_feature_quality_v1` — per-day completeness of Yahoo, Exa, and
+  Finnhub features on `swing_training_examples`.
+
+Sample queries:
+
+```sql
+SELECT * FROM public.swing_ml_readiness_summary_v1;
+SELECT * FROM public.swing_ml_feature_quality_v1 LIMIT 14;
+```
+
+---
+
+## Example model artifact
+
+An example artifact JSON showing the shape a future trained baseline model
+should follow lives at `docs/model-artifacts/swing_model_v1_example.json`.
+It is documentation only — no model is loaded from disk yet by the edge
+functions.
+
