@@ -905,6 +905,10 @@ export async function runSwingTraderWatch(
       selectedPlan.holdingWindow = selected.bestWindow;
     }
   }
+  // Any remaining "passed" rows are strong candidates that lost the tie-break.
+  for (const p of passed) {
+    if (p.status !== "passed_not_selected") p.status = "passed_not_selected";
+  }
 
   const totalCacheHits = results.filter((r) => r.cacheHit).length;
   const totalExaAttempts = results.filter((r) => !r.cacheHit && r.status !== "skipped_due_to_exa_limit").length;
