@@ -191,6 +191,14 @@ export async function saveTrainingExamples(
     const insertedCount = inserted?.length ?? 0;
     console.log(`[ml-training] examples_inserted count=${insertedCount} run_id=${runId ?? "null"}`);
 
+    // Data quality diagnostic for this run.
+    try {
+      const q = computeMLQualityStats(rows);
+      console.log(`[ml-quality] examples=${q.examples} yahoo_complete=${q.yahooComplete} exa_complete=${q.exaComplete} finnhub_profile=${q.finnhubProfileComplete} finnhub_peers=${q.finnhubPeersComplete} finnhub_analyst=${q.finnhubAnalystComplete} final_score=${q.finalScoreComplete} missing_critical=${q.missingCritical}`);
+    } catch (e) {
+      console.log(`[ml-quality] compute_failed reason=${(e as Error).message}`);
+    }
+
     // Immediately create one pending outcome row per new training example
     // so the ML pipeline is easy to verify. Best-effort.
     if (inserted && inserted.length > 0) {
