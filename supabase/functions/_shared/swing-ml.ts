@@ -9,12 +9,62 @@ import type { CheckedTicker, SwingResult, SwingTickerInput } from "./swing-watch
 import { fetchYahooChartWithRetry } from "./yahoo-chart.ts";
 
 export type MLTrainingStats = {
+  savedThisRun: number;
   savedToday: number;
   pending: number;
   completed: number;
   totalRows: number;
   totalOutcomes: number;
+  completed10Session: number;
+  ready: boolean;
+  readinessMessage: string;
 };
+
+export type MLQualityStats = {
+  examples: number;
+  yahooComplete: number;
+  exaComplete: number;
+  finnhubProfileComplete: number;
+  finnhubPeersComplete: number;
+  finnhubAnalystComplete: number;
+  finalScoreComplete: number;
+  missingCritical: number;
+};
+
+const CRITICAL_KEYS = [
+  "ticker", "checked_at", "current_price",
+  "one_session_return_pct", "seven_session_return_pct", "twenty_session_return_pct",
+  "volume_strength", "risk_reward", "technical_score", "final_swing_score",
+];
+
+export function computeMLQualityStats(rows: any[]): MLQualityStats {
+  let yahoo = 0, exa = 0, profile = 0, peers = 0, analyst = 0, finalScore = 0, missing = 0;
+  for (const r of rows) {
+    const yahooOk = r.current_price != null && r.one_session_return_pct != null
+      && r.seven_session_return_pct != null && r.twenty_session_return_pct != null
+      && r.volume_strength != null && r.technical_score != null;
+    const exaOk = r.exa_result_count != null
+      && (r.exa_positive_signal_count != null || r.exa_negative_signal_count != null);
+    const profileOk = r.finnhub_available === true && (r.sector || r.industry);
+    const peersOk = r.finnhub_available === true && r.peer_confirmation_score != null;
+    const analystOk = r.finnhub_available === true && r.analyst_score != null;
+    const finalOk = r.final_swing_score != null;
+    if (yahooOk) yahoo++;
+    if (exaOk) exa++;
+    if (profileOk) profile++;
+    if (peersOk) peers++;
+    if (analystOk) analyst++;
+    if (finalOk) finalScore++;
+    let hasMissing = false;
+    for (const k of CRITICAL_KEYS) {
+      if (r[k] === null || r[k] === undefined) { hasMissing = true; break; }
+    }
+    if (hasMissing) missing++;
+  }
+  return { examples: rows.length, yahooComplete: yahoo, exaComplete: exa,
+    finnhubProfileComplete: profile, finnhubPeersComplete: peers, finnhubAnalystComplete: analyst,
+    finalScoreComplete: finalScore, missingCritical: missing };
+}
 
 const KEYWORD_SIGNAL_KEYS: Record<string, string> = {
   "revenue growth": "has_revenue_growth_signal",
