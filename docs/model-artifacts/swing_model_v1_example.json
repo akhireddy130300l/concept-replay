@@ -1,0 +1,69 @@
+{
+  "_comment": "Example artifact shape for the future Swing Trader Watch baseline model. This is documentation only — no model is loaded from disk yet by the edge functions.",
+  "model_name": "swing_model_v1",
+  "created_at": "2026-01-01T00:00:00Z",
+  "trained_on": {
+    "dataset_view": "swing_ml_training_dataset_v1",
+    "rows": 1250,
+    "label": "label_10_session",
+    "positive_rate": 0.41,
+    "date_range": {
+      "start": "2025-10-01",
+      "end": "2025-12-31"
+    }
+  },
+  "algorithm": "random_forest",
+  "hyperparameters": {
+    "n_estimators": 300,
+    "max_depth": null,
+    "random_state": 42
+  },
+  "features_numeric": [
+    "one_session_return_pct",
+    "seven_session_return_pct",
+    "twenty_session_return_pct",
+    "volume_strength",
+    "risk_reward",
+    "technical_score",
+    "peer_confirmation_score",
+    "analyst_score",
+    "target_upside_pct",
+    "rule_based_final_score",
+    "final_swing_score"
+  ],
+  "features_boolean": [
+    "overbought_flag", "weak_volume_flag", "high_volatility_flag", "extended_flag",
+    "has_revenue_growth_signal", "has_raised_outlook_signal", "has_earnings_beat_signal",
+    "has_analyst_upgrade_signal", "has_price_target_raise_signal",
+    "has_fda_approval_signal", "has_contract_win_signal", "has_partnership_signal",
+    "has_material_lawsuit_signal", "has_generic_lawsuit_noise",
+    "has_investigation_signal", "has_downgrade_signal",
+    "has_earnings_miss_signal", "has_guidance_cut_signal",
+    "has_insider_selling_signal", "has_cash_burn_signal", "has_margin_pressure_signal",
+    "finnhub_available", "target_supports_trade"
+  ],
+  "evaluation_holdout": {
+    "accuracy": 0.62,
+    "precision": 0.58,
+    "recall": 0.55,
+    "f1": 0.56,
+    "roc_auc": 0.67
+  },
+  "top_features_importance": [
+    { "name": "technical_score", "importance": 0.14 },
+    { "name": "risk_reward", "importance": 0.11 },
+    { "name": "volume_strength", "importance": 0.09 },
+    { "name": "seven_session_return_pct", "importance": 0.08 },
+    { "name": "analyst_score", "importance": 0.07 }
+  ],
+  "output": {
+    "field_name": "ai_swing_probability_10_session",
+    "range": [0, 1],
+    "notes": "This is an AI probability estimate, not a guaranteed prediction. Always show alongside the deterministic rule-based score."
+  },
+  "safety": [
+    "Not financial advice.",
+    "Always render alongside the rule-based score.",
+    "Never remove human-readable reasons from the email."
+  ]
+}
