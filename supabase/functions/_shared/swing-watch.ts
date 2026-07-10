@@ -93,6 +93,7 @@ export type SwingResult = {
   modelUsed: string;
   uniqueChecked: number;
   totalSelected: number;
+  totalPassedNotSelected: number;
   totalRejected: number;
   totalWatchOnly: number;
   totalFailed: number;
