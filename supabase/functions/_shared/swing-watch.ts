@@ -817,7 +817,7 @@ export async function runSwingTraderWatch(
 
   const emptyBase = (): Omit<SwingResult, "previous" | "elapsedMs"> => ({
     modelUsed: PROVIDER, uniqueChecked: inputs.length,
-    totalSelected: 0, totalRejected: 0, totalWatchOnly: 0, totalFailed: 0, totalSkipped: 0,
+    totalSelected: 0, totalPassedNotSelected: 0, totalRejected: 0, totalWatchOnly: 0, totalFailed: 0, totalSkipped: 0,
     totalCacheHits: 0, totalExaAttempts: 0,
     passed: [], rejected: [], watchOnly: [], failed: [], skipped: [], all: [],
   });
