@@ -914,6 +914,51 @@ export async function runSwingTraderWatch(
     if (p.status !== "passed_not_selected") p.status = "passed_not_selected";
   }
 
+  // Classify why each non-selected ticker was not picked, and mark near-misses.
+  const selectedScore = selected?.finalScore ?? null;
+  const classifyBlocker = (t: CheckedTicker): string | null => {
+    if (t.status === "selected") return null;
+    if (t.status === "skipped_due_to_exa_limit") return "exa_limit_skipped";
+    if (t.status === "deep_check_failed") return "deep_check_failed";
+    if (t.status === "news_unavailable") return "news_unavailable";
+    const d = t.deep;
+    if (d?.red_flags && d.red_flags.length > 0) return "red_flag_present";
+    if (d?.news_check === "failed") return "negative_news";
+    if (d?.risk_check === "failed") return "risk_failed";
+    if (d?.swing_suitability === "rejected") return "suitability_rejected";
+    if (d?.swing_suitability === "watch_only") return "watch_only_setup";
+    if (d?.swing_suitability === "needs_confirmation") return "needs_confirmation";
+    const inp = inputByTicker.get(t.ticker);
+    const plan = inp && d ? computeTradingPlan(inp, d) : null;
+    if (!plan) return "no_valid_trading_plan";
+    if (typeof plan.riskReward === "number" && plan.riskReward < 2) return "risk_reward_below_2R";
+    if (t.status === "passed_not_selected") return "passed_but_lower_score";
+    return "other";
+  };
+  const allChecked = [
+    ...(selected ? [selected] : []),
+    ...passed, ...needsConf, ...watchOnly, ...newsUnavailable, ...rejected, ...failed, ...skipped,
+  ];
+  for (const t of allChecked) {
+    t.selectionBlocker = classifyBlocker(t);
+    if (t.status !== "selected" && selectedScore != null && typeof t.finalScore === "number") {
+      t.gapToSelected = Math.max(0, selectedScore - t.finalScore);
+      t.nearMiss = t.gapToSelected <= 1.5
+        && (t.status === "passed_not_selected" || t.status === "needs_confirmation" || t.status === "watch_only");
+    } else {
+      t.gapToSelected = null;
+      t.nearMiss = false;
+    }
+  }
+  console.log(JSON.stringify({
+    phase: "swing", event: "selection_blockers",
+    total: allChecked.length, near_miss: allChecked.filter(t => t.nearMiss).length,
+    blockers: allChecked.reduce((acc: Record<string, number>, t) => {
+      const k = t.selectionBlocker || "none"; acc[k] = (acc[k] || 0) + 1; return acc;
+    }, {}),
+  }));
+
+
   const totalCacheHits = results.filter((r) => r.cacheHit).length;
   const totalExaAttempts = results.filter((r) => !r.cacheHit && r.status !== "skipped_due_to_exa_limit").length;
 
