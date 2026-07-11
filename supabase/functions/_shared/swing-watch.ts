@@ -1037,7 +1037,11 @@ export async function runSwingTraderWatch(
           sources_json: r!.deep?.sources ?? null,
           model_used: r!.modelUsed,
           elapsed_ms: r!.elapsedMs,
+          selection_blocker: r!.selectionBlocker ?? null,
+          near_miss: r!.nearMiss ?? false,
+          gap_to_selected: r!.gapToSelected ?? null,
         }));
+
       if (rows.length > 0) {
         try {
           await admin.from("swing_trade_checked_tickers").insert(rows);

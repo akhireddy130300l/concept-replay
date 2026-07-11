@@ -118,8 +118,12 @@ export async function saveTrainingExamples(
         provider: r.modelUsed,
         was_selected: r.status === "selected",
         status_at_check: r.status,
+        selection_blocker: (r as any).selectionBlocker ?? null,
+        near_miss: (r as any).nearMiss ?? false,
+        gap_to_selected: (r as any).gapToSelected ?? null,
         best_window: r.bestWindow,
         selected_window: r.status === "selected" ? r.bestWindow : null,
+
         current_price: inp?.price ?? null,
         market_cap: inp?.marketCap ?? null,
         analyst_signal: inp?.analystLabel ?? null,
