@@ -5,7 +5,8 @@ export type SpeakingMode =
   | "Marketing Mode"
   | "Public Leader Mode"
   | "Executive Mode"
-  | "Daily Charisma Mode";
+  | "Daily Charisma Mode"
+  | "Friends & Jokes Mode";
 
 export const ALL_MODES: SpeakingMode[] = [
   "Sales Mode",
@@ -14,6 +15,7 @@ export const ALL_MODES: SpeakingMode[] = [
   "Public Leader Mode",
   "Executive Mode",
   "Daily Charisma Mode",
+  "Friends & Jokes Mode",
 ];
 
 export const MODE_DESCRIPTIONS: Record<SpeakingMode, string> = {
@@ -23,6 +25,7 @@ export const MODE_DESCRIPTIONS: Record<SpeakingMode, string> = {
   "Public Leader Mode": "Motivational speaking, vision, and public-speaking presence.",
   "Executive Mode": "Concise updates, decisions, risks, and strategic communication.",
   "Daily Charisma Mode": "Casual confidence, storytelling, humor, and social conversation.",
+  "Friends & Jokes Mode": "Playful timing, punchlines, teasing, roast-style banter, and being genuinely funny with friends.",
 };
 
 export const WARMUPS: string[] = [

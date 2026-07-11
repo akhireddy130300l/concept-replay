@@ -296,7 +296,26 @@ export const SCENARIOS: Record<SpeakingMode, Scenario[]> = {
       round3_close_prompt: "Close with one line that makes them want to share their week too.",
     },
   ],
+  "Friends & Jokes Mode": [
+    {
+      title: "Roast a friend without hurting them",
+      scene: "Weekend hangout. Your friend just did something mildly ridiculous everyone noticed.",
+      your_role: "You, being the funny one.",
+      audience: "3–4 close friends, already laughing.",
+      audience_mindset: "Wants a punchline, not a lecture.",
+      what_just_happened: "Your friend confidently mispronounced a word in front of everyone.",
+      pressure: "Too soft = not funny. Too hard = mean.",
+      objection_or_question: "Oh come on, it wasn't that bad — was it?",
+      your_goal: "Land a punchline that gets a real laugh AND keeps them liking you.",
+      speaking_structure: "Callback → Exaggerate → Punchline → Warm out",
+      your_task: "Roast them in under 30 seconds. Land one clean punchline.",
+      success_criteria: "Real punchline (not just a mean observation), timing lands, ends warm.",
+      round2_pressure_prompt: "They fire back: 'Alright genius, do better — say something actually funny.'",
+      round3_close_prompt: "Close by making yourself the joke this time so everyone stays warm.",
+    },
+  ],
 };
+
 
 export function dayOfYear(d: Date = new Date()): number {
   const start = Date.UTC(d.getUTCFullYear(), 0, 0);
