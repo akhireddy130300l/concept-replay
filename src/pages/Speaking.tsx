@@ -115,7 +115,15 @@ const RoundRecorder = ({
         {listening && <span className="text-xs text-red-500 animate-pulse">● Listening…</span>}
         <span className="text-xs text-muted-foreground ml-auto">{value.trim().length} chars</span>
       </div>
-      <Textarea value={value} onChange={(e) => onChange(e.target.value)} rows={4} placeholder="Speak above or type here…" />
+      <Textarea
+        value={value}
+        readOnly
+        onChange={() => { /* record-only: typing is disabled */ }}
+        rows={4}
+        placeholder="Press Record and speak. Your transcript will appear here — typing is disabled on purpose."
+        className="bg-muted/40 cursor-default"
+      />
+
     </div>
   );
 };
@@ -295,9 +303,19 @@ const Speaking = () => {
     }
   };
 
+  const avgScore = useMemo(() => {
+    const s = feedback?.scores;
+    if (!s) return 0;
+    const vals = [s.clarity, s.confidence, s.persuasion, s.structure, s.executive_presence]
+      .map((n) => (typeof n === "number" ? n : 0));
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }, [feedback]);
+
   const eligible = !!feedback &&
     feedback.meaningful_attempt !== false &&
+    avgScore >= 5.0 &&
     (feedback.improvement_target_met === "met" || feedback.improvement_target_met === "partial");
+
 
   const completeSession = async () => {
     if (!userId || !eligible || !feedback) return;
@@ -536,9 +554,28 @@ const Speaking = () => {
                 <div><div className="text-xs uppercase text-muted-foreground mb-1">Corrected</div><p>{feedback.corrected}</p></div>
                 <div><div className="text-xs uppercase text-muted-foreground mb-1">Natural</div><p>{feedback.natural}</p></div>
                 <div><div className="text-xs uppercase text-muted-foreground mb-1">Powerful</div><p>{feedback.powerful}</p></div>
-                <div><div className="text-xs uppercase text-muted-foreground mb-1">Role style ({mode})</div><p>{feedback.role_style}</p></div>
+                <div><div className="text-xs uppercase text-muted-foreground mb-1">Role style rewrite ({mode})</div><p>{feedback.role_style}</p></div>
               </CardContent>
             </Card>
+
+            {(feedback.hard_truth || (feedback.what_to_fix && feedback.what_to_fix.length > 0)) && (
+              <Card className="glass-card mb-4 border-red-300/60">
+                <CardHeader className="pb-3"><CardTitle className="text-base text-red-700 dark:text-red-400">🥊 Hard Truth</CardTitle></CardHeader>
+                <CardContent className="text-sm space-y-3">
+                  {feedback.hard_truth && <p className="font-medium text-foreground">{feedback.hard_truth}</p>}
+                  {feedback.what_to_fix && feedback.what_to_fix.length > 0 && (
+                    <div>
+                      <div className="text-xs uppercase text-muted-foreground mb-1">Fix these next time</div>
+                      <ul className="list-disc pl-5 space-y-1">
+                        {feedback.what_to_fix.map((f, i) => <li key={i}>{f}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">Average score: <strong>{avgScore.toFixed(1)} / 10</strong>. Sessions with average under 5.0 do not count toward your streak.</p>
+                </CardContent>
+              </Card>
+            )}
+
 
             <div className="flex flex-col sm:flex-row gap-2 mb-6">
               <Button onClick={completeSession} disabled={!eligible || completing || completedToday} className="gap-2">

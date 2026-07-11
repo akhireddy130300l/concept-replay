@@ -80,7 +80,11 @@ export type CheckedTicker = {
   modelUsed: string;
   bestWindow: string;
   finnhub?: (FinnhubScoring & { available: boolean; peerCount: number }) | null;
+  selectionBlocker?: string | null;
+  nearMiss?: boolean;
+  gapToSelected?: number | null;
 };
+
 
 export type SwingUnavailableReason =
   | "missing_exa_api_key"
@@ -910,6 +914,51 @@ export async function runSwingTraderWatch(
     if (p.status !== "passed_not_selected") p.status = "passed_not_selected";
   }
 
+  // Classify why each non-selected ticker was not picked, and mark near-misses.
+  const selectedScore = selected?.finalScore ?? null;
+  const classifyBlocker = (t: CheckedTicker): string | null => {
+    if (t.status === "selected") return null;
+    if (t.status === "skipped_due_to_exa_limit") return "exa_limit_skipped";
+    if (t.status === "deep_check_failed") return "deep_check_failed";
+    if (t.status === "news_unavailable") return "news_unavailable";
+    const d = t.deep;
+    if (d?.red_flags && d.red_flags.length > 0) return "red_flag_present";
+    if (d?.news_check === "failed") return "negative_news";
+    if (d?.risk_check === "failed") return "risk_failed";
+    if (d?.swing_suitability === "rejected") return "suitability_rejected";
+    if (d?.swing_suitability === "watch_only") return "watch_only_setup";
+    if (d?.swing_suitability === "needs_confirmation") return "needs_confirmation";
+    const inp = inputByTicker.get(t.ticker);
+    const plan = inp && d ? computeTradingPlan(inp, d) : null;
+    if (!plan) return "no_valid_trading_plan";
+    if (typeof plan.riskReward === "number" && plan.riskReward < 2) return "risk_reward_below_2R";
+    if (t.status === "passed_not_selected") return "passed_but_lower_score";
+    return "other";
+  };
+  const allChecked = [
+    ...(selected ? [selected] : []),
+    ...passed, ...needsConf, ...watchOnly, ...newsUnavailable, ...rejected, ...failed, ...skipped,
+  ];
+  for (const t of allChecked) {
+    t.selectionBlocker = classifyBlocker(t);
+    if (t.status !== "selected" && selectedScore != null && typeof t.finalScore === "number") {
+      t.gapToSelected = Math.max(0, selectedScore - t.finalScore);
+      t.nearMiss = t.gapToSelected <= 1.5
+        && (t.status === "passed_not_selected" || t.status === "needs_confirmation" || t.status === "watch_only");
+    } else {
+      t.gapToSelected = null;
+      t.nearMiss = false;
+    }
+  }
+  console.log(JSON.stringify({
+    phase: "swing", event: "selection_blockers",
+    total: allChecked.length, near_miss: allChecked.filter(t => t.nearMiss).length,
+    blockers: allChecked.reduce((acc: Record<string, number>, t) => {
+      const k = t.selectionBlocker || "none"; acc[k] = (acc[k] || 0) + 1; return acc;
+    }, {}),
+  }));
+
+
   const totalCacheHits = results.filter((r) => r.cacheHit).length;
   const totalExaAttempts = results.filter((r) => !r.cacheHit && r.status !== "skipped_due_to_exa_limit").length;
 
@@ -988,7 +1037,11 @@ export async function runSwingTraderWatch(
           sources_json: r!.deep?.sources ?? null,
           model_used: r!.modelUsed,
           elapsed_ms: r!.elapsedMs,
+          selection_blocker: r!.selectionBlocker ?? null,
+          near_miss: r!.nearMiss ?? false,
+          gap_to_selected: r!.gapToSelected ?? null,
         }));
+
       if (rows.length > 0) {
         try {
           await admin.from("swing_trade_checked_tickers").insert(rows);
@@ -1177,11 +1230,45 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Swing Trader Watch <span style="font-weight:400;color:#64748b;font-size:13px;">(multi-window: 3–10 · 11–20 · 20–40+ sessions · powered by Exa Search)</span></h3>
     ${swingBlock}`;
 
+  // ─── Closest Swing Candidates (near-misses) ─────────────────────────────
+  const blockerLabel: Record<string, string> = {
+    red_flag_present: "Red flag in news",
+    negative_news: "Negative news signal",
+    risk_failed: "Risk check failed",
+    risk_reward_below_2R: "Risk/reward below 2R",
+    no_valid_trading_plan: "No valid trading plan",
+    passed_but_lower_score: "Ranked below the selected ticker",
+    needs_confirmation: "Needs more confirmation",
+    watch_only_setup: "Watch-only setup (no clear entry)",
+    suitability_rejected: "Suitability rejected",
+    news_unavailable: "News check unavailable",
+    deep_check_failed: "Deep check failed",
+    exa_limit_skipped: "Skipped (Exa limit)",
+    other: "Other",
+  };
+  const nearMissPool = [...r.passed, ...r.watchOnly]
+    .filter((t) => t.nearMiss || (typeof t.gapToSelected === "number" && t.gapToSelected <= 2.0))
+    .sort((a, b) => (a.gapToSelected ?? 999) - (b.gapToSelected ?? 999))
+    .slice(0, 3);
+  const closestSection = nearMissPool.length > 0 ? `
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🟡 Closest Swing Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(top ${nearMissPool.length} near-miss — did not qualify today)</span></h3>
+    <div style="border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:12px 14px;">
+      ${nearMissPool.map((t) => {
+        const gap = typeof t.gapToSelected === "number" ? `gap ${t.gapToSelected.toFixed(2)} pts` : "";
+        const why = blockerLabel[t.selectionBlocker || "other"] || "Other";
+        return `<div style="padding:6px 0;border-bottom:1px dashed #fde68a;font-size:12px;color:#78350f;">
+          <strong>${tickerLink(appBaseUrl, t.ticker)}</strong> · ${esc(t.company)} — <em>${esc(why)}</em>${gap ? ` · <span style="color:#92400e;">${esc(gap)}</span>` : ""}
+        </div>`;
+      }).join("")}
+      <p style="margin:8px 0 0 0;font-size:11px;color:#92400e;">These setups are close but did not clear today's bar. Tracked as near-miss training data.</p>
+    </div>` : "";
+
   // Show ALL checked tickers — no slice/limit.
   const combined = [
     ...(r.selected ? [r.selected] : []),
     ...r.passed, ...r.rejected, ...r.watchOnly, ...r.failed, ...r.skipped,
   ];
+
 
   const rowsHtml = combined.map((t) => {
     const d = t.deep;
@@ -1231,5 +1318,5 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
     </div>` : "";
 
   const mlSection = r.mlStats ? buildMLTrainingSectionHTML(r.mlStats) : "";
-  return `${swingSection}\n${checkedSection}\n${prevSection}\n${mlSection}`;
+  return `${swingSection}\n${closestSection}\n${checkedSection}\n${prevSection}\n${mlSection}`;
 }

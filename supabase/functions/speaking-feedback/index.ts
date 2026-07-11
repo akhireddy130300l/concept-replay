@@ -43,10 +43,23 @@ function isGibberish(text: string): boolean {
 
 function buildSystemPrompt(): string {
   return [
-    "You are an elite communication coach for professionals: sales leaders, tech leads, marketers, public speakers, and executives.",
-    "This is NOT beginner English. The speaker is already fluent. Sharpen confidence, clarity, persuasion, structure, and executive presence.",
+    "You are an elite communication coach for professionals: sales leaders, tech leads, marketers, public speakers, executives, and confident social speakers.",
+    "This is NOT beginner English. The speaker is already fluent. Sharpen confidence, clarity, persuasion, structure, humor timing (when the mode calls for it), and executive presence.",
     "You will receive a deep scenario, the speaker's improvement target for today, and a transcript split into 3 rounds (opening, pressure, close).",
-    "Judge the IMPROVEMENT TARGET strictly. A high overall score does NOT automatically mean the target was met.",
+    "",
+    "SCORING DISCIPLINE (strict):",
+    " - Scores are 0–10. Do NOT default to 7+. Reserve 8+ for genuinely strong reps.",
+    " - If the transcript is short, generic, filler-heavy, or fails the scenario's success criteria, most scores must be under 6.",
+    " - If any single score is 5 or below, improvement_target_met must be 'missed' or 'partial' — never 'met'.",
+    " - If average of the 5 scores is under 5.0, improvement_target_met must be 'missed'.",
+    "",
+    "IMPROVEMENT TARGET: judge it strictly. A high overall score does NOT automatically mean the target was met. Explain in target_evaluated exactly what was measured.",
+    "",
+    "role_style MUST be a full REWRITE of the speaker's own words in the target mode's voice — not advice, not description, not a bullet list. It should read like a native line the speaker could say tomorrow.",
+    "",
+    "hard_truth MUST be the single most direct criticism a great coach would give — blunt, specific, under 200 characters. No sugar-coating, no 'consider' / 'you might want to'. Example: 'You sound rehearsed and unsure. Nobody buys a pitch that opens with a disclaimer.'",
+    "what_to_fix MUST be 1–3 concrete, imperative fixes for the NEXT rep. Each item under 140 characters, starting with a verb: 'Cut the first 8 words.', 'Name the outcome in the first sentence.', 'Drop 'basically'.'",
+    "",
     "Return STRICT JSON ONLY (no markdown, no code fences) matching this exact shape:",
     `{
       "corrected": string,
@@ -62,6 +75,8 @@ function buildSystemPrompt(): string {
         "structure": number, "executive_presence": number
       },
       "main_weakness": string,
+      "hard_truth": string,
+      "what_to_fix": string[],
       "improvement_target_met": "met" | "partial" | "missed",
       "target_evaluated": string,
       "meaningful_attempt": boolean,
@@ -72,6 +87,7 @@ function buildSystemPrompt(): string {
     "tomorrows_drill must be a concrete, single-sentence improvement target for the NEXT session, derived from today's main_weakness.",
   ].join("\n");
 }
+
 
 function extractJson(raw: string): string {
   const t = raw.trim();
@@ -208,6 +224,25 @@ Deno.serve(async (req) => {
     if (typeof feedback.meaningful_attempt !== "boolean") feedback.meaningful_attempt = true;
     if (typeof feedback.main_weakness !== "string") feedback.main_weakness = "";
     if (typeof feedback.target_evaluated !== "string") feedback.target_evaluated = body.improvementTarget;
+    if (typeof feedback.hard_truth !== "string") feedback.hard_truth = "";
+    if (!Array.isArray(feedback.what_to_fix)) feedback.what_to_fix = [];
+
+    // Deterministic score-based downgrade: overrides any inflated LLM verdict.
+    const s = feedback.scores || {};
+    const values = [s.clarity, s.confidence, s.persuasion, s.structure, s.executive_presence]
+      .map((n: any) => (typeof n === "number" ? n : 0));
+    const avg = values.reduce((a, b) => a + b, 0) / (values.length || 1);
+    const minScore = Math.min(...values);
+    if (avg < 5.0 || minScore <= 3) {
+      feedback.improvement_target_met = "missed";
+    } else if (minScore <= 5 && feedback.improvement_target_met === "met") {
+      feedback.improvement_target_met = "partial";
+    }
+    console.log(JSON.stringify({
+      phase: "speaking_feedback", event: "score_gate",
+      avg: Number(avg.toFixed(2)), min: minScore, verdict: feedback.improvement_target_met,
+    }));
+
 
     return new Response(JSON.stringify({ feedback }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
