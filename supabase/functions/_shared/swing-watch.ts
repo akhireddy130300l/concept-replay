@@ -1230,11 +1230,45 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
     <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🎯 Swing Trader Watch <span style="font-weight:400;color:#64748b;font-size:13px;">(multi-window: 3–10 · 11–20 · 20–40+ sessions · powered by Exa Search)</span></h3>
     ${swingBlock}`;
 
+  // ─── Closest Swing Candidates (near-misses) ─────────────────────────────
+  const blockerLabel: Record<string, string> = {
+    red_flag_present: "Red flag in news",
+    negative_news: "Negative news signal",
+    risk_failed: "Risk check failed",
+    risk_reward_below_2R: "Risk/reward below 2R",
+    no_valid_trading_plan: "No valid trading plan",
+    passed_but_lower_score: "Ranked below the selected ticker",
+    needs_confirmation: "Needs more confirmation",
+    watch_only_setup: "Watch-only setup (no clear entry)",
+    suitability_rejected: "Suitability rejected",
+    news_unavailable: "News check unavailable",
+    deep_check_failed: "Deep check failed",
+    exa_limit_skipped: "Skipped (Exa limit)",
+    other: "Other",
+  };
+  const nearMissPool = [...r.passed, ...r.watchOnly]
+    .filter((t) => t.nearMiss || (typeof t.gapToSelected === "number" && t.gapToSelected <= 2.0))
+    .sort((a, b) => (a.gapToSelected ?? 999) - (b.gapToSelected ?? 999))
+    .slice(0, 3);
+  const closestSection = nearMissPool.length > 0 ? `
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🟡 Closest Swing Candidates <span style="font-weight:400;color:#64748b;font-size:13px;">(top ${nearMissPool.length} near-miss — did not qualify today)</span></h3>
+    <div style="border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:12px 14px;">
+      ${nearMissPool.map((t) => {
+        const gap = typeof t.gapToSelected === "number" ? `gap ${t.gapToSelected.toFixed(2)} pts` : "";
+        const why = blockerLabel[t.selectionBlocker || "other"] || "Other";
+        return `<div style="padding:6px 0;border-bottom:1px dashed #fde68a;font-size:12px;color:#78350f;">
+          <strong>${tickerLink(appBaseUrl, t.ticker)}</strong> · ${esc(t.company)} — <em>${esc(why)}</em>${gap ? ` · <span style="color:#92400e;">${esc(gap)}</span>` : ""}
+        </div>`;
+      }).join("")}
+      <p style="margin:8px 0 0 0;font-size:11px;color:#92400e;">These setups are close but did not clear today's bar. Tracked as near-miss training data.</p>
+    </div>` : "";
+
   // Show ALL checked tickers — no slice/limit.
   const combined = [
     ...(r.selected ? [r.selected] : []),
     ...r.passed, ...r.rejected, ...r.watchOnly, ...r.failed, ...r.skipped,
   ];
+
 
   const rowsHtml = combined.map((t) => {
     const d = t.deep;
