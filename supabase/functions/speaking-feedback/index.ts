@@ -224,6 +224,25 @@ Deno.serve(async (req) => {
     if (typeof feedback.meaningful_attempt !== "boolean") feedback.meaningful_attempt = true;
     if (typeof feedback.main_weakness !== "string") feedback.main_weakness = "";
     if (typeof feedback.target_evaluated !== "string") feedback.target_evaluated = body.improvementTarget;
+    if (typeof feedback.hard_truth !== "string") feedback.hard_truth = "";
+    if (!Array.isArray(feedback.what_to_fix)) feedback.what_to_fix = [];
+
+    // Deterministic score-based downgrade: overrides any inflated LLM verdict.
+    const s = feedback.scores || {};
+    const values = [s.clarity, s.confidence, s.persuasion, s.structure, s.executive_presence]
+      .map((n: any) => (typeof n === "number" ? n : 0));
+    const avg = values.reduce((a, b) => a + b, 0) / (values.length || 1);
+    const minScore = Math.min(...values);
+    if (avg < 5.0 || minScore <= 3) {
+      feedback.improvement_target_met = "missed";
+    } else if (minScore <= 5 && feedback.improvement_target_met === "met") {
+      feedback.improvement_target_met = "partial";
+    }
+    console.log(JSON.stringify({
+      phase: "speaking_feedback", event: "score_gate",
+      avg: Number(avg.toFixed(2)), min: minScore, verdict: feedback.improvement_target_met,
+    }));
+
 
     return new Response(JSON.stringify({ feedback }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
