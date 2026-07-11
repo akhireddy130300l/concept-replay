@@ -80,7 +80,11 @@ export type CheckedTicker = {
   modelUsed: string;
   bestWindow: string;
   finnhub?: (FinnhubScoring & { available: boolean; peerCount: number }) | null;
+  selectionBlocker?: string | null;
+  nearMiss?: boolean;
+  gapToSelected?: number | null;
 };
+
 
 export type SwingUnavailableReason =
   | "missing_exa_api_key"
