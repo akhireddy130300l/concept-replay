@@ -264,4 +264,7 @@ export type SpeakingFeedback = {
   improvement_target_met?: "met" | "partial" | "missed";
   target_evaluated?: string;
   meaningful_attempt?: boolean;
+  hard_truth?: string;
+  what_to_fix?: string[];
 };
+
