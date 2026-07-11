@@ -115,7 +115,15 @@ const RoundRecorder = ({
         {listening && <span className="text-xs text-red-500 animate-pulse">● Listening…</span>}
         <span className="text-xs text-muted-foreground ml-auto">{value.trim().length} chars</span>
       </div>
-      <Textarea value={value} onChange={(e) => onChange(e.target.value)} rows={4} placeholder="Speak above or type here…" />
+      <Textarea
+        value={value}
+        readOnly
+        onChange={() => { /* record-only: typing is disabled */ }}
+        rows={4}
+        placeholder="Press Record and speak. Your transcript will appear here — typing is disabled on purpose."
+        className="bg-muted/40 cursor-default"
+      />
+
     </div>
   );
 };
@@ -295,9 +303,19 @@ const Speaking = () => {
     }
   };
 
+  const avgScore = useMemo(() => {
+    const s = feedback?.scores;
+    if (!s) return 0;
+    const vals = [s.clarity, s.confidence, s.persuasion, s.structure, s.executive_presence]
+      .map((n) => (typeof n === "number" ? n : 0));
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }, [feedback]);
+
   const eligible = !!feedback &&
     feedback.meaningful_attempt !== false &&
+    avgScore >= 5.0 &&
     (feedback.improvement_target_met === "met" || feedback.improvement_target_met === "partial");
+
 
   const completeSession = async () => {
     if (!userId || !eligible || !feedback) return;
