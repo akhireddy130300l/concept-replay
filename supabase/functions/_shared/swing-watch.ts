@@ -1318,5 +1318,5 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
     </div>` : "";
 
   const mlSection = r.mlStats ? buildMLTrainingSectionHTML(r.mlStats) : "";
-  return `${swingSection}\n${checkedSection}\n${prevSection}\n${mlSection}`;
+  return `${swingSection}\n${closestSection}\n${checkedSection}\n${prevSection}\n${mlSection}`;
 }

@@ -148,3 +148,43 @@ should follow lives at `docs/model-artifacts/swing_model_v1_example.json`.
 It is documentation only — no model is loaded from disk yet by the edge
 functions.
 
+
+---
+
+## Phase 5 — Deep-Learning Readiness (added 2026-07-11)
+
+Once the baseline gradient-boosted model in `docs/model-artifacts/swing_model_v1_example.json`
+is trained and validated, the pipeline should be positioned for deeper sequence models
+without another schema migration.
+
+### Decision tiers
+
+| Tier | Trigger | Model family | Notes |
+| ---- | ------- | ------------ | ----- |
+| T1   | ≥ 1,000 completed 10-session outcomes | LogReg / XGBoost | Baseline. Ship first. |
+| T2   | ≥ 5,000 completed outcomes AND ≥ 300 near-misses (`near_miss = true`) | Gradient boosting + calibration | Add per-window heads. |
+| T3   | ≥ 20,000 completed outcomes AND ≥ 90 days of price history per ticker | Small Transformer / TCN over Yahoo OHLCV windows | Sequence input. |
+| T4   | T3 stable AND multimodal signals wired (Exa embeddings) | Multi-tower (numeric + news embedding + peer group) | Only when clearly beats T2. |
+
+### Near-miss training data
+
+The `selection_blocker`, `near_miss`, and `gap_to_selected` columns
+(`swing_trade_checked_tickers`, `swing_training_examples`) let downstream models
+learn from tickers that just missed selection. These are the highest-signal
+negatives because they are closest to the decision boundary.
+
+Recommended sampling for training:
+- 100% of `was_selected = true` rows.
+- 100% of `near_miss = true` rows.
+- Down-sample the rest to at most 3× the near-miss count.
+
+### View to query
+
+`public.swing_ml_training_dataset_v1` now includes `selection_blocker`,
+`near_miss`, and `gap_to_selected` alongside features and outcomes — use this
+view as the single training source.
+
+### Not building yet
+
+Deep-learning code is deliberately out of scope until T2 data volume is reached.
+Data capture is what unlocks it.
