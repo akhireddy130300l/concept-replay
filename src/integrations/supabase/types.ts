@@ -547,12 +547,14 @@ export type Database = {
           created_at: string
           elapsed_ms: number | null
           final_score: number | null
+          gap_to_selected: number | null
           id: string
           industry_context: string | null
           industry_score: number | null
           key_risks: Json | null
           latest_catalyst: string | null
           model_used: string | null
+          near_miss: boolean | null
           news_score: number | null
           peer_context: string | null
           peer_score: number | null
@@ -560,6 +562,7 @@ export type Database = {
           rejection_reason: string | null
           risk_score: number | null
           run_id: string
+          selection_blocker: string | null
           source_tables: Json | null
           sources_json: Json | null
           status: string
@@ -573,12 +576,14 @@ export type Database = {
           created_at?: string
           elapsed_ms?: number | null
           final_score?: number | null
+          gap_to_selected?: number | null
           id?: string
           industry_context?: string | null
           industry_score?: number | null
           key_risks?: Json | null
           latest_catalyst?: string | null
           model_used?: string | null
+          near_miss?: boolean | null
           news_score?: number | null
           peer_context?: string | null
           peer_score?: number | null
@@ -586,6 +591,7 @@ export type Database = {
           rejection_reason?: string | null
           risk_score?: number | null
           run_id: string
+          selection_blocker?: string | null
           source_tables?: Json | null
           sources_json?: Json | null
           status: string
@@ -599,12 +605,14 @@ export type Database = {
           created_at?: string
           elapsed_ms?: number | null
           final_score?: number | null
+          gap_to_selected?: number | null
           id?: string
           industry_context?: string | null
           industry_score?: number | null
           key_risks?: Json | null
           latest_catalyst?: string | null
           model_used?: string | null
+          near_miss?: boolean | null
           news_score?: number | null
           peer_context?: string | null
           peer_score?: number | null
@@ -612,6 +620,7 @@ export type Database = {
           rejection_reason?: string | null
           risk_score?: number | null
           run_id?: string
+          selection_blocker?: string | null
           source_tables?: Json | null
           sources_json?: Json | null
           status?: string
@@ -754,6 +763,7 @@ export type Database = {
           extended_flag: boolean | null
           final_swing_score: number | null
           finnhub_available: boolean | null
+          gap_to_selected: number | null
           has_analyst_upgrade_signal: boolean | null
           has_cash_burn_signal: boolean | null
           has_contract_win_signal: boolean | null
@@ -782,6 +792,7 @@ export type Database = {
           lower_watch_area: number | null
           market_cap: number | null
           momentum_status: string | null
+          near_miss: boolean | null
           near_resistance_flag: boolean | null
           one_session_return_pct: number | null
           overbought_flag: boolean | null
@@ -794,6 +805,7 @@ export type Database = {
           run_id: string | null
           sector: string | null
           selected_window: string | null
+          selection_blocker: string | null
           seven_session_return_pct: number | null
           status_at_check: string | null
           target_mean: number | null
@@ -838,6 +850,7 @@ export type Database = {
           extended_flag?: boolean | null
           final_swing_score?: number | null
           finnhub_available?: boolean | null
+          gap_to_selected?: number | null
           has_analyst_upgrade_signal?: boolean | null
           has_cash_burn_signal?: boolean | null
           has_contract_win_signal?: boolean | null
@@ -866,6 +879,7 @@ export type Database = {
           lower_watch_area?: number | null
           market_cap?: number | null
           momentum_status?: string | null
+          near_miss?: boolean | null
           near_resistance_flag?: boolean | null
           one_session_return_pct?: number | null
           overbought_flag?: boolean | null
@@ -878,6 +892,7 @@ export type Database = {
           run_id?: string | null
           sector?: string | null
           selected_window?: string | null
+          selection_blocker?: string | null
           seven_session_return_pct?: number | null
           status_at_check?: string | null
           target_mean?: number | null
@@ -922,6 +937,7 @@ export type Database = {
           extended_flag?: boolean | null
           final_swing_score?: number | null
           finnhub_available?: boolean | null
+          gap_to_selected?: number | null
           has_analyst_upgrade_signal?: boolean | null
           has_cash_burn_signal?: boolean | null
           has_contract_win_signal?: boolean | null
@@ -950,6 +966,7 @@ export type Database = {
           lower_watch_area?: number | null
           market_cap?: number | null
           momentum_status?: string | null
+          near_miss?: boolean | null
           near_resistance_flag?: boolean | null
           one_session_return_pct?: number | null
           overbought_flag?: boolean | null
@@ -962,6 +979,7 @@ export type Database = {
           run_id?: string | null
           sector?: string | null
           selected_window?: string | null
+          selection_blocker?: string | null
           seven_session_return_pct?: number | null
           status_at_check?: string | null
           target_mean?: number | null
@@ -1256,35 +1274,17 @@ export type Database = {
           company: string | null
           confidence: string | null
           current_price: number | null
-          distance_from_support_pct: number | null
-          distance_to_resistance_pct: number | null
+          entry_status: string | null
           exa_negative_signal_count: number | null
-          exa_neutral_signal_count: number | null
           exa_positive_signal_count: number | null
-          exa_source_quality_score: number | null
+          exa_result_count: number | null
           extended_flag: boolean | null
           final_label: string | null
           final_swing_score: number | null
           finnhub_available: boolean | null
-          has_analyst_upgrade_signal: boolean | null
-          has_cash_burn_signal: boolean | null
-          has_contract_win_signal: boolean | null
-          has_downgrade_signal: boolean | null
-          has_earnings_beat_signal: boolean | null
-          has_earnings_miss_signal: boolean | null
-          has_fda_approval_signal: boolean | null
+          gap_to_selected: number | null
           has_generic_lawsuit_noise: boolean | null
-          has_guidance_cut_signal: boolean | null
-          has_high_valuation_signal: boolean | null
-          has_insider_selling_signal: boolean | null
-          has_investigation_signal: boolean | null
-          has_lawsuit_signal: boolean | null
-          has_margin_pressure_signal: boolean | null
           has_material_lawsuit_signal: boolean | null
-          has_partnership_signal: boolean | null
-          has_price_target_raise_signal: boolean | null
-          has_raised_outlook_signal: boolean | null
-          has_revenue_growth_signal: boolean | null
           high_volatility_flag: boolean | null
           id: string | null
           industry: string | null
@@ -1292,26 +1292,22 @@ export type Database = {
           label_20_session: string | null
           label_3_session: string | null
           label_40_session: string | null
-          learning_bonus: number | null
-          learning_penalty: number | null
           market_cap: number | null
           max_drawdown_pct: number | null
           max_gain_pct: number | null
-          max_high_since_check: number | null
-          min_low_since_check: number | null
-          near_resistance_flag: boolean | null
+          near_miss: boolean | null
           one_session_return_pct: number | null
-          outcome_current_price: number | null
           overbought_flag: boolean | null
           peer_confirmation_score: number | null
           peer_count: number | null
-          price_at_check: number | null
+          provider: string | null
           rejection_reason: string | null
           return_pct_current: number | null
           risk_reward: number | null
           rule_based_final_score: number | null
           sector: string | null
           selected_window: string | null
+          selection_blocker: string | null
           sessions_elapsed: number | null
           seven_session_return_pct: number | null
           status_at_check: string | null
@@ -1323,8 +1319,7 @@ export type Database = {
           technical_score: number | null
           ticker: string | null
           twenty_session_return_pct: number | null
-          user_id: string | null
-          volatility_score: number | null
+          upside_vs_risk: number | null
           volume_strength: number | null
           was_selected: boolean | null
           weak_volume_flag: boolean | null
