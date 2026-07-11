@@ -554,9 +554,28 @@ const Speaking = () => {
                 <div><div className="text-xs uppercase text-muted-foreground mb-1">Corrected</div><p>{feedback.corrected}</p></div>
                 <div><div className="text-xs uppercase text-muted-foreground mb-1">Natural</div><p>{feedback.natural}</p></div>
                 <div><div className="text-xs uppercase text-muted-foreground mb-1">Powerful</div><p>{feedback.powerful}</p></div>
-                <div><div className="text-xs uppercase text-muted-foreground mb-1">Role style ({mode})</div><p>{feedback.role_style}</p></div>
+                <div><div className="text-xs uppercase text-muted-foreground mb-1">Role style rewrite ({mode})</div><p>{feedback.role_style}</p></div>
               </CardContent>
             </Card>
+
+            {(feedback.hard_truth || (feedback.what_to_fix && feedback.what_to_fix.length > 0)) && (
+              <Card className="glass-card mb-4 border-red-300/60">
+                <CardHeader className="pb-3"><CardTitle className="text-base text-red-700 dark:text-red-400">🥊 Hard Truth</CardTitle></CardHeader>
+                <CardContent className="text-sm space-y-3">
+                  {feedback.hard_truth && <p className="font-medium text-foreground">{feedback.hard_truth}</p>}
+                  {feedback.what_to_fix && feedback.what_to_fix.length > 0 && (
+                    <div>
+                      <div className="text-xs uppercase text-muted-foreground mb-1">Fix these next time</div>
+                      <ul className="list-disc pl-5 space-y-1">
+                        {feedback.what_to_fix.map((f, i) => <li key={i}>{f}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">Average score: <strong>{avgScore.toFixed(1)} / 10</strong>. Sessions with average under 5.0 do not count toward your streak.</p>
+                </CardContent>
+              </Card>
+            )}
+
 
             <div className="flex flex-col sm:flex-row gap-2 mb-6">
               <Button onClick={completeSession} disabled={!eligible || completing || completedToday} className="gap-2">
