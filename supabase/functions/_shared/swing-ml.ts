@@ -181,6 +181,45 @@ export async function saveTrainingExamples(
         learning_bonus: null,
         learning_penalty: null,
         final_swing_score: r.finalScore,
+
+        // --- ML foundation v1 fields (shared by live + historical paths) ---
+        feature_version: "v1",
+        dataset_version: "dataset_v1",
+        training_source: "live",
+        historical_run_id: null,
+        historical_date: null,
+        yahoo_snapshot: inp ? {
+          price: inp.price ?? null,
+          one_day_pct: inp.oneDayPct ?? null,
+          seven_day_pct: inp.sevenDayPct ?? null,
+          twenty_day_pct: inp.twentyDayPct ?? null,
+          volume_ratio: inp.volumeRatio ?? null,
+          market_cap: inp.marketCap ?? null,
+          lower_watch: inp.lowerWatch ?? null,
+          upper_watch: inp.upperWatch ?? null,
+          entry_status: inp.entryStatus ?? null,
+          risk_reward: inp.riskRewardRaw ?? null,
+          source_tables: inp.sourceTables ?? [],
+        } : null,
+        finnhub_snapshot: (r as any).finnhub ?? null,
+        exa_snapshot: d ? {
+          sources: d.sources ?? [],
+          positive_factors: d.positive_factors ?? [],
+          key_risks: d.key_risks ?? [],
+          red_flags: d.red_flags ?? [],
+          latest_catalyst: d.latest_catalyst ?? null,
+          legal_classification: (d as any).legal_classification ?? null,
+          swing_suitability: d.swing_suitability ?? null,
+          confidence: d.confidence ?? null,
+        } : null,
+        entry_price: inp?.price ?? null,
+        entry_date: checkedDateEt,
+        exit_price: null,
+        exit_date: null,
+        commission_bps: 0,
+        slippage_bps: 0,
+        position_size_pct: 0,
+        split_bucket: "test", // Fresh live rows land in test until they age past 30d.
       });
     }
     if (rows.length === 0) return 0;

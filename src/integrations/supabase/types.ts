@@ -70,6 +70,60 @@ export type Database = {
           },
         ]
       }
+      historical_training_runs: {
+        Row: {
+          completed_at: string | null
+          config: Json | null
+          created_at: string
+          current_replay_date: string | null
+          end_date: string
+          examples_created: number
+          id: string
+          last_error: string | null
+          outcomes_created: number
+          resume_supported: boolean
+          start_date: string
+          started_at: string
+          status: string
+          tickers_processed: number
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          config?: Json | null
+          created_at?: string
+          current_replay_date?: string | null
+          end_date: string
+          examples_created?: number
+          id?: string
+          last_error?: string | null
+          outcomes_created?: number
+          resume_supported?: boolean
+          start_date: string
+          started_at?: string
+          status?: string
+          tickers_processed?: number
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          config?: Json | null
+          created_at?: string
+          current_replay_date?: string | null
+          end_date?: string
+          examples_created?: number
+          id?: string
+          last_error?: string | null
+          outcomes_created?: number
+          resume_supported?: boolean
+          start_date?: string
+          started_at?: string
+          status?: string
+          tickers_processed?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       learned_topics: {
         Row: {
           created_at: string
@@ -108,6 +162,208 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      ml_data_drift: {
+        Row: {
+          dataset_version: string
+          drift_flag: string | null
+          feature_name: string
+          historical_mean: number | null
+          id: string
+          ks_stat: number | null
+          live_mean: number | null
+          measured_at: string
+          psi: number | null
+        }
+        Insert: {
+          dataset_version?: string
+          drift_flag?: string | null
+          feature_name: string
+          historical_mean?: number | null
+          id?: string
+          ks_stat?: number | null
+          live_mean?: number | null
+          measured_at?: string
+          psi?: number | null
+        }
+        Update: {
+          dataset_version?: string
+          drift_flag?: string | null
+          feature_name?: string
+          historical_mean?: number | null
+          id?: string
+          ks_stat?: number | null
+          live_mean?: number | null
+          measured_at?: string
+          psi?: number | null
+        }
+        Relationships: []
+      }
+      ml_data_quality_log: {
+        Row: {
+          created_at: string
+          details: Json | null
+          historical_date: string | null
+          id: string
+          reason: string
+          run_id: string | null
+          ticker: string | null
+        }
+        Insert: {
+          created_at?: string
+          details?: Json | null
+          historical_date?: string | null
+          id?: string
+          reason: string
+          run_id?: string | null
+          ticker?: string | null
+        }
+        Update: {
+          created_at?: string
+          details?: Json | null
+          historical_date?: string | null
+          id?: string
+          reason?: string
+          run_id?: string | null
+          ticker?: string | null
+        }
+        Relationships: []
+      }
+      ml_feature_statistics: {
+        Row: {
+          dataset_version: string
+          feature_name: string
+          id: string
+          importance_placeholder: number | null
+          max: number | null
+          mean: number | null
+          min: number | null
+          missing_count: number
+          outlier_count: number
+          sample_size: number
+          std: number | null
+          updated_at: string
+        }
+        Insert: {
+          dataset_version?: string
+          feature_name: string
+          id?: string
+          importance_placeholder?: number | null
+          max?: number | null
+          mean?: number | null
+          min?: number | null
+          missing_count?: number
+          outlier_count?: number
+          sample_size?: number
+          std?: number | null
+          updated_at?: string
+        }
+        Update: {
+          dataset_version?: string
+          feature_name?: string
+          id?: string
+          importance_placeholder?: number | null
+          max?: number | null
+          mean?: number | null
+          min?: number | null
+          missing_count?: number
+          outlier_count?: number
+          sample_size?: number
+          std?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      ml_universe_russell1000: {
+        Row: {
+          added_at: string
+          name: string | null
+          sector: string | null
+          ticker: string
+        }
+        Insert: {
+          added_at?: string
+          name?: string | null
+          sector?: string | null
+          ticker: string
+        }
+        Update: {
+          added_at?: string
+          name?: string | null
+          sector?: string | null
+          ticker?: string
+        }
+        Relationships: []
+      }
+      model_metrics: {
+        Row: {
+          created_at: string
+          id: string
+          metric_name: string
+          metric_value: number | null
+          model_version_id: string | null
+          split: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          metric_name: string
+          metric_value?: number | null
+          model_version_id?: string | null
+          split?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          metric_name?: string
+          metric_value?: number | null
+          model_version_id?: string | null
+          split?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "model_metrics_model_version_id_fkey"
+            columns: ["model_version_id"]
+            isOneToOne: false
+            referencedRelation: "model_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      model_versions: {
+        Row: {
+          created_at: string
+          hyperparameters: Json | null
+          id: string
+          model_id: string | null
+          notes: string | null
+          version: string
+        }
+        Insert: {
+          created_at?: string
+          hyperparameters?: Json | null
+          id?: string
+          model_id?: string | null
+          notes?: string | null
+          version: string
+        }
+        Update: {
+          created_at?: string
+          hyperparameters?: Json | null
+          id?: string
+          model_id?: string | null
+          notes?: string | null
+          version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "model_versions_model_id_fkey"
+            columns: ["model_id"]
+            isOneToOne: false
+            referencedRelation: "trained_models"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       portfolio_feature_access: {
         Row: {
@@ -302,6 +558,47 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      prediction_history: {
+        Row: {
+          actual_label: string | null
+          features_snapshot: Json | null
+          id: string
+          model_version_id: string | null
+          predicted_at: string
+          predicted_label: string | null
+          probability: number | null
+          ticker: string | null
+        }
+        Insert: {
+          actual_label?: string | null
+          features_snapshot?: Json | null
+          id?: string
+          model_version_id?: string | null
+          predicted_at?: string
+          predicted_label?: string | null
+          probability?: number | null
+          ticker?: string | null
+        }
+        Update: {
+          actual_label?: string | null
+          features_snapshot?: Json | null
+          id?: string
+          model_version_id?: string | null
+          predicted_at?: string
+          predicted_label?: string | null
+          probability?: number | null
+          ticker?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prediction_history_model_version_id_fkey"
+            columns: ["model_version_id"]
+            isOneToOne: false
+            referencedRelation: "model_versions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       quiz_responses: {
         Row: {
@@ -747,22 +1044,32 @@ export type Database = {
           catalyst_summary: string | null
           checked_at: string
           checked_date_et: string | null
+          commission_bps: number | null
           company: string | null
           confidence: string | null
           created_at: string
           current_price: number | null
+          data_quality_flags: string[] | null
+          dataset_version: string
           distance_from_support_pct: number | null
           distance_to_resistance_pct: number | null
+          entry_date: string | null
+          entry_price: number | null
           entry_status: string | null
           exa_negative_signal_count: number | null
           exa_neutral_signal_count: number | null
           exa_positive_signal_count: number | null
           exa_query: string | null
           exa_result_count: number | null
+          exa_snapshot: Json | null
           exa_source_quality_score: number | null
+          exit_date: string | null
+          exit_price: number | null
           extended_flag: boolean | null
+          feature_version: string
           final_swing_score: number | null
           finnhub_available: boolean | null
+          finnhub_snapshot: Json | null
           gap_to_selected: number | null
           has_analyst_upgrade_signal: boolean | null
           has_cash_burn_signal: boolean | null
@@ -784,6 +1091,8 @@ export type Database = {
           has_raised_outlook_signal: boolean | null
           has_revenue_growth_signal: boolean | null
           high_volatility_flag: boolean | null
+          historical_date: string | null
+          historical_run_id: string | null
           id: string
           industry: string | null
           key_risks: Json | null
@@ -798,6 +1107,7 @@ export type Database = {
           overbought_flag: boolean | null
           peer_confirmation_score: number | null
           peer_count: number | null
+          position_size_pct: number | null
           provider: string | null
           rejection_reason: string | null
           risk_reward: number | null
@@ -807,12 +1117,15 @@ export type Database = {
           selected_window: string | null
           selection_blocker: string | null
           seven_session_return_pct: number | null
+          slippage_bps: number | null
+          split_bucket: string | null
           status_at_check: string | null
           target_mean: number | null
           target_supports_trade: boolean | null
           target_upside_pct: number | null
           technical_score: number | null
           ticker: string
+          training_source: string
           twenty_session_return_pct: number | null
           updated_at: string
           upper_watch_area: number | null
@@ -823,6 +1136,7 @@ export type Database = {
           volume_strength: number | null
           was_selected: boolean
           weak_volume_flag: boolean | null
+          yahoo_snapshot: Json | null
         }
         Insert: {
           analyst_buy_count?: number | null
@@ -834,22 +1148,32 @@ export type Database = {
           catalyst_summary?: string | null
           checked_at?: string
           checked_date_et?: string | null
+          commission_bps?: number | null
           company?: string | null
           confidence?: string | null
           created_at?: string
           current_price?: number | null
+          data_quality_flags?: string[] | null
+          dataset_version?: string
           distance_from_support_pct?: number | null
           distance_to_resistance_pct?: number | null
+          entry_date?: string | null
+          entry_price?: number | null
           entry_status?: string | null
           exa_negative_signal_count?: number | null
           exa_neutral_signal_count?: number | null
           exa_positive_signal_count?: number | null
           exa_query?: string | null
           exa_result_count?: number | null
+          exa_snapshot?: Json | null
           exa_source_quality_score?: number | null
+          exit_date?: string | null
+          exit_price?: number | null
           extended_flag?: boolean | null
+          feature_version?: string
           final_swing_score?: number | null
           finnhub_available?: boolean | null
+          finnhub_snapshot?: Json | null
           gap_to_selected?: number | null
           has_analyst_upgrade_signal?: boolean | null
           has_cash_burn_signal?: boolean | null
@@ -871,6 +1195,8 @@ export type Database = {
           has_raised_outlook_signal?: boolean | null
           has_revenue_growth_signal?: boolean | null
           high_volatility_flag?: boolean | null
+          historical_date?: string | null
+          historical_run_id?: string | null
           id?: string
           industry?: string | null
           key_risks?: Json | null
@@ -885,6 +1211,7 @@ export type Database = {
           overbought_flag?: boolean | null
           peer_confirmation_score?: number | null
           peer_count?: number | null
+          position_size_pct?: number | null
           provider?: string | null
           rejection_reason?: string | null
           risk_reward?: number | null
@@ -894,12 +1221,15 @@ export type Database = {
           selected_window?: string | null
           selection_blocker?: string | null
           seven_session_return_pct?: number | null
+          slippage_bps?: number | null
+          split_bucket?: string | null
           status_at_check?: string | null
           target_mean?: number | null
           target_supports_trade?: boolean | null
           target_upside_pct?: number | null
           technical_score?: number | null
           ticker: string
+          training_source?: string
           twenty_session_return_pct?: number | null
           updated_at?: string
           upper_watch_area?: number | null
@@ -910,6 +1240,7 @@ export type Database = {
           volume_strength?: number | null
           was_selected?: boolean
           weak_volume_flag?: boolean | null
+          yahoo_snapshot?: Json | null
         }
         Update: {
           analyst_buy_count?: number | null
@@ -921,22 +1252,32 @@ export type Database = {
           catalyst_summary?: string | null
           checked_at?: string
           checked_date_et?: string | null
+          commission_bps?: number | null
           company?: string | null
           confidence?: string | null
           created_at?: string
           current_price?: number | null
+          data_quality_flags?: string[] | null
+          dataset_version?: string
           distance_from_support_pct?: number | null
           distance_to_resistance_pct?: number | null
+          entry_date?: string | null
+          entry_price?: number | null
           entry_status?: string | null
           exa_negative_signal_count?: number | null
           exa_neutral_signal_count?: number | null
           exa_positive_signal_count?: number | null
           exa_query?: string | null
           exa_result_count?: number | null
+          exa_snapshot?: Json | null
           exa_source_quality_score?: number | null
+          exit_date?: string | null
+          exit_price?: number | null
           extended_flag?: boolean | null
+          feature_version?: string
           final_swing_score?: number | null
           finnhub_available?: boolean | null
+          finnhub_snapshot?: Json | null
           gap_to_selected?: number | null
           has_analyst_upgrade_signal?: boolean | null
           has_cash_burn_signal?: boolean | null
@@ -958,6 +1299,8 @@ export type Database = {
           has_raised_outlook_signal?: boolean | null
           has_revenue_growth_signal?: boolean | null
           high_volatility_flag?: boolean | null
+          historical_date?: string | null
+          historical_run_id?: string | null
           id?: string
           industry?: string | null
           key_risks?: Json | null
@@ -972,6 +1315,7 @@ export type Database = {
           overbought_flag?: boolean | null
           peer_confirmation_score?: number | null
           peer_count?: number | null
+          position_size_pct?: number | null
           provider?: string | null
           rejection_reason?: string | null
           risk_reward?: number | null
@@ -981,12 +1325,15 @@ export type Database = {
           selected_window?: string | null
           selection_blocker?: string | null
           seven_session_return_pct?: number | null
+          slippage_bps?: number | null
+          split_bucket?: string | null
           status_at_check?: string | null
           target_mean?: number | null
           target_supports_trade?: boolean | null
           target_upside_pct?: number | null
           technical_score?: number | null
           ticker?: string
+          training_source?: string
           twenty_session_return_pct?: number | null
           updated_at?: string
           upper_watch_area?: number | null
@@ -997,6 +1344,7 @@ export type Database = {
           volume_strength?: number | null
           was_selected?: boolean
           weak_volume_flag?: boolean | null
+          yahoo_snapshot?: Json | null
         }
         Relationships: []
       }
@@ -1090,6 +1438,13 @@ export type Database = {
             foreignKeyName: "swing_training_outcomes_training_example_id_fkey"
             columns: ["training_example_id"]
             isOneToOne: true
+            referencedRelation: "ml_training_dataset_v2"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "swing_training_outcomes_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: true
             referencedRelation: "swing_ml_training_dataset_v1"
             referencedColumns: ["id"]
           },
@@ -1101,6 +1456,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      trained_models: {
+        Row: {
+          algorithm: string | null
+          artifact_url: string | null
+          created_at: string
+          dataset_version: string | null
+          feature_version: string | null
+          id: string
+          name: string
+          trained_at: string | null
+        }
+        Insert: {
+          algorithm?: string | null
+          artifact_url?: string | null
+          created_at?: string
+          dataset_version?: string | null
+          feature_version?: string | null
+          id?: string
+          name: string
+          trained_at?: string | null
+        }
+        Update: {
+          algorithm?: string | null
+          artifact_url?: string | null
+          created_at?: string
+          dataset_version?: string | null
+          feature_version?: string | null
+          id?: string
+          name?: string
+          trained_at?: string | null
+        }
+        Relationships: []
       }
       user_portfolio_settings: {
         Row: {
@@ -1209,6 +1597,128 @@ export type Database = {
       }
     }
     Views: {
+      ml_training_dataset_v2: {
+        Row: {
+          analyst_buy_count: number | null
+          analyst_hold_count: number | null
+          analyst_score: number | null
+          analyst_sell_count: number | null
+          analyst_signal: string | null
+          best_window: string | null
+          catalyst_summary: string | null
+          checked_at: string | null
+          checked_date_et: string | null
+          commission_bps: number | null
+          company: string | null
+          confidence: string | null
+          created_at: string | null
+          current_price: number | null
+          data_quality_flags: string[] | null
+          dataset_version: string | null
+          distance_from_support_pct: number | null
+          distance_to_resistance_pct: number | null
+          entry_date: string | null
+          entry_price: number | null
+          entry_status: string | null
+          exa_negative_signal_count: number | null
+          exa_neutral_signal_count: number | null
+          exa_positive_signal_count: number | null
+          exa_query: string | null
+          exa_result_count: number | null
+          exa_snapshot: Json | null
+          exa_source_quality_score: number | null
+          exit_date: string | null
+          exit_price: number | null
+          extended_flag: boolean | null
+          feature_version: string | null
+          final_label: string | null
+          final_swing_score: number | null
+          finnhub_available: boolean | null
+          finnhub_snapshot: Json | null
+          gap_to_selected: number | null
+          has_analyst_upgrade_signal: boolean | null
+          has_cash_burn_signal: boolean | null
+          has_contract_win_signal: boolean | null
+          has_downgrade_signal: boolean | null
+          has_earnings_beat_signal: boolean | null
+          has_earnings_miss_signal: boolean | null
+          has_fda_approval_signal: boolean | null
+          has_generic_lawsuit_noise: boolean | null
+          has_guidance_cut_signal: boolean | null
+          has_high_valuation_signal: boolean | null
+          has_insider_selling_signal: boolean | null
+          has_investigation_signal: boolean | null
+          has_lawsuit_signal: boolean | null
+          has_margin_pressure_signal: boolean | null
+          has_material_lawsuit_signal: boolean | null
+          has_partnership_signal: boolean | null
+          has_price_target_raise_signal: boolean | null
+          has_raised_outlook_signal: boolean | null
+          has_revenue_growth_signal: boolean | null
+          high_volatility_flag: boolean | null
+          historical_date: string | null
+          historical_run_id: string | null
+          id: string | null
+          industry: string | null
+          key_risks: Json | null
+          label_10_session: string | null
+          label_20_session: string | null
+          label_3_session: string | null
+          label_40_session: string | null
+          learning_bonus: number | null
+          learning_penalty: number | null
+          lower_watch_area: number | null
+          market_cap: number | null
+          max_drawdown_pct: number | null
+          max_gain_pct: number | null
+          momentum_status: string | null
+          near_miss: boolean | null
+          near_resistance_flag: boolean | null
+          one_session_return_pct: number | null
+          outcome_10_session: number | null
+          outcome_20_session: number | null
+          outcome_3_session: number | null
+          outcome_40_session: number | null
+          overbought_flag: boolean | null
+          peer_confirmation_score: number | null
+          peer_count: number | null
+          position_size_pct: number | null
+          provider: string | null
+          rejection_reason: string | null
+          return_pct_current: number | null
+          risk_reward: number | null
+          rule_based_final_score: number | null
+          run_id: string | null
+          sector: string | null
+          selected_window: string | null
+          selection_blocker: string | null
+          sessions_elapsed: number | null
+          seven_session_return_pct: number | null
+          slippage_bps: number | null
+          split_bucket: string | null
+          status_at_check: string | null
+          stop_hit: boolean | null
+          target_hit: boolean | null
+          target_mean: number | null
+          target_supports_trade: boolean | null
+          target_upside_pct: number | null
+          technical_score: number | null
+          ticker: string | null
+          training_source: string | null
+          twenty_session_return_pct: number | null
+          updated_at: string | null
+          upper_watch_area: number | null
+          upside_vs_risk: number | null
+          user_id: string | null
+          volatility_score: number | null
+          volume_confirmation: string | null
+          volume_strength: number | null
+          was_selected: boolean | null
+          weak_volume_flag: boolean | null
+          yahoo_snapshot: Json | null
+        }
+        Relationships: []
+      }
       swing_ml_feature_quality_v1: {
         Row: {
           checked_date_et: string | null
