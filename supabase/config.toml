@@ -29,3 +29,7 @@ verify_jwt = false
 
 [functions.export-training-dataset]
 verify_jwt = false
+
+[functions.ml-training-control]
+verify_jwt = true
+
