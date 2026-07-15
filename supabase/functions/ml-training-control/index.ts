@@ -14,6 +14,7 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const DIAG_KEY = Deno.env.get("DIAG_KEY") ?? "";
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
+const STALE_RUNNING_MINUTES = 30;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "content-type": "application/json" } });
@@ -30,6 +31,19 @@ async function requireOwner(req: Request): Promise<{ ok: true; userId: string } 
   return { ok: true, userId: u.user.id };
 }
 
+async function markStaleRunsFailed() {
+  const cutoff = new Date(Date.now() - STALE_RUNNING_MINUTES * 60 * 1000).toISOString();
+  await admin
+    .from("historical_training_runs")
+    .update({
+      status: "failed",
+      last_error: `stale_worker_no_heartbeat_over_${STALE_RUNNING_MINUTES}_minutes`,
+      completed_at: new Date().toISOString(),
+    })
+    .eq("status", "running")
+    .or(`heartbeat_at.is.null,heartbeat_at.lt.${cutoff}`);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   const url = new URL(req.url);
@@ -37,14 +51,21 @@ Deno.serve(async (req) => {
 
   const auth = await requireOwner(req);
   if (!auth.ok) return auth.res;
+  await markStaleRunsFailed();
 
   if (action === "status") {
     const { data: runs } = await admin
-      .from("historical_training_runs")
+      .from("historical_replay_run_summary_v1")
       .select("*")
       .order("started_at", { ascending: false })
       .limit(10);
-    return json({ runs: runs ?? [] });
+    const { data: committed } = await admin.from("ml_training_committed_summary_v1").select("*").maybeSingle();
+    const { data: recentDayLogs } = await admin
+      .from("historical_replay_day_logs")
+      .select("*")
+      .order("updated_at", { ascending: false })
+      .limit(20);
+    return json({ runs: runs ?? [], committed_summary: committed ?? null, recent_day_logs: recentDayLogs ?? [] });
   }
 
   if (action === "start" && req.method === "POST") {
@@ -52,7 +73,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const start_date = body.start_date;
     const end_date = body.end_date ?? new Date().toISOString().slice(0, 10);
-    const batch_size = Number(body.batch_size ?? 10);
+    const batch_size = Number(body.batch_size ?? 1);
     const resume = body.resume ?? true;
     const top_n = Number(body.top_n ?? 60);
     if (!start_date) return json({ error: "start_date required" }, 400);
