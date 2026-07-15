@@ -464,45 +464,123 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
 
 async function runReplay(runId: string, config: any) {
   try {
+    logEvent("historical_run_started", { run_id: runId, config });
     const { data: universe } = await admin.from("ml_universe_russell1000").select("ticker");
     const tickers = (universe ?? []).map((u: any) => u.ticker);
     if (tickers.length === 0) {
-      await admin.from("historical_training_runs").update({ status: "failed", last_error: "empty_universe", completed_at: new Date().toISOString() }).eq("id", runId);
+      await touchRun(runId, { status: "failed", last_error: "empty_universe", completed_at: new Date().toISOString() });
+      logEvent("historical_run_failed", { run_id: runId, reason: "empty_universe" });
       return;
     }
     const days = tradingDaysInRange(config.start_date, config.end_date);
-    const { data: existing } = await admin.from("historical_training_runs").select("current_replay_date").eq("id", runId).maybeSingle();
+    const { data: existing } = await admin
+      .from("historical_training_runs")
+      .select("current_replay_date,status,tickers_processed,examples_created,outcomes_created,failure_count,consecutive_error_count,processed_trading_days")
+      .eq("id", runId)
+      .maybeSingle();
+    if (!existing || ["cancelled", "completed", "failed"].includes(existing.status)) {
+      logEvent("historical_run_skipped", { run_id: runId, status: existing?.status ?? "missing" });
+      return;
+    }
     const resumeFrom = config.resume && existing?.current_replay_date ? existing.current_replay_date : null;
     const startIdx = resumeFrom ? Math.max(0, days.findIndex((d) => d > resumeFrom)) : 0;
+    const batchSize = Math.max(1, Math.min(20, Number(config.batch_size ?? 5)));
+    const maxConsecutiveErrors = Math.max(1, Number(config.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT));
+    const batchEndIdx = Math.min(days.length, startIdx + batchSize);
 
-    let totalExamples = 0, totalOutcomes = 0, totalTickers = 0;
-    for (let i = startIdx; i < days.length; i++) {
+    let totalExamples = Number(existing.examples_created ?? 0);
+    let totalOutcomes = Number(existing.outcomes_created ?? 0);
+    let totalTickers = Number(existing.tickers_processed ?? 0);
+    let processedTradingDays = Number(existing.processed_trading_days ?? Math.max(0, startIdx));
+    let failureCount = Number(existing.failure_count ?? 0);
+    let consecutiveErrors = Number(existing.consecutive_error_count ?? 0);
+    await touchRun(runId, {
+      status: "running",
+      total_trading_days: days.length,
+      processed_trading_days: processedTradingDays,
+      last_processed_batch: { start_idx: startIdx, end_idx_exclusive: batchEndIdx, batch_size: batchSize, started_at: new Date().toISOString() },
+    });
+
+    if (startIdx >= days.length) {
+      await touchRun(runId, { status: "completed", completed_at: new Date().toISOString(), last_error: null });
+      logEvent("historical_run_completed", { run_id: runId, examples_created: totalExamples, outcomes_created: totalOutcomes, processed_trading_days: processedTradingDays });
+      return;
+    }
+
+    for (let i = startIdx; i < batchEndIdx; i++) {
       const day = days[i];
       try {
         const r = await processDay(runId, day, tickers, config.top_n ?? 60);
         totalExamples += r.examplesCreated; totalOutcomes += r.outcomesCreated; totalTickers += r.tickersProcessed;
+        processedTradingDays = i + 1;
+        consecutiveErrors = 0;
       } catch (e) {
-        console.log(`[hist-trainer] day_failed date=${day} reason=${(e as Error).message}`);
+        const msg = (e as Error).message.slice(0, 500);
+        logEvent("historical_day_failed", { run_id: runId, replay_date: day, reason: msg });
+        failureCount += 1;
+        consecutiveErrors += 1;
+        await upsertDayLog(runId, day, {
+          status: "failed",
+          error_message: msg,
+          finished_at: new Date().toISOString(),
+          metadata: { pipeline_version: PIPELINE_VERSION, consecutive_errors: consecutiveErrors },
+        });
         await admin.from("ml_data_quality_log").insert({ run_id: runId, historical_date: day, reason: "day_failed", details: { error: (e as Error).message } });
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          await touchRun(runId, {
+            status: "failed",
+            last_error: `failed_after_${consecutiveErrors}_consecutive_day_errors: ${msg}`,
+            completed_at: new Date().toISOString(),
+            failure_count: failureCount,
+            consecutive_error_count: consecutiveErrors,
+            current_replay_date: day,
+            tickers_processed: totalTickers,
+            examples_created: totalExamples,
+            outcomes_created: totalOutcomes,
+            processed_trading_days: processedTradingDays,
+          });
+          logEvent("historical_run_failed", { run_id: runId, reason: "max_consecutive_errors", consecutive_errors: consecutiveErrors, last_error: msg });
+          return;
+        }
       }
-      await admin.from("historical_training_runs").update({
+      const nextStatus = i === days.length - 1 ? "completed" : "running";
+      await touchRun(runId, {
         current_replay_date: day,
         tickers_processed: totalTickers,
         examples_created: totalExamples,
         outcomes_created: totalOutcomes,
-        status: i === days.length - 1 ? "completed" : "running",
-      }).eq("id", runId);
-
-      // Batch pause every N days to avoid provider bursts.
-      if ((i - startIdx + 1) % (config.batch_size ?? 10) === 0) {
-        await new Promise((r) => setTimeout(r, 2000));
-      }
+        processed_trading_days: processedTradingDays,
+        failure_count: failureCount,
+        consecutive_error_count: consecutiveErrors,
+        last_progress_at: new Date().toISOString(),
+        last_error: consecutiveErrors ? `last day error: ${day}` : null,
+        status: nextStatus,
+        completed_at: nextStatus === "completed" ? new Date().toISOString() : null,
+        last_processed_batch: { start_idx: startIdx, end_idx_exclusive: batchEndIdx, last_day: day, committed_at: new Date().toISOString() },
+      });
+      logEvent("historical_progress_committed", { run_id: runId, replay_date: day, examples_created: totalExamples, outcomes_created: totalOutcomes, processed_trading_days: processedTradingDays, total_trading_days: days.length });
     }
-    await admin.from("historical_training_runs").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", runId);
-    console.log(`[hist-trainer] run_complete run_id=${runId} examples=${totalExamples} outcomes=${totalOutcomes}`);
+
+    if (batchEndIdx >= days.length) {
+      await touchRun(runId, { status: "completed", completed_at: new Date().toISOString(), last_error: null });
+      logEvent("historical_run_completed", { run_id: runId, examples_created: totalExamples, outcomes_created: totalOutcomes, processed_trading_days: processedTradingDays });
+      return;
+    }
+
+    await touchRun(runId, {
+      status: "running",
+      last_processed_batch: { start_idx: startIdx, end_idx_exclusive: batchEndIdx, queued_next_at: new Date().toISOString(), next_replay_date: days[batchEndIdx] },
+    });
+    logEvent("historical_next_batch_queued", { run_id: runId, next_replay_date: days[batchEndIdx], processed_trading_days: processedTradingDays, total_trading_days: days.length });
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/historical-swing-trainer`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-diag-key": DIAG_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+      body: JSON.stringify({ ...config, run_id: runId, resume: true }),
+    });
+    logEvent("historical_next_batch_invoked", { run_id: runId, status: resp.status, ok: resp.ok });
   } catch (e) {
-    await admin.from("historical_training_runs").update({ status: "failed", last_error: (e as Error).message, completed_at: new Date().toISOString() }).eq("id", runId);
-    console.log(`[hist-trainer] run_failed reason=${(e as Error).message}`);
+    await touchRun(runId, { status: "failed", last_error: (e as Error).message, completed_at: new Date().toISOString() });
+    logEvent("historical_run_failed", { run_id: runId, reason: (e as Error).message });
   }
 }
 
@@ -512,15 +590,26 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...CORS, "content-type": "application/json" } });
   }
   const body = await req.json().catch(() => ({}));
-  const { start_date, end_date, batch_size = 10, resume = true, universe = "russell1000", dry_run = false, top_n = 60 } = body;
+  const { start_date, end_date, batch_size = 5, resume = true, universe = "russell1000", dry_run = false, top_n = 60, run_id = null } = body;
   if (!start_date || !end_date) {
     return new Response(JSON.stringify({ error: "start_date and end_date required" }), { status: 400, headers: { ...CORS, "content-type": "application/json" } });
   }
-  const config = { start_date, end_date, batch_size, resume, universe, top_n };
-  const { data: run, error } = await admin.from("historical_training_runs").insert({
-    start_date, end_date, status: dry_run ? "dry_run" : "running", config,
-  }).select("id").single();
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...CORS, "content-type": "application/json" } });
+  const config = { start_date, end_date, batch_size, resume, universe, top_n, max_consecutive_errors: body.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT };
+  let run = run_id ? { id: run_id } : null;
+  if (!run) {
+    const inserted = await admin.from("historical_training_runs").insert({
+      start_date,
+      end_date,
+      status: dry_run ? "dry_run" : "running",
+      config,
+      heartbeat_at: new Date().toISOString(),
+      last_progress_at: new Date().toISOString(),
+      pipeline_version: PIPELINE_VERSION,
+      run_source: body.run_source ?? "manual",
+    }).select("id").single();
+    if (inserted.error) return new Response(JSON.stringify({ error: inserted.error.message }), { status: 500, headers: { ...CORS, "content-type": "application/json" } });
+    run = inserted.data;
+  }
 
   if (dry_run) {
     const days = tradingDaysInRange(start_date, end_date);
