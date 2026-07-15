@@ -39,6 +39,7 @@ const PIPELINE_VERSION = "historical_replay_v2";
 const FEATURE_VERSION = "v1";
 const DATASET_VERSION = "dataset_v1";
 const MAX_CONSECUTIVE_ERRORS_DEFAULT = 3;
+const MAX_DAYS_PER_INVOCATION = 1;
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
@@ -484,7 +485,7 @@ async function runReplay(runId: string, config: any) {
     }
     const resumeFrom = config.resume && existing?.current_replay_date ? existing.current_replay_date : null;
     const startIdx = resumeFrom ? Math.max(0, days.findIndex((d) => d > resumeFrom)) : 0;
-    const batchSize = Math.max(1, Math.min(20, Number(config.batch_size ?? 5)));
+    const batchSize = Math.max(1, Math.min(MAX_DAYS_PER_INVOCATION, Number(config.batch_size ?? 1)));
     const maxConsecutiveErrors = Math.max(1, Number(config.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT));
     const batchEndIdx = Math.min(days.length, startIdx + batchSize);
 
