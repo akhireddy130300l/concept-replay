@@ -35,8 +35,16 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const DIAG_KEY = Deno.env.get("DIAG_KEY") ?? "";
 const EXA_API_KEY = Deno.env.get("EXA_API_KEY") ?? "";
+const PIPELINE_VERSION = "historical_replay_v2";
+const FEATURE_VERSION = "v1";
+const DATASET_VERSION = "dataset_v1";
+const MAX_CONSECUTIVE_ERRORS_DEFAULT = 3;
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
+
+function logEvent(event: string, details: Record<string, unknown>) {
+  console.log(JSON.stringify({ event, pipeline: PIPELINE_VERSION, ts: new Date().toISOString(), ...details }));
+}
 
 // US market holidays 2023-2027 (regular closes only; half-days included as full).
 const US_HOLIDAYS = new Set<string>([
@@ -59,8 +67,10 @@ function tradingDaysInRange(start: string, end: string): string[] {
 }
 
 async function fetchYahooHistorical(symbol: string, from: string, to: string): Promise<
-  { ok: true; bars: { ts: number; close: number; high: number; low: number; volume: number }[] } | { ok: false; reason: string }
+  { ok: true; bars: { ts: number; close: number; high: number; low: number; volume: number }[]; latency_ms: number; status: number; provider_timestamp: string } | { ok: false; reason: string; latency_ms: number; status?: number; provider_timestamp: string }
 > {
+  const started = Date.now();
+  const provider_timestamp = new Date().toISOString();
   const period1 = Math.floor(new Date(from + "T00:00:00Z").getTime() / 1000);
   const period2 = Math.floor(new Date(to + "T00:00:00Z").getTime() / 1000) + 86400;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`;
@@ -68,10 +78,10 @@ async function fetchYahooHistorical(symbol: string, from: string, to: string): P
     const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12000);
     const res = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": "Mozilla/5.0" } });
     clearTimeout(t);
-    if (res.status !== 200) return { ok: false, reason: `status_${res.status}` };
+    if (res.status !== 200) return { ok: false, reason: `status_${res.status}`, latency_ms: Date.now() - started, status: res.status, provider_timestamp };
     const j = await res.json();
     const r = j?.chart?.result?.[0]; const q = r?.indicators?.quote?.[0]; const ts = r?.timestamp;
-    if (!Array.isArray(ts) || !q) return { ok: false, reason: "missing_series" };
+    if (!Array.isArray(ts) || !q) return { ok: false, reason: "missing_series", latency_ms: Date.now() - started, status: res.status, provider_timestamp };
     const bars: any[] = [];
     for (let i = 0; i < ts.length; i++) {
       const c = q.close?.[i], h = q.high?.[i], l = q.low?.[i], v = q.volume?.[i];
@@ -79,12 +89,14 @@ async function fetchYahooHistorical(symbol: string, from: string, to: string): P
         bars.push({ ts: ts[i], close: c, high: h, low: l, volume: v });
       }
     }
-    return { ok: true, bars };
-  } catch (e) { return { ok: false, reason: (e as Error).message.slice(0, 100) }; }
+    return { ok: true, bars, latency_ms: Date.now() - started, status: res.status, provider_timestamp };
+  } catch (e) { return { ok: false, reason: (e as Error).message.slice(0, 100), latency_ms: Date.now() - started, provider_timestamp }; }
 }
 
 async function exaHistoricalNews(ticker: string, company: string, day: string): Promise<any> {
-  if (!EXA_API_KEY) return { skipped: "missing_exa_api_key" };
+  const started = Date.now();
+  const provider_timestamp = new Date().toISOString();
+  if (!EXA_API_KEY) return { skipped: "missing_exa_api_key", _meta: { provider: "exa", status: "skipped", latency_ms: 0, provider_timestamp } };
   const end = day; const start = iso(addDays(new Date(day + "T00:00:00Z"), -14));
   try {
     const res = await fetch("https://api.exa.ai/search", {
@@ -98,10 +110,10 @@ async function exaHistoricalNews(ticker: string, company: string, day: string): 
         contents: { highlights: true },
       }),
     });
-    if (!res.ok) return { error: `status_${res.status}` };
+    if (!res.ok) return { error: `status_${res.status}`, _meta: { provider: "exa", status: res.status, latency_ms: Date.now() - started, provider_timestamp } };
     const j = await res.json();
-    return { results: (j.results ?? []).map((r: any) => ({ title: r.title, url: r.url, published: r.publishedDate, highlights: r.highlights ?? [] })) };
-  } catch (e) { return { error: (e as Error).message.slice(0, 100) }; }
+    return { results: (j.results ?? []).map((r: any) => ({ title: r.title, url: r.url, published: r.publishedDate, highlights: r.highlights ?? [] })), _meta: { provider: "exa", status: res.status, latency_ms: Date.now() - started, provider_timestamp } };
+  } catch (e) { return { error: (e as Error).message.slice(0, 100), _meta: { provider: "exa", status: "error", latency_ms: Date.now() - started, provider_timestamp } }; }
 }
 
 // Deterministic keyword-based signals (subset of live pipeline).
