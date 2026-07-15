@@ -70,56 +70,265 @@ export type Database = {
           },
         ]
       }
+      backtest_equity_curve: {
+        Row: {
+          backtest_run_id: string | null
+          cash: number | null
+          created_at: string
+          curve_date: string
+          drawdown: number | null
+          equity_curve: Json | null
+          id: string
+          portfolio_value: number
+          shares: Json | null
+        }
+        Insert: {
+          backtest_run_id?: string | null
+          cash?: number | null
+          created_at?: string
+          curve_date: string
+          drawdown?: number | null
+          equity_curve?: Json | null
+          id?: string
+          portfolio_value: number
+          shares?: Json | null
+        }
+        Update: {
+          backtest_run_id?: string | null
+          cash?: number | null
+          created_at?: string
+          curve_date?: string
+          drawdown?: number | null
+          equity_curve?: Json | null
+          id?: string
+          portfolio_value?: number
+          shares?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "backtest_equity_curve_backtest_run_id_fkey"
+            columns: ["backtest_run_id"]
+            isOneToOne: false
+            referencedRelation: "backtest_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      backtest_runs: {
+        Row: {
+          config: Json
+          created_at: string
+          dataset_version: string
+          end_date: string
+          feature_version: string
+          final_portfolio_value: number | null
+          id: string
+          initial_cash: number
+          max_drawdown: number | null
+          name: string
+          sharpe_ratio: number | null
+          start_date: string
+          status: string
+          strategy_version: string
+          total_return_pct: number | null
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          dataset_version?: string
+          end_date: string
+          feature_version?: string
+          final_portfolio_value?: number | null
+          id?: string
+          initial_cash?: number
+          max_drawdown?: number | null
+          name: string
+          sharpe_ratio?: number | null
+          start_date: string
+          status?: string
+          strategy_version: string
+          total_return_pct?: number | null
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          dataset_version?: string
+          end_date?: string
+          feature_version?: string
+          final_portfolio_value?: number | null
+          id?: string
+          initial_cash?: number
+          max_drawdown?: number | null
+          name?: string
+          sharpe_ratio?: number | null
+          start_date?: string
+          status?: string
+          strategy_version?: string
+          total_return_pct?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      historical_replay_day_logs: {
+        Row: {
+          created_at: string
+          data_quality_events: number
+          duration_ms: number | null
+          error_message: string | null
+          examples_created: number
+          finished_at: string | null
+          id: string
+          metadata: Json
+          outcomes_created: number
+          replay_date: string
+          run_id: string | null
+          scored_count: number
+          selected_count: number
+          started_at: string
+          status: string
+          tickers_processed: number
+          universe_count: number
+          updated_at: string
+          yahoo_failures: number
+        }
+        Insert: {
+          created_at?: string
+          data_quality_events?: number
+          duration_ms?: number | null
+          error_message?: string | null
+          examples_created?: number
+          finished_at?: string | null
+          id?: string
+          metadata?: Json
+          outcomes_created?: number
+          replay_date: string
+          run_id?: string | null
+          scored_count?: number
+          selected_count?: number
+          started_at?: string
+          status?: string
+          tickers_processed?: number
+          universe_count?: number
+          updated_at?: string
+          yahoo_failures?: number
+        }
+        Update: {
+          created_at?: string
+          data_quality_events?: number
+          duration_ms?: number | null
+          error_message?: string | null
+          examples_created?: number
+          finished_at?: string | null
+          id?: string
+          metadata?: Json
+          outcomes_created?: number
+          replay_date?: string
+          run_id?: string | null
+          scored_count?: number
+          selected_count?: number
+          started_at?: string
+          status?: string
+          tickers_processed?: number
+          universe_count?: number
+          updated_at?: string
+          yahoo_failures?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "historical_replay_day_logs_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "historical_replay_run_summary_v1"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "historical_replay_day_logs_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "historical_training_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       historical_training_runs: {
         Row: {
           completed_at: string | null
           config: Json | null
+          consecutive_error_count: number
           created_at: string
           current_replay_date: string | null
           end_date: string
           examples_created: number
+          failure_count: number
+          heartbeat_at: string | null
           id: string
           last_error: string | null
+          last_processed_batch: Json | null
+          last_progress_at: string | null
           outcomes_created: number
+          pipeline_version: string
+          processed_trading_days: number
           resume_supported: boolean
+          run_source: string
           start_date: string
           started_at: string
           status: string
           tickers_processed: number
+          total_trading_days: number | null
           updated_at: string
         }
         Insert: {
           completed_at?: string | null
           config?: Json | null
+          consecutive_error_count?: number
           created_at?: string
           current_replay_date?: string | null
           end_date: string
           examples_created?: number
+          failure_count?: number
+          heartbeat_at?: string | null
           id?: string
           last_error?: string | null
+          last_processed_batch?: Json | null
+          last_progress_at?: string | null
           outcomes_created?: number
+          pipeline_version?: string
+          processed_trading_days?: number
           resume_supported?: boolean
+          run_source?: string
           start_date: string
           started_at?: string
           status?: string
           tickers_processed?: number
+          total_trading_days?: number | null
           updated_at?: string
         }
         Update: {
           completed_at?: string | null
           config?: Json | null
+          consecutive_error_count?: number
           created_at?: string
           current_replay_date?: string | null
           end_date?: string
           examples_created?: number
+          failure_count?: number
+          heartbeat_at?: string | null
           id?: string
           last_error?: string | null
+          last_processed_batch?: Json | null
+          last_progress_at?: string | null
           outcomes_created?: number
+          pipeline_version?: string
+          processed_trading_days?: number
           resume_supported?: boolean
+          run_source?: string
           start_date?: string
           started_at?: string
           status?: string
           tickers_processed?: number
+          total_trading_days?: number | null
           updated_at?: string
         }
         Relationships: []
@@ -160,6 +369,57 @@ export type Database = {
           revision_count?: number | null
           title?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      market_regimes: {
+        Row: {
+          broad_market_label: string | null
+          confidence_score: number | null
+          created_at: string
+          earnings_season: boolean
+          fed_week: boolean
+          id: string
+          metadata: Json
+          regime_date: string
+          source: string
+          spy_return_20d: number | null
+          trend_label: string | null
+          updated_at: string
+          vix_level: number | null
+          volatility_label: string | null
+        }
+        Insert: {
+          broad_market_label?: string | null
+          confidence_score?: number | null
+          created_at?: string
+          earnings_season?: boolean
+          fed_week?: boolean
+          id?: string
+          metadata?: Json
+          regime_date: string
+          source?: string
+          spy_return_20d?: number | null
+          trend_label?: string | null
+          updated_at?: string
+          vix_level?: number | null
+          volatility_label?: string | null
+        }
+        Update: {
+          broad_market_label?: string | null
+          confidence_score?: number | null
+          created_at?: string
+          earnings_season?: boolean
+          fed_week?: boolean
+          id?: string
+          metadata?: Json
+          regime_date?: string
+          source?: string
+          spy_return_20d?: number | null
+          trend_label?: string | null
+          updated_at?: string
+          vix_level?: number | null
+          volatility_label?: string | null
         }
         Relationships: []
       }
@@ -562,35 +822,69 @@ export type Database = {
       prediction_history: {
         Row: {
           actual_label: string | null
+          actual_label_at: string | null
+          actual_return: number | null
+          confidence_score: number | null
+          created_by_pipeline: string | null
+          feature_store_id: string | null
           features_snapshot: Json | null
           id: string
+          model_version: string | null
           model_version_id: string | null
           predicted_at: string
           predicted_label: string | null
+          predicted_probability: number | null
+          prediction_date: string | null
           probability: number | null
           ticker: string | null
+          why_prediction: Json | null
         }
         Insert: {
           actual_label?: string | null
+          actual_label_at?: string | null
+          actual_return?: number | null
+          confidence_score?: number | null
+          created_by_pipeline?: string | null
+          feature_store_id?: string | null
           features_snapshot?: Json | null
           id?: string
+          model_version?: string | null
           model_version_id?: string | null
           predicted_at?: string
           predicted_label?: string | null
+          predicted_probability?: number | null
+          prediction_date?: string | null
           probability?: number | null
           ticker?: string | null
+          why_prediction?: Json | null
         }
         Update: {
           actual_label?: string | null
+          actual_label_at?: string | null
+          actual_return?: number | null
+          confidence_score?: number | null
+          created_by_pipeline?: string | null
+          feature_store_id?: string | null
           features_snapshot?: Json | null
           id?: string
+          model_version?: string | null
           model_version_id?: string | null
           predicted_at?: string
           predicted_label?: string | null
+          predicted_probability?: number | null
+          prediction_date?: string | null
           probability?: number | null
           ticker?: string | null
+          why_prediction?: Json | null
         }
         Relationships: [
+          {
+            foreignKeyName: "prediction_history_feature_store_id_fkey"
+            columns: ["feature_store_id"]
+            isOneToOne: false
+            referencedRelation: "swing_feature_store"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "prediction_history_model_version_id_fkey"
             columns: ["model_version_id"]
@@ -637,6 +931,83 @@ export type Database = {
             columns: ["topic_id"]
             isOneToOne: false
             referencedRelation: "learned_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rl_experiences: {
+        Row: {
+          action: Json
+          created_at: string
+          done: boolean
+          experience_date: string | null
+          feature_store_id: string | null
+          id: string
+          model_version: string | null
+          next_state: Json | null
+          pipeline_version: string
+          reward: number | null
+          state: Json
+          ticker: string | null
+          training_example_id: string | null
+        }
+        Insert: {
+          action: Json
+          created_at?: string
+          done?: boolean
+          experience_date?: string | null
+          feature_store_id?: string | null
+          id?: string
+          model_version?: string | null
+          next_state?: Json | null
+          pipeline_version?: string
+          reward?: number | null
+          state: Json
+          ticker?: string | null
+          training_example_id?: string | null
+        }
+        Update: {
+          action?: Json
+          created_at?: string
+          done?: boolean
+          experience_date?: string | null
+          feature_store_id?: string | null
+          id?: string
+          model_version?: string | null
+          next_state?: Json | null
+          pipeline_version?: string
+          reward?: number | null
+          state?: Json
+          ticker?: string | null
+          training_example_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rl_experiences_feature_store_id_fkey"
+            columns: ["feature_store_id"]
+            isOneToOne: false
+            referencedRelation: "swing_feature_store"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rl_experiences_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: false
+            referencedRelation: "ml_training_dataset_v2"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rl_experiences_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: false
+            referencedRelation: "swing_ml_training_dataset_v1"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rl_experiences_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: false
+            referencedRelation: "swing_training_examples"
             referencedColumns: ["id"]
           },
         ]
@@ -808,6 +1179,116 @@ export type Database = {
           ticker?: string
         }
         Relationships: []
+      }
+      swing_feature_store: {
+        Row: {
+          api_latency_ms: Json | null
+          confidence_score: number | null
+          created_at: string
+          current_price: number | null
+          data_quality_flags: string[] | null
+          dataset_version: string
+          exa_negative_signal_count: number | null
+          exa_positive_signal_count: number | null
+          exa_result_count: number | null
+          exa_snapshot: Json | null
+          feature_date: string
+          feature_vector: Json
+          feature_version: string
+          finnhub_available: boolean | null
+          finnhub_snapshot: Json | null
+          id: string
+          market_regime_id: string | null
+          market_regime_label: string | null
+          one_session_return_pct: number | null
+          pipeline_version: string
+          provider_status: Json | null
+          provider_timestamp: string | null
+          provider_version: Json | null
+          seven_session_return_pct: number | null
+          technical_score: number | null
+          ticker: string
+          training_source: string
+          twenty_session_return_pct: number | null
+          updated_at: string
+          volume_strength: number | null
+          yahoo_snapshot: Json | null
+        }
+        Insert: {
+          api_latency_ms?: Json | null
+          confidence_score?: number | null
+          created_at?: string
+          current_price?: number | null
+          data_quality_flags?: string[] | null
+          dataset_version?: string
+          exa_negative_signal_count?: number | null
+          exa_positive_signal_count?: number | null
+          exa_result_count?: number | null
+          exa_snapshot?: Json | null
+          feature_date: string
+          feature_vector?: Json
+          feature_version?: string
+          finnhub_available?: boolean | null
+          finnhub_snapshot?: Json | null
+          id?: string
+          market_regime_id?: string | null
+          market_regime_label?: string | null
+          one_session_return_pct?: number | null
+          pipeline_version?: string
+          provider_status?: Json | null
+          provider_timestamp?: string | null
+          provider_version?: Json | null
+          seven_session_return_pct?: number | null
+          technical_score?: number | null
+          ticker: string
+          training_source?: string
+          twenty_session_return_pct?: number | null
+          updated_at?: string
+          volume_strength?: number | null
+          yahoo_snapshot?: Json | null
+        }
+        Update: {
+          api_latency_ms?: Json | null
+          confidence_score?: number | null
+          created_at?: string
+          current_price?: number | null
+          data_quality_flags?: string[] | null
+          dataset_version?: string
+          exa_negative_signal_count?: number | null
+          exa_positive_signal_count?: number | null
+          exa_result_count?: number | null
+          exa_snapshot?: Json | null
+          feature_date?: string
+          feature_vector?: Json
+          feature_version?: string
+          finnhub_available?: boolean | null
+          finnhub_snapshot?: Json | null
+          id?: string
+          market_regime_id?: string | null
+          market_regime_label?: string | null
+          one_session_return_pct?: number | null
+          pipeline_version?: string
+          provider_status?: Json | null
+          provider_timestamp?: string | null
+          provider_version?: Json | null
+          seven_session_return_pct?: number | null
+          technical_score?: number | null
+          ticker?: string
+          training_source?: string
+          twenty_session_return_pct?: number | null
+          updated_at?: string
+          volume_strength?: number | null
+          yahoo_snapshot?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "swing_feature_store_market_regime_id_fkey"
+            columns: ["market_regime_id"]
+            isOneToOne: false
+            referencedRelation: "market_regimes"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       swing_ticker_cache: {
         Row: {
@@ -1040,6 +1521,7 @@ export type Database = {
           analyst_score: number | null
           analyst_sell_count: number | null
           analyst_signal: string | null
+          api_latency_ms: Json | null
           best_window: string | null
           catalyst_summary: string | null
           checked_at: string
@@ -1047,7 +1529,9 @@ export type Database = {
           commission_bps: number | null
           company: string | null
           confidence: string | null
+          confidence_score: number | null
           created_at: string
+          created_by_pipeline: string | null
           current_price: number | null
           data_quality_flags: string[] | null
           dataset_version: string
@@ -1066,10 +1550,12 @@ export type Database = {
           exit_date: string | null
           exit_price: number | null
           extended_flag: boolean | null
+          feature_store_id: string | null
           feature_version: string
           final_swing_score: number | null
           finnhub_available: boolean | null
           finnhub_snapshot: Json | null
+          future_return: number | null
           gap_to_selected: number | null
           has_analyst_upgrade_signal: boolean | null
           has_cash_burn_signal: boolean | null
@@ -1093,6 +1579,7 @@ export type Database = {
           high_volatility_flag: boolean | null
           historical_date: string | null
           historical_run_id: string | null
+          holding_days: number | null
           id: string
           industry: string | null
           key_risks: Json | null
@@ -1100,6 +1587,8 @@ export type Database = {
           learning_penalty: number | null
           lower_watch_area: number | null
           market_cap: number | null
+          market_regime_id: string | null
+          market_regime_label: string | null
           momentum_status: string | null
           near_miss: boolean | null
           near_resistance_flag: boolean | null
@@ -1107,9 +1596,15 @@ export type Database = {
           overbought_flag: boolean | null
           peer_confirmation_score: number | null
           peer_count: number | null
+          pipeline_version: string
           position_size_pct: number | null
           provider: string | null
+          provider_status: Json | null
+          provider_timestamp: string | null
+          provider_version: Json | null
           rejection_reason: string | null
+          reward_drawdown: number | null
+          risk_adjusted_return: number | null
           risk_reward: number | null
           rule_based_final_score: number | null
           run_id: string | null
@@ -1136,6 +1631,7 @@ export type Database = {
           volume_strength: number | null
           was_selected: boolean
           weak_volume_flag: boolean | null
+          why_prediction: Json | null
           yahoo_snapshot: Json | null
         }
         Insert: {
@@ -1144,6 +1640,7 @@ export type Database = {
           analyst_score?: number | null
           analyst_sell_count?: number | null
           analyst_signal?: string | null
+          api_latency_ms?: Json | null
           best_window?: string | null
           catalyst_summary?: string | null
           checked_at?: string
@@ -1151,7 +1648,9 @@ export type Database = {
           commission_bps?: number | null
           company?: string | null
           confidence?: string | null
+          confidence_score?: number | null
           created_at?: string
+          created_by_pipeline?: string | null
           current_price?: number | null
           data_quality_flags?: string[] | null
           dataset_version?: string
@@ -1170,10 +1669,12 @@ export type Database = {
           exit_date?: string | null
           exit_price?: number | null
           extended_flag?: boolean | null
+          feature_store_id?: string | null
           feature_version?: string
           final_swing_score?: number | null
           finnhub_available?: boolean | null
           finnhub_snapshot?: Json | null
+          future_return?: number | null
           gap_to_selected?: number | null
           has_analyst_upgrade_signal?: boolean | null
           has_cash_burn_signal?: boolean | null
@@ -1197,6 +1698,7 @@ export type Database = {
           high_volatility_flag?: boolean | null
           historical_date?: string | null
           historical_run_id?: string | null
+          holding_days?: number | null
           id?: string
           industry?: string | null
           key_risks?: Json | null
@@ -1204,6 +1706,8 @@ export type Database = {
           learning_penalty?: number | null
           lower_watch_area?: number | null
           market_cap?: number | null
+          market_regime_id?: string | null
+          market_regime_label?: string | null
           momentum_status?: string | null
           near_miss?: boolean | null
           near_resistance_flag?: boolean | null
@@ -1211,9 +1715,15 @@ export type Database = {
           overbought_flag?: boolean | null
           peer_confirmation_score?: number | null
           peer_count?: number | null
+          pipeline_version?: string
           position_size_pct?: number | null
           provider?: string | null
+          provider_status?: Json | null
+          provider_timestamp?: string | null
+          provider_version?: Json | null
           rejection_reason?: string | null
+          reward_drawdown?: number | null
+          risk_adjusted_return?: number | null
           risk_reward?: number | null
           rule_based_final_score?: number | null
           run_id?: string | null
@@ -1240,6 +1750,7 @@ export type Database = {
           volume_strength?: number | null
           was_selected?: boolean
           weak_volume_flag?: boolean | null
+          why_prediction?: Json | null
           yahoo_snapshot?: Json | null
         }
         Update: {
@@ -1248,6 +1759,7 @@ export type Database = {
           analyst_score?: number | null
           analyst_sell_count?: number | null
           analyst_signal?: string | null
+          api_latency_ms?: Json | null
           best_window?: string | null
           catalyst_summary?: string | null
           checked_at?: string
@@ -1255,7 +1767,9 @@ export type Database = {
           commission_bps?: number | null
           company?: string | null
           confidence?: string | null
+          confidence_score?: number | null
           created_at?: string
+          created_by_pipeline?: string | null
           current_price?: number | null
           data_quality_flags?: string[] | null
           dataset_version?: string
@@ -1274,10 +1788,12 @@ export type Database = {
           exit_date?: string | null
           exit_price?: number | null
           extended_flag?: boolean | null
+          feature_store_id?: string | null
           feature_version?: string
           final_swing_score?: number | null
           finnhub_available?: boolean | null
           finnhub_snapshot?: Json | null
+          future_return?: number | null
           gap_to_selected?: number | null
           has_analyst_upgrade_signal?: boolean | null
           has_cash_burn_signal?: boolean | null
@@ -1301,6 +1817,7 @@ export type Database = {
           high_volatility_flag?: boolean | null
           historical_date?: string | null
           historical_run_id?: string | null
+          holding_days?: number | null
           id?: string
           industry?: string | null
           key_risks?: Json | null
@@ -1308,6 +1825,8 @@ export type Database = {
           learning_penalty?: number | null
           lower_watch_area?: number | null
           market_cap?: number | null
+          market_regime_id?: string | null
+          market_regime_label?: string | null
           momentum_status?: string | null
           near_miss?: boolean | null
           near_resistance_flag?: boolean | null
@@ -1315,9 +1834,15 @@ export type Database = {
           overbought_flag?: boolean | null
           peer_confirmation_score?: number | null
           peer_count?: number | null
+          pipeline_version?: string
           position_size_pct?: number | null
           provider?: string | null
+          provider_status?: Json | null
+          provider_timestamp?: string | null
+          provider_version?: Json | null
           rejection_reason?: string | null
+          reward_drawdown?: number | null
+          risk_adjusted_return?: number | null
           risk_reward?: number | null
           rule_based_final_score?: number | null
           run_id?: string | null
@@ -1344,9 +1869,25 @@ export type Database = {
           volume_strength?: number | null
           was_selected?: boolean
           weak_volume_flag?: boolean | null
+          why_prediction?: Json | null
           yahoo_snapshot?: Json | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "fk_swing_training_examples_feature_store"
+            columns: ["feature_store_id"]
+            isOneToOne: false
+            referencedRelation: "swing_feature_store"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_swing_training_examples_market_regime"
+            columns: ["market_regime_id"]
+            isOneToOne: false
+            referencedRelation: "market_regimes"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       swing_training_outcomes: {
         Row: {
@@ -1597,6 +2138,58 @@ export type Database = {
       }
     }
     Views: {
+      historical_replay_run_summary_v1: {
+        Row: {
+          completed_at: string | null
+          config: Json | null
+          consecutive_error_count: number | null
+          created_at: string | null
+          current_replay_date: string | null
+          days_committed: number | null
+          days_failed: number | null
+          end_date: string | null
+          examples_committed: number | null
+          examples_created: number | null
+          failure_count: number | null
+          heartbeat_at: string | null
+          id: string | null
+          last_day_finished_at: string | null
+          last_error: string | null
+          last_processed_batch: Json | null
+          last_progress_at: string | null
+          outcomes_committed: number | null
+          outcomes_created: number | null
+          pipeline_version: string | null
+          processed_trading_days: number | null
+          resume_supported: boolean | null
+          run_source: string | null
+          start_date: string | null
+          started_at: string | null
+          status: string | null
+          tickers_committed: number | null
+          tickers_processed: number | null
+          total_trading_days: number | null
+          updated_at: string | null
+        }
+        Relationships: []
+      }
+      ml_training_committed_summary_v1: {
+        Row: {
+          avg_max_drawdown_pct: number | null
+          avg_return_pct: number | null
+          completed_10_session: number | null
+          flat_count: number | null
+          historical_days_saved: number | null
+          historical_examples: number | null
+          last_example_at: string | null
+          last_outcome_at: string | null
+          live_examples: number | null
+          loss_count: number | null
+          total_examples: number | null
+          win_count: number | null
+        }
+        Relationships: []
+      }
       ml_training_dataset_v2: {
         Row: {
           analyst_buy_count: number | null

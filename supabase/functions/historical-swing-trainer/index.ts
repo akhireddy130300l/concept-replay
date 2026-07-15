@@ -35,8 +35,17 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const DIAG_KEY = Deno.env.get("DIAG_KEY") ?? "";
 const EXA_API_KEY = Deno.env.get("EXA_API_KEY") ?? "";
+const PIPELINE_VERSION = "historical_replay_v2";
+const FEATURE_VERSION = "v1";
+const DATASET_VERSION = "dataset_v1";
+const MAX_CONSECUTIVE_ERRORS_DEFAULT = 3;
+const MAX_DAYS_PER_INVOCATION = 1;
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
+
+function logEvent(event: string, details: Record<string, unknown>) {
+  console.log(JSON.stringify({ event, pipeline: PIPELINE_VERSION, ts: new Date().toISOString(), ...details }));
+}
 
 // US market holidays 2023-2027 (regular closes only; half-days included as full).
 const US_HOLIDAYS = new Set<string>([
@@ -59,8 +68,10 @@ function tradingDaysInRange(start: string, end: string): string[] {
 }
 
 async function fetchYahooHistorical(symbol: string, from: string, to: string): Promise<
-  { ok: true; bars: { ts: number; close: number; high: number; low: number; volume: number }[] } | { ok: false; reason: string }
+  { ok: true; bars: { ts: number; close: number; high: number; low: number; volume: number }[]; latency_ms: number; status: number; provider_timestamp: string } | { ok: false; reason: string; latency_ms: number; status?: number; provider_timestamp: string }
 > {
+  const started = Date.now();
+  const provider_timestamp = new Date().toISOString();
   const period1 = Math.floor(new Date(from + "T00:00:00Z").getTime() / 1000);
   const period2 = Math.floor(new Date(to + "T00:00:00Z").getTime() / 1000) + 86400;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`;
@@ -68,10 +79,10 @@ async function fetchYahooHistorical(symbol: string, from: string, to: string): P
     const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12000);
     const res = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": "Mozilla/5.0" } });
     clearTimeout(t);
-    if (res.status !== 200) return { ok: false, reason: `status_${res.status}` };
+    if (res.status !== 200) return { ok: false, reason: `status_${res.status}`, latency_ms: Date.now() - started, status: res.status, provider_timestamp };
     const j = await res.json();
     const r = j?.chart?.result?.[0]; const q = r?.indicators?.quote?.[0]; const ts = r?.timestamp;
-    if (!Array.isArray(ts) || !q) return { ok: false, reason: "missing_series" };
+    if (!Array.isArray(ts) || !q) return { ok: false, reason: "missing_series", latency_ms: Date.now() - started, status: res.status, provider_timestamp };
     const bars: any[] = [];
     for (let i = 0; i < ts.length; i++) {
       const c = q.close?.[i], h = q.high?.[i], l = q.low?.[i], v = q.volume?.[i];
@@ -79,12 +90,14 @@ async function fetchYahooHistorical(symbol: string, from: string, to: string): P
         bars.push({ ts: ts[i], close: c, high: h, low: l, volume: v });
       }
     }
-    return { ok: true, bars };
-  } catch (e) { return { ok: false, reason: (e as Error).message.slice(0, 100) }; }
+    return { ok: true, bars, latency_ms: Date.now() - started, status: res.status, provider_timestamp };
+  } catch (e) { return { ok: false, reason: (e as Error).message.slice(0, 100), latency_ms: Date.now() - started, provider_timestamp }; }
 }
 
 async function exaHistoricalNews(ticker: string, company: string, day: string): Promise<any> {
-  if (!EXA_API_KEY) return { skipped: "missing_exa_api_key" };
+  const started = Date.now();
+  const provider_timestamp = new Date().toISOString();
+  if (!EXA_API_KEY) return { skipped: "missing_exa_api_key", _meta: { provider: "exa", status: "skipped", latency_ms: 0, provider_timestamp } };
   const end = day; const start = iso(addDays(new Date(day + "T00:00:00Z"), -14));
   try {
     const res = await fetch("https://api.exa.ai/search", {
@@ -98,10 +111,10 @@ async function exaHistoricalNews(ticker: string, company: string, day: string): 
         contents: { highlights: true },
       }),
     });
-    if (!res.ok) return { error: `status_${res.status}` };
+    if (!res.ok) return { error: `status_${res.status}`, _meta: { provider: "exa", status: res.status, latency_ms: Date.now() - started, provider_timestamp } };
     const j = await res.json();
-    return { results: (j.results ?? []).map((r: any) => ({ title: r.title, url: r.url, published: r.publishedDate, highlights: r.highlights ?? [] })) };
-  } catch (e) { return { error: (e as Error).message.slice(0, 100) }; }
+    return { results: (j.results ?? []).map((r: any) => ({ title: r.title, url: r.url, published: r.publishedDate, highlights: r.highlights ?? [] })), _meta: { provider: "exa", status: res.status, latency_ms: Date.now() - started, provider_timestamp } };
+  } catch (e) { return { error: (e as Error).message.slice(0, 100), _meta: { provider: "exa", status: "error", latency_ms: Date.now() - started, provider_timestamp } }; }
 }
 
 // Deterministic keyword-based signals (subset of live pipeline).
@@ -129,22 +142,87 @@ function labelFor(returnPct: number, targetHit: boolean, stopHit: boolean, maxGa
   return "flat";
 }
 
+async function touchRun(runId: string, patch: Record<string, unknown> = {}) {
+  await admin.from("historical_training_runs").update({ heartbeat_at: new Date().toISOString(), ...patch }).eq("id", runId);
+}
+
+async function upsertDayLog(runId: string, day: string, patch: Record<string, unknown>) {
+  await admin.from("historical_replay_day_logs").upsert({
+    run_id: runId,
+    replay_date: day,
+    updated_at: new Date().toISOString(),
+    ...patch,
+  }, { onConflict: "run_id,replay_date" });
+}
+
+async function countDayQualityEvents(runId: string, day: string): Promise<number> {
+  const { count } = await admin
+    .from("ml_data_quality_log")
+    .select("id", { count: "exact", head: true })
+    .eq("run_id", runId)
+    .eq("historical_date", day);
+  return count ?? 0;
+}
+
+function confidenceFromScore(score: number, exaScore: { positive_count: number; negative_count: number }) {
+  const signalStrength = Math.min(0.25, Math.abs(exaScore.positive_count - exaScore.negative_count) * 0.03);
+  return Math.max(0.35, Math.min(0.92, 0.45 + score / 25 + signalStrength));
+}
+
+function marketRegimeFor(day: string, scored: { twentyDayPct: number; volumeRatio: number }[]) {
+  const avg20 = scored.length ? scored.reduce((a, s) => a + s.twentyDayPct, 0) / scored.length : 0;
+  const avgVolume = scored.length ? scored.reduce((a, s) => a + s.volumeRatio, 0) / scored.length : 1;
+  const broad = avg20 > 3 ? "bull" : avg20 < -3 ? "bear" : "sideways";
+  const vol = avgVolume > 1.35 ? "high_volatility" : avgVolume < 0.8 ? "low_volatility" : "normal_volatility";
+  const month = Number(day.slice(5, 7));
+  const dd = Number(day.slice(8, 10));
+  return {
+    broad_market_label: broad,
+    volatility_label: vol,
+    trend_label: avg20 > 1 ? "uptrend" : avg20 < -1 ? "downtrend" : "rangebound",
+    fed_week: dd >= 15 && dd <= 22,
+    earnings_season: [1, 4, 7, 10].includes(month),
+    spy_return_20d: avg20,
+    vix_level: null,
+    confidence_score: 0.55,
+    metadata: { proxy: "average_top_universe_20d_return_and_volume", avg_volume_ratio: avgVolume },
+  };
+}
+
 async function processDay(runId: string, day: string, universe: string[], topN: number) {
-  console.log(`[hist-trainer] day_started date=${day} universe=${universe.length}`);
+  const dayStarted = Date.now();
+  logEvent("historical_day_started", { run_id: runId, replay_date: day, universe_count: universe.length, top_n: topN });
+  await touchRun(runId, { current_replay_date: day });
+  await upsertDayLog(runId, day, {
+    status: "started",
+    universe_count: universe.length,
+    started_at: new Date().toISOString(),
+    metadata: { top_n: topN, pipeline_version: PIPELINE_VERSION },
+  });
   // Fetch bars [day-60, day+45] for every universe ticker with concurrency 3.
   const from = iso(addDays(new Date(day + "T00:00:00Z"), -70));
   const to = iso(addDays(new Date(day + "T00:00:00Z"), 55));
   const barsByTicker = new Map<string, any[]>();
+  const yahooMetaByTicker = new Map<string, any>();
   let idx = 0;
+  let yahooFailures = 0;
   async function worker() {
     while (idx < universe.length) {
       const i = idx++; const sym = universe[i];
       const r = await fetchYahooHistorical(sym, from, to);
-      if (r.ok) barsByTicker.set(sym, r.bars);
-      else await admin.from("ml_data_quality_log").insert({ run_id: runId, ticker: sym, historical_date: day, reason: "yahoo_fetch_failed", details: { reason: r.reason } });
+      if (r.ok) {
+        barsByTicker.set(sym, r.bars);
+        yahooMetaByTicker.set(sym, { status: r.status, latency_ms: r.latency_ms, provider_timestamp: r.provider_timestamp });
+      } else {
+        yahooFailures++;
+        yahooMetaByTicker.set(sym, { status: r.status ?? "error", latency_ms: r.latency_ms, provider_timestamp: r.provider_timestamp, reason: r.reason });
+        await admin.from("ml_data_quality_log").insert({ run_id: runId, ticker: sym, historical_date: day, reason: "yahoo_fetch_failed", details: { reason: r.reason, status: r.status, latency_ms: r.latency_ms } });
+      }
     }
   }
   await Promise.all([worker(), worker(), worker()]);
+  logEvent("historical_yahoo_scan_complete", { run_id: runId, replay_date: day, fetched: barsByTicker.size, yahoo_failures: yahooFailures });
+  await touchRun(runId);
 
   // Compute point-in-time metrics per ticker as of `day`.
   const dayTs = Math.floor(new Date(day + "T00:00:00Z").getTime() / 1000);
@@ -165,7 +243,21 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
   // Point-in-time "top gainers" universe: sort by composite gainer/momentum then take topN.
   scored.sort((a, b) => (b.oneDayPct + b.sevenDayPct * 0.3 + (b.volumeRatio - 1) * 5) - (a.oneDayPct + a.sevenDayPct * 0.3 + (a.volumeRatio - 1) * 5));
   const selected = scored.slice(0, topN);
-  console.log(`[hist-trainer] gainers_scan date=${day} scored=${scored.length} selected=${selected.length}`);
+  logEvent("historical_gainers_scan_complete", { run_id: runId, replay_date: day, scored_count: scored.length, selected_count: selected.length });
+  await upsertDayLog(runId, day, {
+    status: "scored",
+    scored_count: scored.length,
+    selected_count: selected.length,
+    yahoo_failures: yahooFailures,
+    metadata: { bars_fetched: barsByTicker.size, top_n: topN, pipeline_version: PIPELINE_VERSION },
+  });
+
+  const regime = marketRegimeFor(day, scored);
+  const { data: regimeRow } = await admin.from("market_regimes").upsert({
+    regime_date: day,
+    ...regime,
+  }, { onConflict: "regime_date" }).select("id,broad_market_label,volatility_label,trend_label").maybeSingle();
+  const marketRegimeLabel = regimeRow ? `${regimeRow.broad_market_label}/${regimeRow.volatility_label}` : `${regime.broad_market_label}/${regime.volatility_label}`;
 
   let examplesCreated = 0, outcomesCreated = 0;
   for (const s of selected) {
@@ -182,6 +274,18 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
     const stop = support * 0.98;
     const target = resistance * 1.02;
     const rr = entry > stop ? (target - entry) / (entry - stop) : 0;
+    const confidenceScore = confidenceFromScore(technicalScore, exaScore);
+    const providerStatus = {
+      yahoo: yahooMetaByTicker.get(s.ticker)?.status ?? "unknown",
+      exa: news?._meta?.status ?? (news?.error ? "error" : "unknown"),
+      finnhub: "unavailable_historical_free_tier",
+    };
+    const apiLatencyMs = {
+      yahoo: yahooMetaByTicker.get(s.ticker)?.latency_ms ?? null,
+      exa: news?._meta?.latency_ms ?? null,
+      finnhub: null,
+    };
+    const providerTimestamp = news?._meta?.provider_timestamp ?? yahooMetaByTicker.get(s.ticker)?.provider_timestamp ?? new Date().toISOString();
 
     // Deterministic outcomes from bars > asOfIdx.
     const future = s.bars.slice(s.asOfIdx + 1);
@@ -204,6 +308,67 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
     const label40 = labelFor(returnPct, targetHit, stopHit, maxGain, maxDD, sessionsElapsed, 40);
     const finalLabel = label40 !== "pending" ? label40 : label20 !== "pending" ? label20 : label10 !== "pending" ? label10 : label3;
     const exitIdx = Math.min(future.length - 1, 40);
+    const exitPrice = future[exitIdx].close;
+    const exitDate = iso(new Date(future[exitIdx].ts * 1000));
+    const riskAdjustedReturn = Math.abs(maxDD) > 0 ? returnPct / Math.abs(maxDD) : returnPct;
+    const whyPrediction = {
+      technical_score: technicalScore,
+      volume_strength: s.volumeRatio,
+      one_day_return_pct: s.oneDayPct,
+      seven_day_return_pct: s.sevenDayPct,
+      positive_news_signals: exaScore.positive_count,
+      negative_news_signals: exaScore.negative_count,
+      risk_reward: rr,
+    };
+
+    const featureVector = {
+      price: entry,
+      one_session_return_pct: s.oneDayPct,
+      seven_session_return_pct: s.sevenDayPct,
+      twenty_session_return_pct: s.twentyDayPct,
+      volume_strength: s.volumeRatio,
+      technical_score: technicalScore,
+      risk_reward: rr,
+      exa_result_count: exaScore.result_count,
+      exa_positive_signal_count: exaScore.positive_count,
+      exa_negative_signal_count: exaScore.negative_count,
+      market_regime_label: marketRegimeLabel,
+      confidence_score: confidenceScore,
+    };
+
+    const { data: featureRow, error: featureErr } = await admin.from("swing_feature_store").upsert({
+      ticker: s.ticker,
+      feature_date: day,
+      feature_version: FEATURE_VERSION,
+      dataset_version: DATASET_VERSION,
+      training_source: "historical",
+      pipeline_version: PIPELINE_VERSION,
+      provider_version: { yahoo_chart: "v8", exa_search: "search", finnhub: "free_tier_no_historical" },
+      provider_timestamp: providerTimestamp,
+      provider_status: providerStatus,
+      api_latency_ms: apiLatencyMs,
+      market_regime_id: regimeRow?.id ?? null,
+      market_regime_label: marketRegimeLabel,
+      current_price: entry,
+      one_session_return_pct: s.oneDayPct,
+      seven_session_return_pct: s.sevenDayPct,
+      twenty_session_return_pct: s.twentyDayPct,
+      volume_strength: s.volumeRatio,
+      technical_score: technicalScore,
+      exa_result_count: exaScore.result_count,
+      exa_positive_signal_count: exaScore.positive_count,
+      exa_negative_signal_count: exaScore.negative_count,
+      finnhub_available: false,
+      confidence_score: confidenceScore,
+      feature_vector: featureVector,
+      yahoo_snapshot: { price: entry, one_day_pct: s.oneDayPct, seven_day_pct: s.sevenDayPct, twenty_day_pct: s.twentyDayPct, volume_ratio: s.volumeRatio, support, resistance },
+      finnhub_snapshot: null,
+      exa_snapshot: news,
+      data_quality_flags: ["finnhub_lookahead_unavailable"],
+    }, { onConflict: "ticker,feature_date,feature_version,dataset_version,training_source" }).select("id").maybeSingle();
+    if (featureErr) {
+      await admin.from("ml_data_quality_log").insert({ run_id: runId, ticker: s.ticker, historical_date: day, reason: "feature_store_upsert_failed", details: { error: featureErr.message } });
+    }
 
     // Insert example
     const row = {
@@ -225,16 +390,31 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
       finnhub_available: false, // no historical Finnhub on free tier
       rule_based_final_score: technicalScore, final_swing_score: technicalScore,
 
-      feature_version: "v1", dataset_version: "dataset_v1", training_source: "historical",
+      feature_version: FEATURE_VERSION, dataset_version: DATASET_VERSION, training_source: "historical",
       historical_run_id: runId, historical_date: day,
       yahoo_snapshot: { price: entry, one_day_pct: s.oneDayPct, seven_day_pct: s.sevenDayPct, twenty_day_pct: s.twentyDayPct, volume_ratio: s.volumeRatio, support, resistance },
       finnhub_snapshot: null,
       exa_snapshot: news,
-      entry_price: entry, exit_price: future[exitIdx].close,
-      entry_date: day, exit_date: iso(new Date(future[exitIdx].ts * 1000)),
+      entry_price: entry, exit_price: exitPrice,
+      entry_date: day, exit_date: exitDate,
       commission_bps: 0, slippage_bps: 0, position_size_pct: 0,
       split_bucket: "train", // historical rows always land in train
       data_quality_flags: ["finnhub_lookahead_unavailable"],
+      feature_store_id: featureRow?.id ?? null,
+      provider_version: { yahoo_chart: "v8", exa_search: "search", finnhub: "free_tier_no_historical" },
+      provider_timestamp: providerTimestamp,
+      provider_status: providerStatus,
+      api_latency_ms: apiLatencyMs,
+      pipeline_version: PIPELINE_VERSION,
+      created_by_pipeline: "historical_replay",
+      confidence_score: confidenceScore,
+      market_regime_id: regimeRow?.id ?? null,
+      market_regime_label: marketRegimeLabel,
+      future_return: returnPct,
+      risk_adjusted_return: riskAdjustedReturn,
+      reward_drawdown: maxDD,
+      holding_days: Math.min(sessionsElapsed, 40),
+      why_prediction: whyPrediction,
     };
 
     const { data: ins, error: insErr } = await admin.from("swing_training_examples").insert(row).select("id").maybeSingle();
@@ -262,51 +442,146 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
     }, { onConflict: "training_example_id" });
     outcomesCreated++;
   }
-  console.log(`[hist-trainer] day_complete date=${day} examples=${examplesCreated} outcomes=${outcomesCreated}`);
-  return { examplesCreated, outcomesCreated, tickersProcessed: selected.length };
+  const dataQualityEvents = await countDayQualityEvents(runId, day);
+  const finishedAt = new Date().toISOString();
+  const durationMs = Date.now() - dayStarted;
+  await upsertDayLog(runId, day, {
+    status: "completed",
+    universe_count: universe.length,
+    scored_count: scored.length,
+    selected_count: selected.length,
+    examples_created: examplesCreated,
+    outcomes_created: outcomesCreated,
+    tickers_processed: selected.length,
+    yahoo_failures: yahooFailures,
+    data_quality_events: dataQualityEvents,
+    finished_at: finishedAt,
+    duration_ms: durationMs,
+    metadata: { market_regime_label: marketRegimeLabel, pipeline_version: PIPELINE_VERSION },
+  });
+  logEvent("historical_day_completed", { run_id: runId, replay_date: day, examples_created: examplesCreated, outcomes_created: outcomesCreated, tickers_processed: selected.length, duration_ms: durationMs, data_quality_events: dataQualityEvents });
+  return { examplesCreated, outcomesCreated, tickersProcessed: selected.length, scoredCount: scored.length, selectedCount: selected.length, yahooFailures, dataQualityEvents };
 }
 
 async function runReplay(runId: string, config: any) {
   try {
+    logEvent("historical_run_started", { run_id: runId, config });
     const { data: universe } = await admin.from("ml_universe_russell1000").select("ticker");
     const tickers = (universe ?? []).map((u: any) => u.ticker);
     if (tickers.length === 0) {
-      await admin.from("historical_training_runs").update({ status: "failed", last_error: "empty_universe", completed_at: new Date().toISOString() }).eq("id", runId);
+      await touchRun(runId, { status: "failed", last_error: "empty_universe", completed_at: new Date().toISOString() });
+      logEvent("historical_run_failed", { run_id: runId, reason: "empty_universe" });
       return;
     }
     const days = tradingDaysInRange(config.start_date, config.end_date);
-    const { data: existing } = await admin.from("historical_training_runs").select("current_replay_date").eq("id", runId).maybeSingle();
+    const { data: existing } = await admin
+      .from("historical_training_runs")
+      .select("current_replay_date,status,tickers_processed,examples_created,outcomes_created,failure_count,consecutive_error_count,processed_trading_days")
+      .eq("id", runId)
+      .maybeSingle();
+    if (!existing || ["cancelled", "completed", "failed"].includes(existing.status)) {
+      logEvent("historical_run_skipped", { run_id: runId, status: existing?.status ?? "missing" });
+      return;
+    }
     const resumeFrom = config.resume && existing?.current_replay_date ? existing.current_replay_date : null;
     const startIdx = resumeFrom ? Math.max(0, days.findIndex((d) => d > resumeFrom)) : 0;
+    const batchSize = Math.max(1, Math.min(MAX_DAYS_PER_INVOCATION, Number(config.batch_size ?? 1)));
+    const maxConsecutiveErrors = Math.max(1, Number(config.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT));
+    const batchEndIdx = Math.min(days.length, startIdx + batchSize);
 
-    let totalExamples = 0, totalOutcomes = 0, totalTickers = 0;
-    for (let i = startIdx; i < days.length; i++) {
+    let totalExamples = Number(existing.examples_created ?? 0);
+    let totalOutcomes = Number(existing.outcomes_created ?? 0);
+    let totalTickers = Number(existing.tickers_processed ?? 0);
+    let processedTradingDays = Number(existing.processed_trading_days ?? Math.max(0, startIdx));
+    let failureCount = Number(existing.failure_count ?? 0);
+    let consecutiveErrors = Number(existing.consecutive_error_count ?? 0);
+    await touchRun(runId, {
+      status: "running",
+      total_trading_days: days.length,
+      processed_trading_days: processedTradingDays,
+      last_processed_batch: { start_idx: startIdx, end_idx_exclusive: batchEndIdx, batch_size: batchSize, started_at: new Date().toISOString() },
+    });
+
+    if (startIdx >= days.length) {
+      await touchRun(runId, { status: "completed", completed_at: new Date().toISOString(), last_error: null });
+      logEvent("historical_run_completed", { run_id: runId, examples_created: totalExamples, outcomes_created: totalOutcomes, processed_trading_days: processedTradingDays });
+      return;
+    }
+
+    for (let i = startIdx; i < batchEndIdx; i++) {
       const day = days[i];
       try {
         const r = await processDay(runId, day, tickers, config.top_n ?? 60);
         totalExamples += r.examplesCreated; totalOutcomes += r.outcomesCreated; totalTickers += r.tickersProcessed;
+        processedTradingDays = i + 1;
+        consecutiveErrors = 0;
       } catch (e) {
-        console.log(`[hist-trainer] day_failed date=${day} reason=${(e as Error).message}`);
+        const msg = (e as Error).message.slice(0, 500);
+        logEvent("historical_day_failed", { run_id: runId, replay_date: day, reason: msg });
+        failureCount += 1;
+        consecutiveErrors += 1;
+        await upsertDayLog(runId, day, {
+          status: "failed",
+          error_message: msg,
+          finished_at: new Date().toISOString(),
+          metadata: { pipeline_version: PIPELINE_VERSION, consecutive_errors: consecutiveErrors },
+        });
         await admin.from("ml_data_quality_log").insert({ run_id: runId, historical_date: day, reason: "day_failed", details: { error: (e as Error).message } });
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          await touchRun(runId, {
+            status: "failed",
+            last_error: `failed_after_${consecutiveErrors}_consecutive_day_errors: ${msg}`,
+            completed_at: new Date().toISOString(),
+            failure_count: failureCount,
+            consecutive_error_count: consecutiveErrors,
+            current_replay_date: day,
+            tickers_processed: totalTickers,
+            examples_created: totalExamples,
+            outcomes_created: totalOutcomes,
+            processed_trading_days: processedTradingDays,
+          });
+          logEvent("historical_run_failed", { run_id: runId, reason: "max_consecutive_errors", consecutive_errors: consecutiveErrors, last_error: msg });
+          return;
+        }
       }
-      await admin.from("historical_training_runs").update({
+      const nextStatus = i === days.length - 1 ? "completed" : "running";
+      await touchRun(runId, {
         current_replay_date: day,
         tickers_processed: totalTickers,
         examples_created: totalExamples,
         outcomes_created: totalOutcomes,
-        status: i === days.length - 1 ? "completed" : "running",
-      }).eq("id", runId);
-
-      // Batch pause every N days to avoid provider bursts.
-      if ((i - startIdx + 1) % (config.batch_size ?? 10) === 0) {
-        await new Promise((r) => setTimeout(r, 2000));
-      }
+        processed_trading_days: processedTradingDays,
+        failure_count: failureCount,
+        consecutive_error_count: consecutiveErrors,
+        last_progress_at: new Date().toISOString(),
+        last_error: consecutiveErrors ? `last day error: ${day}` : null,
+        status: nextStatus,
+        completed_at: nextStatus === "completed" ? new Date().toISOString() : null,
+        last_processed_batch: { start_idx: startIdx, end_idx_exclusive: batchEndIdx, last_day: day, committed_at: new Date().toISOString() },
+      });
+      logEvent("historical_progress_committed", { run_id: runId, replay_date: day, examples_created: totalExamples, outcomes_created: totalOutcomes, processed_trading_days: processedTradingDays, total_trading_days: days.length });
     }
-    await admin.from("historical_training_runs").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", runId);
-    console.log(`[hist-trainer] run_complete run_id=${runId} examples=${totalExamples} outcomes=${totalOutcomes}`);
+
+    if (batchEndIdx >= days.length) {
+      await touchRun(runId, { status: "completed", completed_at: new Date().toISOString(), last_error: null });
+      logEvent("historical_run_completed", { run_id: runId, examples_created: totalExamples, outcomes_created: totalOutcomes, processed_trading_days: processedTradingDays });
+      return;
+    }
+
+    await touchRun(runId, {
+      status: "running",
+      last_processed_batch: { start_idx: startIdx, end_idx_exclusive: batchEndIdx, queued_next_at: new Date().toISOString(), next_replay_date: days[batchEndIdx] },
+    });
+    logEvent("historical_next_batch_queued", { run_id: runId, next_replay_date: days[batchEndIdx], processed_trading_days: processedTradingDays, total_trading_days: days.length });
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/historical-swing-trainer`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-diag-key": DIAG_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+      body: JSON.stringify({ ...config, run_id: runId, resume: true }),
+    });
+    logEvent("historical_next_batch_invoked", { run_id: runId, status: resp.status, ok: resp.ok });
   } catch (e) {
-    await admin.from("historical_training_runs").update({ status: "failed", last_error: (e as Error).message, completed_at: new Date().toISOString() }).eq("id", runId);
-    console.log(`[hist-trainer] run_failed reason=${(e as Error).message}`);
+    await touchRun(runId, { status: "failed", last_error: (e as Error).message, completed_at: new Date().toISOString() });
+    logEvent("historical_run_failed", { run_id: runId, reason: (e as Error).message });
   }
 }
 
@@ -316,15 +591,26 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...CORS, "content-type": "application/json" } });
   }
   const body = await req.json().catch(() => ({}));
-  const { start_date, end_date, batch_size = 10, resume = true, universe = "russell1000", dry_run = false, top_n = 60 } = body;
+  const { start_date, end_date, batch_size = 5, resume = true, universe = "russell1000", dry_run = false, top_n = 60, run_id = null } = body;
   if (!start_date || !end_date) {
     return new Response(JSON.stringify({ error: "start_date and end_date required" }), { status: 400, headers: { ...CORS, "content-type": "application/json" } });
   }
-  const config = { start_date, end_date, batch_size, resume, universe, top_n };
-  const { data: run, error } = await admin.from("historical_training_runs").insert({
-    start_date, end_date, status: dry_run ? "dry_run" : "running", config,
-  }).select("id").single();
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...CORS, "content-type": "application/json" } });
+  const config = { start_date, end_date, batch_size, resume, universe, top_n, max_consecutive_errors: body.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT };
+  let run = run_id ? { id: run_id } : null;
+  if (!run) {
+    const inserted = await admin.from("historical_training_runs").insert({
+      start_date,
+      end_date,
+      status: dry_run ? "dry_run" : "running",
+      config,
+      heartbeat_at: new Date().toISOString(),
+      last_progress_at: new Date().toISOString(),
+      pipeline_version: PIPELINE_VERSION,
+      run_source: body.run_source ?? "manual",
+    }).select("id").single();
+    if (inserted.error) return new Response(JSON.stringify({ error: inserted.error.message }), { status: 500, headers: { ...CORS, "content-type": "application/json" } });
+    run = inserted.data;
+  }
 
   if (dry_run) {
     const days = tradingDaysInRange(start_date, end_date);

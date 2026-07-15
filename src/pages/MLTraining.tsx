@@ -15,39 +15,43 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 export default function MLTraining() {
   const [examples, setExamples] = useState<Row[] | null>(null);
   const [runs, setRuns] = useState<Row[]>([]);
+  const [dayLogs, setDayLogs] = useState<Row[]>([]);
   const [drift, setDrift] = useState<Row[]>([]);
-  const [stats, setStats] = useState({ total: 0, live: 0, historical: 0, completed10: 0, win: 0, loss: 0, flat: 0, avgReturn: 0, avgDD: 0 });
+  const [stats, setStats] = useState({ total: 0, live: 0, historical: 0, completed10: 0, win: 0, loss: 0, flat: 0, avgReturn: 0, avgDD: 0, historicalDays: 0 });
 
   const [startDate, setStartDate] = useState("2025-05-01");
   const [endDate, setEndDate] = useState(todayISO());
-  const [batchSize, setBatchSize] = useState(10);
+  const [batchSize, setBatchSize] = useState(1);
   const [topN, setTopN] = useState(60);
   const [starting, setStarting] = useState(false);
 
   async function loadAll() {
-    const [{ data: ex }, { data: out }, { data: dr }] = await Promise.all([
-      supabase.from("swing_training_examples").select("id, training_source, split_bucket").limit(10000),
-      supabase.from("swing_training_outcomes").select("label_10_session, return_pct_current, max_drawdown_pct").limit(10000),
+    const [{ data: dr }] = await Promise.all([
       supabase.from("ml_data_drift").select("*").order("measured_at", { ascending: false }).limit(10),
     ]);
-    setExamples(ex ?? []);
+    setExamples([]);
     setDrift(dr ?? []);
-    const total = ex?.length ?? 0;
-    const live = ex?.filter((r) => r.training_source === "live").length ?? 0;
-    const historical = ex?.filter((r) => r.training_source === "historical").length ?? 0;
-    const completed10 = out?.filter((r) => r.label_10_session && r.label_10_session !== "pending").length ?? 0;
-    const win = out?.filter((r) => r.label_10_session === "positive").length ?? 0;
-    const loss = out?.filter((r) => r.label_10_session === "negative").length ?? 0;
-    const flat = out?.filter((r) => r.label_10_session === "flat").length ?? 0;
-    const finished = out?.filter((r) => typeof r.return_pct_current === "number") ?? [];
-    const avgReturn = finished.length ? finished.reduce((a, r) => a + r.return_pct_current, 0) / finished.length : 0;
-    const avgDD = finished.length ? finished.reduce((a, r) => a + (r.max_drawdown_pct ?? 0), 0) / finished.length : 0;
-    setStats({ total, live, historical, completed10, win, loss, flat, avgReturn, avgDD });
   }
 
   async function loadRuns() {
     const { data } = await supabase.functions.invoke("ml-training-control?action=status", { method: "GET" as any });
     if (data?.runs) setRuns(data.runs);
+    if (data?.recent_day_logs) setDayLogs(data.recent_day_logs);
+    const s = data?.committed_summary;
+    if (s) {
+      setStats({
+        total: Number(s.total_examples ?? 0),
+        live: Number(s.live_examples ?? 0),
+        historical: Number(s.historical_examples ?? 0),
+        completed10: Number(s.completed_10_session ?? 0),
+        win: Number(s.win_count ?? 0),
+        loss: Number(s.loss_count ?? 0),
+        flat: Number(s.flat_count ?? 0),
+        avgReturn: Number(s.avg_return_pct ?? 0),
+        avgDD: Number(s.avg_max_drawdown_pct ?? 0),
+        historicalDays: Number(s.historical_days_saved ?? 0),
+      });
+    }
   }
 
   useEffect(() => {
@@ -114,7 +118,9 @@ export default function MLTraining() {
               <div><b>Current day:</b> {activeRun.current_replay_date ?? "—"}</div>
               <div><b>Examples created:</b> {activeRun.examples_created ?? 0}</div>
               <div><b>Outcomes created:</b> {activeRun.outcomes_created ?? 0}</div>
+              <div><b>Committed days:</b> {activeRun.days_committed ?? activeRun.processed_trading_days ?? 0} / {activeRun.total_trading_days ?? "—"}</div>
               <div><b>Tickers processed:</b> {activeRun.tickers_processed ?? 0}</div>
+              <div><b>Heartbeat:</b> {activeRun.heartbeat_at ? new Date(activeRun.heartbeat_at).toLocaleString() : "—"}</div>
               <div className="text-xs text-muted-foreground">Started {new Date(activeRun.started_at).toLocaleString()}</div>
             </div>
           )}
@@ -138,6 +144,7 @@ export default function MLTraining() {
           ["Total examples", stats.total.toLocaleString()],
           ["Live", stats.live.toLocaleString()],
           ["Historical", stats.historical.toLocaleString()],
+          ["Historical days", stats.historicalDays.toLocaleString()],
           ["Completed 10-session", stats.completed10.toLocaleString()],
           ["Win %", `${stats.completed10 ? Math.round((stats.win / stats.completed10) * 100) : 0}%`],
           ["Loss %", `${stats.completed10 ? Math.round((stats.loss / stats.completed10) * 100) : 0}%`],
@@ -155,15 +162,39 @@ export default function MLTraining() {
             <div className="text-sm text-muted-foreground">No historical replay runs yet. Use the form above to start one.</div>
           ) : (
             <table className="w-full text-sm">
-              <thead><tr className="text-left text-xs text-muted-foreground"><th>Started</th><th>Range</th><th>Current</th><th>Examples</th><th>Outcomes</th><th>Status</th></tr></thead>
+              <thead><tr className="text-left text-xs text-muted-foreground"><th>Started</th><th>Range</th><th>Current</th><th>Committed</th><th>Examples</th><th>Outcomes</th><th>Heartbeat</th><th>Status</th></tr></thead>
               <tbody>{runs.map((r) => (
                 <tr key={r.id} className="border-t">
                   <td className="py-2">{new Date(r.started_at).toLocaleString()}</td>
                   <td>{r.start_date} → {r.end_date}</td>
                   <td>{r.current_replay_date ?? "—"}</td>
+                  <td>{r.days_committed ?? r.processed_trading_days ?? 0} / {r.total_trading_days ?? "—"}</td>
                   <td>{r.examples_created ?? 0}</td>
                   <td>{r.outcomes_created ?? 0}</td>
+                  <td>{r.heartbeat_at ? new Date(r.heartbeat_at).toLocaleTimeString() : "—"}</td>
                   <td><Badge variant="outline">{r.status}</Badge></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Recent Replay Day Commits</CardTitle></CardHeader>
+        <CardContent>
+          {dayLogs.length === 0 ? <div className="text-sm text-muted-foreground">No day commits recorded yet.</div> : (
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs text-muted-foreground"><th>Date</th><th>Status</th><th>Examples</th><th>Outcomes</th><th>Scored</th><th>Duration</th><th>Error</th></tr></thead>
+              <tbody>{dayLogs.slice(0, 8).map((d) => (
+                <tr key={d.id} className="border-t">
+                  <td className="py-2">{d.replay_date}</td>
+                  <td><Badge variant="outline">{d.status}</Badge></td>
+                  <td>{d.examples_created ?? 0}</td>
+                  <td>{d.outcomes_created ?? 0}</td>
+                  <td>{d.scored_count ?? 0}</td>
+                  <td>{d.duration_ms ? `${Math.round(d.duration_ms / 1000)}s` : "—"}</td>
+                  <td className="max-w-[240px] truncate">{d.error_message ?? "—"}</td>
                 </tr>
               ))}</tbody>
             </table>
