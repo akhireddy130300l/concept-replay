@@ -141,22 +141,87 @@ function labelFor(returnPct: number, targetHit: boolean, stopHit: boolean, maxGa
   return "flat";
 }
 
+async function touchRun(runId: string, patch: Record<string, unknown> = {}) {
+  await admin.from("historical_training_runs").update({ heartbeat_at: new Date().toISOString(), ...patch }).eq("id", runId);
+}
+
+async function upsertDayLog(runId: string, day: string, patch: Record<string, unknown>) {
+  await admin.from("historical_replay_day_logs").upsert({
+    run_id: runId,
+    replay_date: day,
+    updated_at: new Date().toISOString(),
+    ...patch,
+  }, { onConflict: "run_id,replay_date" });
+}
+
+async function countDayQualityEvents(runId: string, day: string): Promise<number> {
+  const { count } = await admin
+    .from("ml_data_quality_log")
+    .select("id", { count: "exact", head: true })
+    .eq("run_id", runId)
+    .eq("historical_date", day);
+  return count ?? 0;
+}
+
+function confidenceFromScore(score: number, exaScore: { positive_count: number; negative_count: number }) {
+  const signalStrength = Math.min(0.25, Math.abs(exaScore.positive_count - exaScore.negative_count) * 0.03);
+  return Math.max(0.35, Math.min(0.92, 0.45 + score / 25 + signalStrength));
+}
+
+function marketRegimeFor(day: string, scored: { twentyDayPct: number; volumeRatio: number }[]) {
+  const avg20 = scored.length ? scored.reduce((a, s) => a + s.twentyDayPct, 0) / scored.length : 0;
+  const avgVolume = scored.length ? scored.reduce((a, s) => a + s.volumeRatio, 0) / scored.length : 1;
+  const broad = avg20 > 3 ? "bull" : avg20 < -3 ? "bear" : "sideways";
+  const vol = avgVolume > 1.35 ? "high_volatility" : avgVolume < 0.8 ? "low_volatility" : "normal_volatility";
+  const month = Number(day.slice(5, 7));
+  const dd = Number(day.slice(8, 10));
+  return {
+    broad_market_label: broad,
+    volatility_label: vol,
+    trend_label: avg20 > 1 ? "uptrend" : avg20 < -1 ? "downtrend" : "rangebound",
+    fed_week: dd >= 15 && dd <= 22,
+    earnings_season: [1, 4, 7, 10].includes(month),
+    spy_return_20d: avg20,
+    vix_level: null,
+    confidence_score: 0.55,
+    metadata: { proxy: "average_top_universe_20d_return_and_volume", avg_volume_ratio: avgVolume },
+  };
+}
+
 async function processDay(runId: string, day: string, universe: string[], topN: number) {
-  console.log(`[hist-trainer] day_started date=${day} universe=${universe.length}`);
+  const dayStarted = Date.now();
+  logEvent("historical_day_started", { run_id: runId, replay_date: day, universe_count: universe.length, top_n: topN });
+  await touchRun(runId, { current_replay_date: day });
+  await upsertDayLog(runId, day, {
+    status: "started",
+    universe_count: universe.length,
+    started_at: new Date().toISOString(),
+    metadata: { top_n: topN, pipeline_version: PIPELINE_VERSION },
+  });
   // Fetch bars [day-60, day+45] for every universe ticker with concurrency 3.
   const from = iso(addDays(new Date(day + "T00:00:00Z"), -70));
   const to = iso(addDays(new Date(day + "T00:00:00Z"), 55));
   const barsByTicker = new Map<string, any[]>();
+  const yahooMetaByTicker = new Map<string, any>();
   let idx = 0;
+  let yahooFailures = 0;
   async function worker() {
     while (idx < universe.length) {
       const i = idx++; const sym = universe[i];
       const r = await fetchYahooHistorical(sym, from, to);
-      if (r.ok) barsByTicker.set(sym, r.bars);
-      else await admin.from("ml_data_quality_log").insert({ run_id: runId, ticker: sym, historical_date: day, reason: "yahoo_fetch_failed", details: { reason: r.reason } });
+      if (r.ok) {
+        barsByTicker.set(sym, r.bars);
+        yahooMetaByTicker.set(sym, { status: r.status, latency_ms: r.latency_ms, provider_timestamp: r.provider_timestamp });
+      } else {
+        yahooFailures++;
+        yahooMetaByTicker.set(sym, { status: r.status ?? "error", latency_ms: r.latency_ms, provider_timestamp: r.provider_timestamp, reason: r.reason });
+        await admin.from("ml_data_quality_log").insert({ run_id: runId, ticker: sym, historical_date: day, reason: "yahoo_fetch_failed", details: { reason: r.reason, status: r.status, latency_ms: r.latency_ms } });
+      }
     }
   }
   await Promise.all([worker(), worker(), worker()]);
+  logEvent("historical_yahoo_scan_complete", { run_id: runId, replay_date: day, fetched: barsByTicker.size, yahoo_failures: yahooFailures });
+  await touchRun(runId);
 
   // Compute point-in-time metrics per ticker as of `day`.
   const dayTs = Math.floor(new Date(day + "T00:00:00Z").getTime() / 1000);
@@ -177,7 +242,21 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
   // Point-in-time "top gainers" universe: sort by composite gainer/momentum then take topN.
   scored.sort((a, b) => (b.oneDayPct + b.sevenDayPct * 0.3 + (b.volumeRatio - 1) * 5) - (a.oneDayPct + a.sevenDayPct * 0.3 + (a.volumeRatio - 1) * 5));
   const selected = scored.slice(0, topN);
-  console.log(`[hist-trainer] gainers_scan date=${day} scored=${scored.length} selected=${selected.length}`);
+  logEvent("historical_gainers_scan_complete", { run_id: runId, replay_date: day, scored_count: scored.length, selected_count: selected.length });
+  await upsertDayLog(runId, day, {
+    status: "scored",
+    scored_count: scored.length,
+    selected_count: selected.length,
+    yahoo_failures: yahooFailures,
+    metadata: { bars_fetched: barsByTicker.size, top_n: topN, pipeline_version: PIPELINE_VERSION },
+  });
+
+  const regime = marketRegimeFor(day, scored);
+  const { data: regimeRow } = await admin.from("market_regimes").upsert({
+    regime_date: day,
+    ...regime,
+  }, { onConflict: "regime_date" }).select("id,broad_market_label,volatility_label,trend_label").maybeSingle();
+  const marketRegimeLabel = regimeRow ? `${regimeRow.broad_market_label}/${regimeRow.volatility_label}` : `${regime.broad_market_label}/${regime.volatility_label}`;
 
   let examplesCreated = 0, outcomesCreated = 0;
   for (const s of selected) {
@@ -194,6 +273,18 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
     const stop = support * 0.98;
     const target = resistance * 1.02;
     const rr = entry > stop ? (target - entry) / (entry - stop) : 0;
+    const confidenceScore = confidenceFromScore(technicalScore, exaScore);
+    const providerStatus = {
+      yahoo: yahooMetaByTicker.get(s.ticker)?.status ?? "unknown",
+      exa: news?._meta?.status ?? (news?.error ? "error" : "unknown"),
+      finnhub: "unavailable_historical_free_tier",
+    };
+    const apiLatencyMs = {
+      yahoo: yahooMetaByTicker.get(s.ticker)?.latency_ms ?? null,
+      exa: news?._meta?.latency_ms ?? null,
+      finnhub: null,
+    };
+    const providerTimestamp = news?._meta?.provider_timestamp ?? yahooMetaByTicker.get(s.ticker)?.provider_timestamp ?? new Date().toISOString();
 
     // Deterministic outcomes from bars > asOfIdx.
     const future = s.bars.slice(s.asOfIdx + 1);
@@ -216,6 +307,67 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
     const label40 = labelFor(returnPct, targetHit, stopHit, maxGain, maxDD, sessionsElapsed, 40);
     const finalLabel = label40 !== "pending" ? label40 : label20 !== "pending" ? label20 : label10 !== "pending" ? label10 : label3;
     const exitIdx = Math.min(future.length - 1, 40);
+    const exitPrice = future[exitIdx].close;
+    const exitDate = iso(new Date(future[exitIdx].ts * 1000));
+    const riskAdjustedReturn = Math.abs(maxDD) > 0 ? returnPct / Math.abs(maxDD) : returnPct;
+    const whyPrediction = {
+      technical_score: technicalScore,
+      volume_strength: s.volumeRatio,
+      one_day_return_pct: s.oneDayPct,
+      seven_day_return_pct: s.sevenDayPct,
+      positive_news_signals: exaScore.positive_count,
+      negative_news_signals: exaScore.negative_count,
+      risk_reward: rr,
+    };
+
+    const featureVector = {
+      price: entry,
+      one_session_return_pct: s.oneDayPct,
+      seven_session_return_pct: s.sevenDayPct,
+      twenty_session_return_pct: s.twentyDayPct,
+      volume_strength: s.volumeRatio,
+      technical_score: technicalScore,
+      risk_reward: rr,
+      exa_result_count: exaScore.result_count,
+      exa_positive_signal_count: exaScore.positive_count,
+      exa_negative_signal_count: exaScore.negative_count,
+      market_regime_label: marketRegimeLabel,
+      confidence_score: confidenceScore,
+    };
+
+    const { data: featureRow, error: featureErr } = await admin.from("swing_feature_store").upsert({
+      ticker: s.ticker,
+      feature_date: day,
+      feature_version: FEATURE_VERSION,
+      dataset_version: DATASET_VERSION,
+      training_source: "historical",
+      pipeline_version: PIPELINE_VERSION,
+      provider_version: { yahoo_chart: "v8", exa_search: "search", finnhub: "free_tier_no_historical" },
+      provider_timestamp: providerTimestamp,
+      provider_status: providerStatus,
+      api_latency_ms: apiLatencyMs,
+      market_regime_id: regimeRow?.id ?? null,
+      market_regime_label: marketRegimeLabel,
+      current_price: entry,
+      one_session_return_pct: s.oneDayPct,
+      seven_session_return_pct: s.sevenDayPct,
+      twenty_session_return_pct: s.twentyDayPct,
+      volume_strength: s.volumeRatio,
+      technical_score: technicalScore,
+      exa_result_count: exaScore.result_count,
+      exa_positive_signal_count: exaScore.positive_count,
+      exa_negative_signal_count: exaScore.negative_count,
+      finnhub_available: false,
+      confidence_score: confidenceScore,
+      feature_vector: featureVector,
+      yahoo_snapshot: { price: entry, one_day_pct: s.oneDayPct, seven_day_pct: s.sevenDayPct, twenty_day_pct: s.twentyDayPct, volume_ratio: s.volumeRatio, support, resistance },
+      finnhub_snapshot: null,
+      exa_snapshot: news,
+      data_quality_flags: ["finnhub_lookahead_unavailable"],
+    }, { onConflict: "ticker,feature_date,feature_version,dataset_version,training_source" }).select("id").maybeSingle();
+    if (featureErr) {
+      await admin.from("ml_data_quality_log").insert({ run_id: runId, ticker: s.ticker, historical_date: day, reason: "feature_store_upsert_failed", details: { error: featureErr.message } });
+    }
 
     // Insert example
     const row = {
@@ -237,16 +389,31 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
       finnhub_available: false, // no historical Finnhub on free tier
       rule_based_final_score: technicalScore, final_swing_score: technicalScore,
 
-      feature_version: "v1", dataset_version: "dataset_v1", training_source: "historical",
+      feature_version: FEATURE_VERSION, dataset_version: DATASET_VERSION, training_source: "historical",
       historical_run_id: runId, historical_date: day,
       yahoo_snapshot: { price: entry, one_day_pct: s.oneDayPct, seven_day_pct: s.sevenDayPct, twenty_day_pct: s.twentyDayPct, volume_ratio: s.volumeRatio, support, resistance },
       finnhub_snapshot: null,
       exa_snapshot: news,
-      entry_price: entry, exit_price: future[exitIdx].close,
-      entry_date: day, exit_date: iso(new Date(future[exitIdx].ts * 1000)),
+      entry_price: entry, exit_price: exitPrice,
+      entry_date: day, exit_date: exitDate,
       commission_bps: 0, slippage_bps: 0, position_size_pct: 0,
       split_bucket: "train", // historical rows always land in train
       data_quality_flags: ["finnhub_lookahead_unavailable"],
+      feature_store_id: featureRow?.id ?? null,
+      provider_version: { yahoo_chart: "v8", exa_search: "search", finnhub: "free_tier_no_historical" },
+      provider_timestamp: providerTimestamp,
+      provider_status: providerStatus,
+      api_latency_ms: apiLatencyMs,
+      pipeline_version: PIPELINE_VERSION,
+      created_by_pipeline: "historical_replay",
+      confidence_score: confidenceScore,
+      market_regime_id: regimeRow?.id ?? null,
+      market_regime_label: marketRegimeLabel,
+      future_return: returnPct,
+      risk_adjusted_return: riskAdjustedReturn,
+      reward_drawdown: maxDD,
+      holding_days: Math.min(sessionsElapsed, 40),
+      why_prediction: whyPrediction,
     };
 
     const { data: ins, error: insErr } = await admin.from("swing_training_examples").insert(row).select("id").maybeSingle();
@@ -274,8 +441,25 @@ async function processDay(runId: string, day: string, universe: string[], topN: 
     }, { onConflict: "training_example_id" });
     outcomesCreated++;
   }
-  console.log(`[hist-trainer] day_complete date=${day} examples=${examplesCreated} outcomes=${outcomesCreated}`);
-  return { examplesCreated, outcomesCreated, tickersProcessed: selected.length };
+  const dataQualityEvents = await countDayQualityEvents(runId, day);
+  const finishedAt = new Date().toISOString();
+  const durationMs = Date.now() - dayStarted;
+  await upsertDayLog(runId, day, {
+    status: "completed",
+    universe_count: universe.length,
+    scored_count: scored.length,
+    selected_count: selected.length,
+    examples_created: examplesCreated,
+    outcomes_created: outcomesCreated,
+    tickers_processed: selected.length,
+    yahoo_failures: yahooFailures,
+    data_quality_events: dataQualityEvents,
+    finished_at: finishedAt,
+    duration_ms: durationMs,
+    metadata: { market_regime_label: marketRegimeLabel, pipeline_version: PIPELINE_VERSION },
+  });
+  logEvent("historical_day_completed", { run_id: runId, replay_date: day, examples_created: examplesCreated, outcomes_created: outcomesCreated, tickers_processed: selected.length, duration_ms: durationMs, data_quality_events: dataQualityEvents });
+  return { examplesCreated, outcomesCreated, tickersProcessed: selected.length, scoredCount: scored.length, selectedCount: selected.length, yahooFailures, dataQualityEvents };
 }
 
 async function runReplay(runId: string, config: any) {
