@@ -508,11 +508,31 @@ const Speaking = () => {
 
         {/* Deep scenario briefing */}
         <Card className="glass-card mb-4 border-border/40">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Step 2 — Scenario: {scenario.title}</CardTitle>
+          <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2 space-y-0">
+            <CardTitle className="text-base">
+              Step 2 — Scenario: {generatingScenario ? "Generating a fresh scenario…" : scenario.title}
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => loadFreshScenario(mode, userId)}
+              disabled={generatingScenario || completedToday}
+              title={completedToday ? "Already completed today" : "Generate a new scenario"}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${generatingScenario ? "animate-spin" : ""}`} />
+              New scenario
+            </Button>
           </CardHeader>
-          <CardContent><ScenarioBriefing s={scenario} /></CardContent>
+          <CardContent>
+            {generatingScenario ? (
+              <p className="text-sm text-muted-foreground">Creating a fresh, high-pressure scenario for "{mode}"…</p>
+            ) : (
+              <ScenarioBriefing s={scenario} />
+            )}
+          </CardContent>
         </Card>
+
 
         {/* 3 rounds */}
         <Card className="glass-card mb-4 border-border/40">
