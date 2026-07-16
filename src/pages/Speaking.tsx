@@ -239,10 +239,11 @@ const Speaking = () => {
         }
       }
       setState(current);
-      if (current.preferred_mode && ALL_MODES.includes(current.preferred_mode)) {
-        setMode(current.preferred_mode);
-        setScenario(pickScenarioForMode(current.preferred_mode));
-      }
+      const activeMode: SpeakingMode =
+        current.preferred_mode && ALL_MODES.includes(current.preferred_mode)
+          ? current.preferred_mode
+          : defaultMode;
+      if (activeMode !== mode) setMode(activeMode);
 
       const today = localDateStr();
       const { data: sess } = await supabase
@@ -257,6 +258,11 @@ const Speaking = () => {
           const r = sess.rounds as Partial<Record<RoundKey, string>>;
           setRounds({ opening: r.opening ?? "", pressure: r.pressure ?? "", close: r.close ?? "" });
         }
+        // Keep the built-in placeholder scenario for an already-completed day — do not spend a Gemini call.
+        setScenario(pickScenarioForMode(activeMode));
+      } else {
+        // Fresh day: auto-generate a new scenario every visit.
+        await loadFreshScenario(activeMode, uid);
       }
 
       setSttSupported(getSpeechRecognitionCtor() !== null);
@@ -272,10 +278,14 @@ const Speaking = () => {
 
   const handleSelectMode = async (m: SpeakingMode) => {
     setMode(m);
-    setScenario(pickScenarioForMode(m));
     setFeedback(null);
     setRounds({ opening: "", pressure: "", close: "" });
     if (userId) await supabase.from("speaking_user_state").update({ preferred_mode: m }).eq("user_id", userId);
+    if (!completedToday) {
+      await loadFreshScenario(m, userId);
+    } else {
+      setScenario(pickScenarioForMode(m));
+    }
   };
 
   const fullTranscript = useMemo(() => {
