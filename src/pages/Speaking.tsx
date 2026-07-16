@@ -11,7 +11,7 @@ import {
   type SpeakingFeedback, type SpeakingMode, type Scenario,
 } from "@/lib/speaking/content";
 import { classifyGate, gateLabel, type GateStatus } from "@/lib/speaking/gate";
-import { Mic, MicOff, Sparkles, Flame, CheckCircle2, AlertTriangle, ArrowLeft, Trophy, Target } from "lucide-react";
+import { Mic, MicOff, Sparkles, Flame, CheckCircle2, AlertTriangle, ArrowLeft, Trophy, Target, RefreshCw } from "lucide-react";
 
 const BASELINE_TARGET = "Speak clearly with structure and finish with one strong closing line.";
 
