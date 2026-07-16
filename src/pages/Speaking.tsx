@@ -11,7 +11,7 @@ import {
   type SpeakingFeedback, type SpeakingMode, type Scenario,
 } from "@/lib/speaking/content";
 import { classifyGate, gateLabel, type GateStatus } from "@/lib/speaking/gate";
-import { Mic, MicOff, Sparkles, Flame, CheckCircle2, AlertTriangle, ArrowLeft, Trophy, Target } from "lucide-react";
+import { Mic, MicOff, Sparkles, Flame, CheckCircle2, AlertTriangle, ArrowLeft, Trophy, Target, RefreshCw } from "lucide-react";
 
 const BASELINE_TARGET = "Speak clearly with structure and finish with one strong closing line.";
 
@@ -167,8 +167,44 @@ const Speaking = () => {
   const [completing, setCompleting] = useState(false);
   const [completedToday, setCompletedToday] = useState(false);
   const [sttSupported, setSttSupported] = useState(true);
+  const [generatingScenario, setGeneratingScenario] = useState(false);
 
   const todaysTarget = state?.next_improvement_target || BASELINE_TARGET;
+
+  // Fetch a fresh Gemini-generated scenario for the mode, avoiding recently-seen titles/ids.
+  // Falls back to the built-in picker on any failure so the page never gets stuck.
+  const loadFreshScenario = async (m: SpeakingMode, uid: string | null) => {
+    setGeneratingScenario(true);
+    try {
+      let recentTitles: string[] = [];
+      let recentIds: string[] = [];
+      if (uid) {
+        const { data: recents } = await supabase
+          .from("speaking_sessions")
+          .select("scenario_title, scenario_prompt, mode, completed_at")
+          .eq("user_id", uid)
+          .order("completed_at", { ascending: false })
+          .limit(20);
+        if (Array.isArray(recents)) {
+          recentTitles = recents.map((r) => r.scenario_title).filter(Boolean) as string[];
+        }
+      }
+      const { data, error } = await supabase.functions.invoke("generate-speaking-scenario", {
+        body: { mode: m, recentTitles, recentIds },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const s = data?.scenario as Scenario | undefined;
+      if (!s || !s.title || !s.your_task) throw new Error("Invalid scenario payload");
+      setScenario(s);
+    } catch (e) {
+      // Silent fallback to a built-in scenario so the page always works.
+      setScenario(pickScenarioForMode(m));
+      console.warn("[speaking] scenario generation failed, using built-in:", e);
+    } finally {
+      setGeneratingScenario(false);
+    }
+  };
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -203,10 +239,11 @@ const Speaking = () => {
         }
       }
       setState(current);
-      if (current.preferred_mode && ALL_MODES.includes(current.preferred_mode)) {
-        setMode(current.preferred_mode);
-        setScenario(pickScenarioForMode(current.preferred_mode));
-      }
+      const activeMode: SpeakingMode =
+        current.preferred_mode && ALL_MODES.includes(current.preferred_mode)
+          ? current.preferred_mode
+          : defaultMode;
+      if (activeMode !== mode) setMode(activeMode);
 
       const today = localDateStr();
       const { data: sess } = await supabase
@@ -221,6 +258,11 @@ const Speaking = () => {
           const r = sess.rounds as Partial<Record<RoundKey, string>>;
           setRounds({ opening: r.opening ?? "", pressure: r.pressure ?? "", close: r.close ?? "" });
         }
+        // Keep the built-in placeholder scenario for an already-completed day — do not spend a Gemini call.
+        setScenario(pickScenarioForMode(activeMode));
+      } else {
+        // Fresh day: auto-generate a new scenario every visit.
+        await loadFreshScenario(activeMode, uid);
       }
 
       setSttSupported(getSpeechRecognitionCtor() !== null);
@@ -236,10 +278,14 @@ const Speaking = () => {
 
   const handleSelectMode = async (m: SpeakingMode) => {
     setMode(m);
-    setScenario(pickScenarioForMode(m));
     setFeedback(null);
     setRounds({ opening: "", pressure: "", close: "" });
     if (userId) await supabase.from("speaking_user_state").update({ preferred_mode: m }).eq("user_id", userId);
+    if (!completedToday) {
+      await loadFreshScenario(m, userId);
+    } else {
+      setScenario(pickScenarioForMode(m));
+    }
   };
 
   const fullTranscript = useMemo(() => {
@@ -462,11 +508,31 @@ const Speaking = () => {
 
         {/* Deep scenario briefing */}
         <Card className="glass-card mb-4 border-border/40">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Step 2 — Scenario: {scenario.title}</CardTitle>
+          <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2 space-y-0">
+            <CardTitle className="text-base">
+              Step 2 — Scenario: {generatingScenario ? "Generating a fresh scenario…" : scenario.title}
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => loadFreshScenario(mode, userId)}
+              disabled={generatingScenario || completedToday}
+              title={completedToday ? "Already completed today" : "Generate a new scenario"}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${generatingScenario ? "animate-spin" : ""}`} />
+              New scenario
+            </Button>
           </CardHeader>
-          <CardContent><ScenarioBriefing s={scenario} /></CardContent>
+          <CardContent>
+            {generatingScenario ? (
+              <p className="text-sm text-muted-foreground">Creating a fresh, high-pressure scenario for "{mode}"…</p>
+            ) : (
+              <ScenarioBriefing s={scenario} />
+            )}
+          </CardContent>
         </Card>
+
 
         {/* 3 rounds */}
         <Card className="glass-card mb-4 border-border/40">
