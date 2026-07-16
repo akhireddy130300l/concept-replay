@@ -167,8 +167,44 @@ const Speaking = () => {
   const [completing, setCompleting] = useState(false);
   const [completedToday, setCompletedToday] = useState(false);
   const [sttSupported, setSttSupported] = useState(true);
+  const [generatingScenario, setGeneratingScenario] = useState(false);
 
   const todaysTarget = state?.next_improvement_target || BASELINE_TARGET;
+
+  // Fetch a fresh Gemini-generated scenario for the mode, avoiding recently-seen titles/ids.
+  // Falls back to the built-in picker on any failure so the page never gets stuck.
+  const loadFreshScenario = async (m: SpeakingMode, uid: string | null) => {
+    setGeneratingScenario(true);
+    try {
+      let recentTitles: string[] = [];
+      let recentIds: string[] = [];
+      if (uid) {
+        const { data: recents } = await supabase
+          .from("speaking_sessions")
+          .select("scenario_title, scenario_prompt, mode, completed_at")
+          .eq("user_id", uid)
+          .order("completed_at", { ascending: false })
+          .limit(20);
+        if (Array.isArray(recents)) {
+          recentTitles = recents.map((r) => r.scenario_title).filter(Boolean) as string[];
+        }
+      }
+      const { data, error } = await supabase.functions.invoke("generate-speaking-scenario", {
+        body: { mode: m, recentTitles, recentIds },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const s = data?.scenario as Scenario | undefined;
+      if (!s || !s.title || !s.your_task) throw new Error("Invalid scenario payload");
+      setScenario(s);
+    } catch (e) {
+      // Silent fallback to a built-in scenario so the page always works.
+      setScenario(pickScenarioForMode(m));
+      console.warn("[speaking] scenario generation failed, using built-in:", e);
+    } finally {
+      setGeneratingScenario(false);
+    }
+  };
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
