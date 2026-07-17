@@ -106,6 +106,69 @@ const ScoreBar = ({ label, value }: { label: string; value: number }) => {
   );
 };
 
+const StreakDeadlineCard = ({
+  lastCompletedDate, currentStreak,
+}: { lastCompletedDate: string | null; currentStreak: number }) => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(id);
+  }, []);
+  const info = computeStreakInfo(lastCompletedDate, now);
+  if (info.state === "none") {
+    return (
+      <div className="mb-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground flex items-center gap-2">
+        <Flame className="w-4 h-4" />
+        Complete your first session to start a streak. You'll then need one session every day to keep it alive.
+      </div>
+    );
+  }
+  const deadlineStr = info.deadline
+    ? info.deadline.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })
+    : "";
+  const left = formatCountdown(info.msLeft);
+  if (info.state === "safe") {
+    const urgent = info.msLeft < 12 * 3600 * 1000;
+    const tone = urgent
+      ? "bg-amber-50 border-amber-300 text-amber-900"
+      : "bg-emerald-50 border-emerald-300 text-emerald-900";
+    return (
+      <div className={`mb-4 rounded-md border px-3 py-2 text-sm flex items-center gap-2 ${tone}`}>
+        <CheckCircle2 className="w-4 h-4" />
+        <span>
+          <strong>Streak safe ({currentStreak} day{currentStreak === 1 ? "" : "s"}).</strong>{" "}
+          Next session due by <strong>{deadlineStr}</strong> — <strong>{left}</strong> left.
+        </span>
+      </div>
+    );
+  }
+  if (info.state === "at_risk") {
+    const critical = info.msLeft < 3 * 3600 * 1000;
+    const tone = critical
+      ? "bg-red-50 border-red-300 text-red-900"
+      : "bg-amber-50 border-amber-300 text-amber-900";
+    return (
+      <div className={`mb-4 rounded-md border px-3 py-2 text-sm flex items-center gap-2 ${tone}`}>
+        <AlertTriangle className="w-4 h-4" />
+        <span>
+          <strong>Streak breaking soon!</strong> Complete today's session before <strong>{deadlineStr}</strong> — only <strong>{left}</strong> left to save your {currentStreak}-day streak.
+        </span>
+      </div>
+    );
+  }
+  // broken
+  return (
+    <div className="mb-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 flex items-center gap-2">
+      <AlertTriangle className="w-4 h-4" />
+      <span>
+        <strong>Streak reset.</strong> Your previous streak lapsed. Finish a session today to start a new one.
+      </span>
+    </div>
+  );
+};
+
+
+
 type RoundKey = "opening" | "pressure" | "close";
 
 const RoundRecorder = ({
