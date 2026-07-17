@@ -509,6 +509,9 @@ const Speaking = () => {
           {gateInfo.text}
         </div>
 
+        {/* Streak deadline indicator */}
+        <StreakDeadlineCard lastCompletedDate={state?.last_completed_date ?? null} currentStreak={state?.current_streak ?? 0} />
+
         {/* Today's improvement target */}
         <Card className="glass-card mb-4 border-primary/30">
           <CardContent className="pt-5 pb-5">
