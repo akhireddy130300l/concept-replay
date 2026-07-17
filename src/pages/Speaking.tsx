@@ -35,6 +35,47 @@ function localDateStr(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Streak deadline logic (local time):
+ *   - completed today       → safe; must complete again before end of tomorrow.
+ *   - completed yesterday   → at risk; must complete before end of today.
+ *   - completed 2+ days ago → streak already broken.
+ *   - never completed       → no active streak.
+ */
+type StreakInfo = {
+  state: "safe" | "at_risk" | "broken" | "none";
+  deadline: Date | null;
+  msLeft: number;
+};
+function computeStreakInfo(lastCompletedDate: string | null, now = new Date()): StreakInfo {
+  if (!lastCompletedDate) return { state: "none", deadline: null, msLeft: 0 };
+  const last = lastCompletedDate.slice(0, 10);
+  const today = localDateStr(now);
+  const yesterday = localDateStr(new Date(now.getTime() - 86400000));
+  if (last === today) {
+    const d = new Date(now); d.setDate(d.getDate() + 1); d.setHours(23, 59, 59, 999);
+    return { state: "safe", deadline: d, msLeft: d.getTime() - now.getTime() };
+  }
+  if (last === yesterday) {
+    const d = new Date(now); d.setHours(23, 59, 59, 999);
+    return { state: "at_risk", deadline: d, msLeft: d.getTime() - now.getTime() };
+  }
+  return { state: "broken", deadline: null, msLeft: 0 };
+}
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "0m";
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h >= 24) {
+    const d = Math.floor(h / 24);
+    const rh = h % 24;
+    return `${d}d ${rh}h`;
+  }
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+
 type SpeechRecResult = { transcript: string };
 type SpeechRecAlt = { 0: SpeechRecResult; isFinal: boolean; length: number };
 type SpeechRecEvent = { resultIndex: number; results: ArrayLike<SpeechRecAlt> };
@@ -64,6 +105,69 @@ const ScoreBar = ({ label, value }: { label: string; value: number }) => {
     </div>
   );
 };
+
+const StreakDeadlineCard = ({
+  lastCompletedDate, currentStreak,
+}: { lastCompletedDate: string | null; currentStreak: number }) => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(id);
+  }, []);
+  const info = computeStreakInfo(lastCompletedDate, now);
+  if (info.state === "none") {
+    return (
+      <div className="mb-4 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground flex items-center gap-2">
+        <Flame className="w-4 h-4" />
+        Complete your first session to start a streak. You'll then need one session every day to keep it alive.
+      </div>
+    );
+  }
+  const deadlineStr = info.deadline
+    ? info.deadline.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })
+    : "";
+  const left = formatCountdown(info.msLeft);
+  if (info.state === "safe") {
+    const urgent = info.msLeft < 12 * 3600 * 1000;
+    const tone = urgent
+      ? "bg-amber-50 border-amber-300 text-amber-900"
+      : "bg-emerald-50 border-emerald-300 text-emerald-900";
+    return (
+      <div className={`mb-4 rounded-md border px-3 py-2 text-sm flex items-center gap-2 ${tone}`}>
+        <CheckCircle2 className="w-4 h-4" />
+        <span>
+          <strong>Streak safe ({currentStreak} day{currentStreak === 1 ? "" : "s"}).</strong>{" "}
+          Next session due by <strong>{deadlineStr}</strong> — <strong>{left}</strong> left.
+        </span>
+      </div>
+    );
+  }
+  if (info.state === "at_risk") {
+    const critical = info.msLeft < 3 * 3600 * 1000;
+    const tone = critical
+      ? "bg-red-50 border-red-300 text-red-900"
+      : "bg-amber-50 border-amber-300 text-amber-900";
+    return (
+      <div className={`mb-4 rounded-md border px-3 py-2 text-sm flex items-center gap-2 ${tone}`}>
+        <AlertTriangle className="w-4 h-4" />
+        <span>
+          <strong>Streak breaking soon!</strong> Complete today's session before <strong>{deadlineStr}</strong> — only <strong>{left}</strong> left to save your {currentStreak}-day streak.
+        </span>
+      </div>
+    );
+  }
+  // broken
+  return (
+    <div className="mb-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 flex items-center gap-2">
+      <AlertTriangle className="w-4 h-4" />
+      <span>
+        <strong>Streak reset.</strong> Your previous streak lapsed. Finish a session today to start a new one.
+      </span>
+    </div>
+  );
+};
+
+
 
 type RoundKey = "opening" | "pressure" | "close";
 
@@ -385,11 +489,13 @@ const Speaking = () => {
       if (insErr) throw insErr;
 
       const cur = state;
+      const lastDone = cur?.last_completed_date ? cur.last_completed_date.slice(0, 10) : null;
       const yesterday = localDateStr(new Date(Date.now() - 86400000));
       let newStreak = 1;
-      if (cur?.last_completed_date === yesterday) newStreak = (cur.current_streak ?? 0) + 1;
-      else if (cur?.last_completed_date === today) newStreak = cur.current_streak ?? 1;
+      if (lastDone === yesterday) newStreak = (cur?.current_streak ?? 0) + 1;
+      else if (lastDone === today) newStreak = cur?.current_streak ?? 1;
       const longest = Math.max(cur?.longest_streak ?? 0, newStreak);
+
 
       const { data: updated } = await supabase
         .from("speaking_user_state")
@@ -465,6 +571,9 @@ const Speaking = () => {
         <div className={`border rounded-md px-3 py-2 text-sm mb-4 ${gateToneClass}`}>
           {gateInfo.text}
         </div>
+
+        {/* Streak deadline indicator */}
+        <StreakDeadlineCard lastCompletedDate={state?.last_completed_date ?? null} currentStreak={state?.current_streak ?? 0} />
 
         {/* Today's improvement target */}
         <Card className="glass-card mb-4 border-primary/30">
