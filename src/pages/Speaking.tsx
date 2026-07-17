@@ -35,6 +35,47 @@ function localDateStr(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Streak deadline logic (local time):
+ *   - completed today       → safe; must complete again before end of tomorrow.
+ *   - completed yesterday   → at risk; must complete before end of today.
+ *   - completed 2+ days ago → streak already broken.
+ *   - never completed       → no active streak.
+ */
+type StreakInfo = {
+  state: "safe" | "at_risk" | "broken" | "none";
+  deadline: Date | null;
+  msLeft: number;
+};
+function computeStreakInfo(lastCompletedDate: string | null, now = new Date()): StreakInfo {
+  if (!lastCompletedDate) return { state: "none", deadline: null, msLeft: 0 };
+  const last = lastCompletedDate.slice(0, 10);
+  const today = localDateStr(now);
+  const yesterday = localDateStr(new Date(now.getTime() - 86400000));
+  if (last === today) {
+    const d = new Date(now); d.setDate(d.getDate() + 1); d.setHours(23, 59, 59, 999);
+    return { state: "safe", deadline: d, msLeft: d.getTime() - now.getTime() };
+  }
+  if (last === yesterday) {
+    const d = new Date(now); d.setHours(23, 59, 59, 999);
+    return { state: "at_risk", deadline: d, msLeft: d.getTime() - now.getTime() };
+  }
+  return { state: "broken", deadline: null, msLeft: 0 };
+}
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "0m";
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h >= 24) {
+    const d = Math.floor(h / 24);
+    const rh = h % 24;
+    return `${d}d ${rh}h`;
+  }
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+
 type SpeechRecResult = { transcript: string };
 type SpeechRecAlt = { 0: SpeechRecResult; isFinal: boolean; length: number };
 type SpeechRecEvent = { resultIndex: number; results: ArrayLike<SpeechRecAlt> };
