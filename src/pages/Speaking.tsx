@@ -385,11 +385,13 @@ const Speaking = () => {
       if (insErr) throw insErr;
 
       const cur = state;
+      const lastDone = cur?.last_completed_date ? cur.last_completed_date.slice(0, 10) : null;
       const yesterday = localDateStr(new Date(Date.now() - 86400000));
       let newStreak = 1;
-      if (cur?.last_completed_date === yesterday) newStreak = (cur.current_streak ?? 0) + 1;
-      else if (cur?.last_completed_date === today) newStreak = cur.current_streak ?? 1;
+      if (lastDone === yesterday) newStreak = (cur?.current_streak ?? 0) + 1;
+      else if (lastDone === today) newStreak = cur?.current_streak ?? 1;
       const longest = Math.max(cur?.longest_streak ?? 0, newStreak);
+
 
       const { data: updated } = await supabase
         .from("speaking_user_state")
