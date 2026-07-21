@@ -463,8 +463,7 @@ const Speaking = () => {
 
   const eligible = !!feedback &&
     feedback.meaningful_attempt !== false &&
-    avgScore >= 5.0 &&
-    (feedback.improvement_target_met === "met" || feedback.improvement_target_met === "partial");
+    avgScore >= 4.0;
 
 
   const completeSession = async () => {
