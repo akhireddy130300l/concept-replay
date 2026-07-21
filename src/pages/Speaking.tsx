@@ -748,7 +748,7 @@ const Speaking = () => {
                       </ul>
                     </div>
                   )}
-                  <p className="text-xs text-muted-foreground">Average score: <strong>{avgScore.toFixed(1)} / 10</strong>. Sessions with average under 4.0 do not count toward your streak.</p>
+                  <p className="text-xs text-muted-foreground">Average score: <strong>{avgScore.toFixed(1)} / 10</strong>. This is coaching feedback — completing all rounds already counts your session.</p>
                 </CardContent>
               </Card>
             )}
