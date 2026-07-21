@@ -761,7 +761,7 @@ const Speaking = () => {
               </Button>
               {!eligible && !completedToday && (
                 <span className="text-xs text-muted-foreground self-center">
-                  Mark Complete unlocks only when the AI confirms a real attempt at today's target.
+                  Speak a real attempt in each of the 3 rounds (40+ chars) to complete your session.
                 </span>
               )}
             </div>
