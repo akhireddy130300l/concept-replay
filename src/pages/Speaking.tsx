@@ -685,10 +685,13 @@ const Speaking = () => {
                 {eligible ? <CheckCircle2 className="w-5 h-5 text-emerald-600 mt-0.5" /> : <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5" />}
                 <div>
                   <div className="font-semibold">
-                    {eligible ? "Good session — improvement target met" : "Needs another attempt — improvement target not met yet"}
+                    {eligible ? "Session completed — habit counted" : "Session not counted — needs a real attempt on each round"}
                   </div>
                   <div className="text-sm text-muted-foreground mt-1">
-                    Target: <strong>{todaysTarget}</strong> — verdict: <strong>{feedback.improvement_target_met}</strong>
+                    Target: <strong>{todaysTarget}</strong> · Coaching verdict: <strong>{feedback.improvement_target_met}</strong> · Avg score: <strong>{avgScore.toFixed(1)}/10</strong>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Score is feedback only — it does not decide whether today counts.
                   </div>
                 </div>
               </CardContent>
