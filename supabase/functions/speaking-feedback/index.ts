@@ -226,19 +226,15 @@ Deno.serve(async (req) => {
     if (typeof feedback.hard_truth !== "string") feedback.hard_truth = "";
     if (!Array.isArray(feedback.what_to_fix)) feedback.what_to_fix = [];
 
-    // Deterministic score-based downgrade: overrides any inflated LLM verdict.
+    // Score is coaching feedback only — it does NOT decide whether the habit was completed.
+    // Habit completion is decided on the client from: all rounds attempted + meaningful transcript + feedback generated.
     const s = feedback.scores || {};
     const values = [s.clarity, s.confidence, s.persuasion, s.structure, s.executive_presence]
       .map((n: any) => (typeof n === "number" ? n : 0));
     const avg = values.reduce((a, b) => a + b, 0) / (values.length || 1);
     const minScore = Math.min(...values);
-    if (avg < 3.5) {
-      feedback.improvement_target_met = "missed";
-    } else if (avg < 5.0 && feedback.improvement_target_met === "met") {
-      feedback.improvement_target_met = "partial";
-    }
     console.log(JSON.stringify({
-      phase: "speaking_feedback", event: "score_gate",
+      phase: "speaking_feedback", event: "coaching_scores",
       avg: Number(avg.toFixed(2)), min: minScore, verdict: feedback.improvement_target_met,
     }));
 
