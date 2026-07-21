@@ -18,6 +18,9 @@ verify_jwt = false
 [functions.speaking-feedback]
 verify_jwt = true
 
+[functions.speaking-tts]
+verify_jwt = true
+
 [functions.send-speaking-email]
 verify_jwt = false
 
