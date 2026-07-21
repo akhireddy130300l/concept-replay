@@ -461,9 +461,9 @@ const Speaking = () => {
     return vals.reduce((a, b) => a + b, 0) / vals.length;
   }, [feedback]);
 
-  const eligible = !!feedback &&
-    feedback.meaningful_attempt !== false &&
-    avgScore >= 4.0;
+  // Habit-based eligibility: completing all rounds + getting AI feedback = session counts.
+  // Score is coaching only, it does not decide whether the habit was done.
+  const eligible = !!feedback && feedback.meaningful_attempt !== false;
 
 
   const completeSession = async () => {
