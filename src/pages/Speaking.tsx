@@ -172,17 +172,53 @@ const StreakDeadlineCard = ({
 type RoundKey = "opening" | "pressure" | "close";
 
 const RoundRecorder = ({
-  label, prompt, value, onChange, sttSupported,
+  label, prompt, value, onChange, sttSupported, audioUrl, onAudioBlob,
 }: {
-  label: string; prompt: string; value: string; onChange: (v: string) => void; sttSupported: boolean;
+  label: string; prompt: string; value: string; onChange: (v: string) => void;
+  sttSupported: boolean;
+  audioUrl: string | null;
+  onAudioBlob: (blob: Blob | null) => void;
 }) => {
   const [listening, setListening] = useState(false);
   const recRef = useRef<SpeechRec | null>(null);
   const finalRef = useRef("");
+  const mediaRecRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
-  const start = () => {
+  const stopMic = () => {
+    try { mediaRecRef.current?.state === "recording" && mediaRecRef.current.stop(); } catch { /* ignore */ }
+    try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
+    mediaRecRef.current = null;
+    streamRef.current = null;
+  };
+
+  const start = async () => {
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) return;
+
+    // Kick off MediaRecorder in parallel so we can play back the user's own voice.
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+      const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) =>
+        typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported?.(m)
+      );
+      const mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      mr.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        if (chunksRef.current.length > 0) {
+          const blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
+          onAudioBlob(blob);
+        }
+      };
+      mr.start();
+      mediaRecRef.current = mr;
+    } catch {
+      // Mic capture failed — STT can still run if browser has its own path.
+    }
+
     const rec = new Ctor();
     rec.lang = "en-US"; rec.continuous = true; rec.interimResults = true;
     finalRef.current = value ? value + " " : "";
@@ -196,17 +232,22 @@ const RoundRecorder = ({
       }
       onChange((finalRef.current + interim).trimStart());
     };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => setListening(false);
-    try { rec.start(); recRef.current = rec; setListening(true); } catch { /* ignore */ }
+    rec.onerror = () => { setListening(false); stopMic(); };
+    rec.onend = () => { setListening(false); stopMic(); };
+    try { rec.start(); recRef.current = rec; setListening(true); }
+    catch { stopMic(); }
   };
-  const stop = () => { try { recRef.current?.stop(); } catch { /* ignore */ } setListening(false); };
+  const stop = () => {
+    try { recRef.current?.stop(); } catch { /* ignore */ }
+    stopMic();
+    setListening(false);
+  };
 
   return (
     <div className="mb-4">
       <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">{label}</div>
       <div className="text-sm mb-2">{prompt}</div>
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
         {!listening ? (
           <Button type="button" onClick={start} variant="outline" size="sm" disabled={!sttSupported} className="gap-2">
             <Mic className="w-4 h-4" /> {sttSupported ? "Record" : "Speech not supported"}
@@ -227,7 +268,67 @@ const RoundRecorder = ({
         placeholder="Press Record and speak. Your transcript will appear here — typing is disabled on purpose."
         className="bg-muted/40 cursor-default"
       />
+      {audioUrl && (
+        <div className="mt-2">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">🎙️ Your recording</div>
+          <audio controls src={audioUrl} className="w-full h-9" />
+        </div>
+      )}
+    </div>
+  );
+};
 
+// Lazy on-demand TTS player: fetches audio only when user clicks Play, caches per-text.
+const CoachAudioButton = ({ label, text, voice, instructions }: {
+  label: string; text: string; voice: string; instructions?: string;
+}) => {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { toast } = useToast();
+
+  const load = async () => {
+    if (url || loading) return;
+    setLoading(true); setError(null);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) throw new Error("Not signed in");
+      const url = `${(import.meta.env.VITE_SUPABASE_URL as string)}/functions/v1/speaking-tts`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ text, voice, instructions }),
+      });
+      if (!res.ok) {
+        const msg = await res.json().catch(() => ({ error: "TTS failed" }));
+        throw new Error(msg.error || "TTS failed");
+      }
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      setUrl(objUrl);
+      // autoplay after load
+      setTimeout(() => audioRef.current?.play().catch(() => {}), 50);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : "TTS failed";
+      setError(m);
+      toast({ title: "Couldn't play audio", description: m, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-md border border-border/50 bg-muted/30 p-2">
+      <div className="flex items-center gap-2 mb-1">
+        <Button type="button" size="sm" variant="outline" onClick={load} disabled={loading} className="gap-1 h-7 px-2 text-xs">
+          {loading ? "Generating…" : url ? "🔁 Replay" : "▶️ Listen"}
+        </Button>
+        <span className="text-xs font-semibold">{label}</span>
+      </div>
+      {url && <audio ref={audioRef} controls src={url} className="w-full h-8" />}
+      {error && <div className="text-xs text-red-600 mt-1">{error}</div>}
     </div>
   );
 };
