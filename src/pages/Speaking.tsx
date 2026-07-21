@@ -847,14 +847,51 @@ const Speaking = () => {
             </Card>
 
             <Card className="glass-card mb-4 border-border/40">
-              <CardHeader className="pb-3"><CardTitle className="text-base">Stronger versions</CardTitle></CardHeader>
-              <CardContent className="text-sm space-y-3">
-                <div><div className="text-xs uppercase text-muted-foreground mb-1">Corrected</div><p>{feedback.corrected}</p></div>
-                <div><div className="text-xs uppercase text-muted-foreground mb-1">Natural</div><p>{feedback.natural}</p></div>
-                <div><div className="text-xs uppercase text-muted-foreground mb-1">Powerful</div><p>{feedback.powerful}</p></div>
-                <div><div className="text-xs uppercase text-muted-foreground mb-1">Role style rewrite ({mode})</div><p>{feedback.role_style}</p></div>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">🎧 Stronger versions — listen &amp; compare</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  Play your own recordings above, then tap ▶️ Listen on each rewrite to hear how a confident coach would say it.
+                </p>
+                {[
+                  { key: "corrected", label: "Corrected (your voice, cleaned)", text: feedback.corrected, voice: "alloy", instructions: "Speak clearly and naturally, matching a confident professional. Neutral tone." },
+                  { key: "natural", label: "Natural Professional", text: feedback.natural, voice: "sage", instructions: "Speak like a sharp, warm professional in a real conversation. Confident, easy pace, natural pauses." },
+                  { key: "powerful", label: "Executive Leader", text: feedback.powerful, voice: "onyx", instructions: "Speak like a Fortune 500 executive. Concise, decisive, high-status. Deliberate pauses. End with impact." },
+                  { key: "role_style", label: `Charismatic (${mode})`, text: feedback.role_style, voice: "verse", instructions: "Speak like a charismatic TED speaker tuned to the mode. Vivid, warm, memorable. Vary tone and pace for emotional impact." },
+                ].map((r) => r.text ? (
+                  <div key={r.key} className="space-y-1">
+                    <div className="text-xs uppercase text-muted-foreground">{r.label}</div>
+                    <p className="mb-1">{r.text}</p>
+                    <CoachAudioButton label="Coach audio" text={r.text} voice={r.voice} instructions={r.instructions} />
+                  </div>
+                ) : null)}
               </CardContent>
             </Card>
+
+            {(feedback.pace_verdict || feedback.pause_verdict || typeof feedback.filler_count === "number" || feedback.power_habit) && (
+              <Card className="glass-card mb-4 border-border/40">
+                <CardHeader className="pb-3"><CardTitle className="text-base">🎯 Delivery &amp; presence</CardTitle></CardHeader>
+                <CardContent className="text-sm grid gap-2 sm:grid-cols-2">
+                  {feedback.pace_verdict && (
+                    <div><span className="text-muted-foreground">Pace:</span> <strong>{feedback.pace_verdict}</strong>{feedback.pace_wpm ? ` (~${feedback.pace_wpm} wpm)` : ""}</div>
+                  )}
+                  {feedback.pause_verdict && (
+                    <div><span className="text-muted-foreground">Pauses:</span> <strong>{feedback.pause_verdict}</strong></div>
+                  )}
+                  {typeof feedback.filler_count === "number" && (
+                    <div><span className="text-muted-foreground">Filler words:</span> <strong>{feedback.filler_count}</strong></div>
+                  )}
+                  {feedback.power_habit && (
+                    <div className="sm:col-span-2"><span className="text-muted-foreground">Power habit for tomorrow:</span> <strong>{feedback.power_habit}</strong></div>
+                  )}
+                  {feedback.filler_issues && (
+                    <div className="sm:col-span-2 text-xs text-muted-foreground">{feedback.filler_issues}</div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
 
             {(feedback.hard_truth || (feedback.what_to_fix && feedback.what_to_fix.length > 0)) && (
               <Card className="glass-card mb-4 border-red-300/60">
