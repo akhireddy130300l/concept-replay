@@ -998,9 +998,13 @@ const Speaking = () => {
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => loadFreshScenario(mode, userId)}
-              disabled={generatingScenario || completedToday}
-              title={completedToday ? "Already completed today" : "Generate a new scenario"}
+              onClick={() => {
+                setFeedback(null);
+                setRounds({ opening: "", pressure: "", close: "" });
+                loadFreshScenario(mode, userId);
+              }}
+              disabled={generatingScenario}
+              title="Generate a new scenario"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${generatingScenario ? "animate-spin" : ""}`} />
               New scenario
