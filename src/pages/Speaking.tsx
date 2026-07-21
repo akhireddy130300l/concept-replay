@@ -367,6 +367,19 @@ const Speaking = () => {
   const warmups = useMemo(() => todaysWarmups(), []);
 
   const [rounds, setRounds] = useState<Record<RoundKey, string>>({ opening: "", pressure: "", close: "" });
+  const [roundAudioUrls, setRoundAudioUrls] = useState<Record<RoundKey, string | null>>({ opening: null, pressure: null, close: null });
+  const setRoundBlob = (k: RoundKey) => (blob: Blob | null) => {
+    setRoundAudioUrls((prev) => {
+      if (prev[k]) URL.revokeObjectURL(prev[k] as string);
+      return { ...prev, [k]: blob ? URL.createObjectURL(blob) : null };
+    });
+  };
+  useEffect(() => () => {
+    // Revoke any object URLs on unmount to avoid leaks.
+    Object.values(roundAudioUrls).forEach((u) => { if (u) URL.revokeObjectURL(u); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [feedback, setFeedback] = useState<SpeakingFeedback | null>(null);
   const [requestingFeedback, setRequestingFeedback] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -753,6 +766,8 @@ const Speaking = () => {
               value={rounds.opening}
               onChange={(v) => setRounds((r) => ({ ...r, opening: v }))}
               sttSupported={sttSupported}
+              audioUrl={roundAudioUrls.opening}
+              onAudioBlob={setRoundBlob("opening")}
             />
             <RoundRecorder
               label="Round 2 — Pressure / objection"
@@ -760,6 +775,8 @@ const Speaking = () => {
               value={rounds.pressure}
               onChange={(v) => setRounds((r) => ({ ...r, pressure: v }))}
               sttSupported={sttSupported}
+              audioUrl={roundAudioUrls.pressure}
+              onAudioBlob={setRoundBlob("pressure")}
             />
             <RoundRecorder
               label="Round 3 — Close / land the message"
@@ -767,7 +784,10 @@ const Speaking = () => {
               value={rounds.close}
               onChange={(v) => setRounds((r) => ({ ...r, close: v }))}
               sttSupported={sttSupported}
+              audioUrl={roundAudioUrls.close}
+              onAudioBlob={setRoundBlob("close")}
             />
+
             <Button onClick={requestFeedback} disabled={!allRoundsReady || requestingFeedback} className="gap-2 mt-2">
               <Sparkles className="w-4 h-4" />
               {requestingFeedback ? "Coaching…" : "Get speaking feedback"}
