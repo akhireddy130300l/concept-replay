@@ -1820,4 +1820,9 @@ export type SpeakingFeedback = {
   retry_instruction?: string;
   phrase_to_stop_using?: string;
   phrase_to_use_tomorrow?: string;
+  power_habit?: string;
+  pace_verdict?: "too slow" | "slightly slow" | "ideal" | "slightly fast" | "too fast" | string;
+  pace_wpm?: number;
+  pause_verdict?: "too short" | "natural" | "too long" | string;
+  filler_count?: number;
 };
