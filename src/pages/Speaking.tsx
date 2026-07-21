@@ -1058,6 +1058,21 @@ const Speaking = () => {
           </CardContent>
         </Card>
 
+        {/* Shadow Practice — Phase 2 */}
+        <ShadowPractice
+          defaultText={
+            feedback?.powerful ||
+            feedback?.natural ||
+            feedback?.role_style ||
+            scenario.strong_example_round_1 ||
+            scenario.round_1_prompt ||
+            scenario.your_task ||
+            ""
+          }
+        />
+
+
+
         {/* Feedback */}
         {feedback && (
           <>
