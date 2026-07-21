@@ -232,9 +232,9 @@ Deno.serve(async (req) => {
       .map((n: any) => (typeof n === "number" ? n : 0));
     const avg = values.reduce((a, b) => a + b, 0) / (values.length || 1);
     const minScore = Math.min(...values);
-    if (avg < 5.0 || minScore <= 3) {
+    if (avg < 3.5) {
       feedback.improvement_target_met = "missed";
-    } else if (minScore <= 5 && feedback.improvement_target_met === "met") {
+    } else if (avg < 5.0 && feedback.improvement_target_met === "met") {
       feedback.improvement_target_met = "partial";
     }
     console.log(JSON.stringify({
