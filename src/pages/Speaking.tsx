@@ -11,7 +11,7 @@ import {
   type SpeakingFeedback, type SpeakingMode, type Scenario,
 } from "@/lib/speaking/content";
 import { classifyGate, gateLabel, type GateStatus } from "@/lib/speaking/gate";
-import { Mic, MicOff, Sparkles, Flame, CheckCircle2, AlertTriangle, ArrowLeft, Trophy, Target, RefreshCw } from "lucide-react";
+import { Mic, MicOff, Sparkles, Flame, CheckCircle2, AlertTriangle, ArrowLeft, Trophy, Target, RefreshCw, Play, SkipForward, SkipBack, Repeat } from "lucide-react";
 
 const BASELINE_TARGET = "Speak clearly with structure and finish with one strong closing line.";
 
@@ -353,6 +353,266 @@ const ScenarioBriefing = ({ s }: { s: Scenario }) => {
     </div>
   );
 };
+
+// ============================================================
+// Shadow Practice — AI reads one sentence at a time; you repeat it.
+// ============================================================
+
+type ShadowVoice = { id: string; label: string; voice: string; instructions: string };
+const SHADOW_VOICES: ShadowVoice[] = [
+  { id: "natural", label: "Natural Professional", voice: "sage",
+    instructions: "Speak like a sharp, warm professional in a real conversation. Confident, easy pace, natural pauses." },
+  { id: "executive", label: "Executive Leader", voice: "onyx",
+    instructions: "Speak like a Fortune 500 executive. Concise, decisive, high-status. Deliberate pauses. End with impact." },
+  { id: "charismatic", label: "Charismatic Speaker", voice: "verse",
+    instructions: "Speak like a charismatic TED speaker. Vivid, warm, memorable. Vary tone and pace for emotional impact." },
+];
+
+function splitSentences(text: string): string[] {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) return [];
+  // Split on sentence-ending punctuation but keep it attached.
+  const parts = cleaned.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [cleaned];
+  return parts.map((p) => p.trim()).filter((p) => p.length > 0);
+}
+
+function normalizeForCompare(s: string): string[] {
+  return s.toLowerCase().replace(/[^a-z0-9'\s]/g, " ").split(/\s+/).filter(Boolean);
+}
+
+// Longest common subsequence length between two word arrays.
+function lcsLen(a: string[], b: string[]): number {
+  if (a.length === 0 || b.length === 0) return 0;
+  const dp = new Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = 0;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev + 1 : Math.max(dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+}
+
+function similarityScore(target: string, said: string): number {
+  const a = normalizeForCompare(target);
+  const b = normalizeForCompare(said);
+  if (a.length === 0) return 0;
+  const lcs = lcsLen(a, b);
+  return lcs / a.length; // 0..1, order-aware
+}
+
+const ShadowPractice = ({ defaultText }: { defaultText: string }) => {
+  const { toast } = useToast();
+  const [rawText, setRawText] = useState(defaultText);
+  const [sentences, setSentences] = useState<string[]>([]);
+  const [voiceId, setVoiceId] = useState<string>("natural");
+  const [idx, setIdx] = useState(0);
+  const [audioCache, setAudioCache] = useState<Record<string, string>>({});
+  const [loadingAudio, setLoadingAudio] = useState(false);
+  const [said, setSaid] = useState("");
+  const [listening, setListening] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const recRef = useRef<SpeechRec | null>(null);
+  const [scoresByIdx, setScoresByIdx] = useState<Record<number, number>>({});
+  const sttOk = getSpeechRecognitionCtor() !== null;
+
+  useEffect(() => { setRawText(defaultText); }, [defaultText]);
+
+  const start = () => {
+    const s = splitSentences(rawText);
+    if (s.length === 0) {
+      toast({ title: "Add some text first", description: "Paste or type at least one sentence to shadow." });
+      return;
+    }
+    setSentences(s);
+    setIdx(0);
+    setSaid("");
+    setScoresByIdx({});
+  };
+
+  const cacheKey = (sentence: string, voice: string) => `${voice}::${sentence}`;
+
+  const playCurrent = async () => {
+    const sentence = sentences[idx];
+    if (!sentence) return;
+    const v = SHADOW_VOICES.find((x) => x.id === voiceId) ?? SHADOW_VOICES[0];
+    const key = cacheKey(sentence, v.id);
+    let url = audioCache[key];
+    if (!url) {
+      setLoadingAudio(true);
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess.session?.access_token;
+        if (!token) throw new Error("Not signed in");
+        const endpoint = `${(import.meta.env.VITE_SUPABASE_URL as string)}/functions/v1/speaking-tts`;
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ text: sentence, voice: v.voice, instructions: v.instructions }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({ error: "TTS failed" }));
+          throw new Error(j.error || "TTS failed");
+        }
+        const blob = await res.blob();
+        url = URL.createObjectURL(blob);
+        setAudioCache((prev) => ({ ...prev, [key]: url! }));
+      } catch (e) {
+        toast({ title: "Couldn't play sentence", description: e instanceof Error ? e.message : "TTS failed", variant: "destructive" });
+        setLoadingAudio(false);
+        return;
+      }
+      setLoadingAudio(false);
+    }
+    if (audioRef.current) {
+      audioRef.current.src = url;
+      audioRef.current.play().catch(() => {});
+    }
+  };
+
+  const startListening = () => {
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) return;
+    setSaid("");
+    const rec = new Ctor();
+    rec.lang = "en-US"; rec.continuous = false; rec.interimResults = true;
+    let finalText = "";
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i] as SpeechRecAlt;
+        if (r.isFinal) finalText += r[0].transcript + " ";
+        else interim += r[0].transcript;
+      }
+      setSaid((finalText + interim).trim());
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => {
+      setListening(false);
+      // Score against current sentence.
+      const t = sentences[idx];
+      if (t) {
+        const score = similarityScore(t, (finalText || said).trim());
+        setScoresByIdx((prev) => ({ ...prev, [idx]: score }));
+      }
+    };
+    try { rec.start(); recRef.current = rec; setListening(true); }
+    catch { setListening(false); }
+  };
+  const stopListening = () => { try { recRef.current?.stop(); } catch { /* ignore */ } setListening(false); };
+
+  const next = () => { if (idx < sentences.length - 1) { setIdx(idx + 1); setSaid(""); } };
+  const prev = () => { if (idx > 0) { setIdx(idx - 1); setSaid(""); } };
+  const retry = () => { setSaid(""); setScoresByIdx((p) => { const c = { ...p }; delete c[idx]; return c; }); };
+
+  useEffect(() => () => {
+    Object.values(audioCache).forEach((u) => { try { URL.revokeObjectURL(u); } catch { /* ignore */ } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const currentScore = scoresByIdx[idx];
+  const verdict = currentScore == null ? null
+    : currentScore >= 0.85 ? { text: "Nailed it", tone: "text-emerald-600", emoji: "✅" }
+    : currentScore >= 0.6  ? { text: "Close — try again for a cleaner take", tone: "text-amber-600", emoji: "⚠️" }
+    :                        { text: "Off — replay and try once more", tone: "text-red-600", emoji: "🔁" };
+  const completedCount = Object.values(scoresByIdx).filter((s) => s >= 0.6).length;
+
+  return (
+    <Card className="glass-card mb-4 border-border/40">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">🎤 Shadow Practice — repeat after the coach</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {sentences.length === 0 ? (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Paste any text (a rewrite from above, a pitch, an intro). The coach reads one sentence at a time — you repeat it, then move on.
+            </p>
+            <Textarea rows={4} value={rawText} onChange={(e) => setRawText(e.target.value)}
+              placeholder="Paste the sentence(s) you want to practice out loud…" />
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={voiceId} onValueChange={setVoiceId}>
+                <SelectTrigger className="w-56 h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SHADOW_VOICES.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button size="sm" onClick={start} className="gap-1"><Play className="w-4 h-4" /> Start shadow practice</Button>
+              {!sttOk && <span className="text-xs text-amber-600">Speech recognition unsupported here — playback still works.</span>}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Sentence <strong>{idx + 1}</strong> / {sentences.length} · Style: <strong>{SHADOW_VOICES.find((v) => v.id === voiceId)?.label}</strong></span>
+              <span>Cleared: {completedCount}/{sentences.length}</span>
+            </div>
+            <div className="h-1.5 w-full bg-muted rounded overflow-hidden">
+              <div className="h-full bg-primary transition-all" style={{ width: `${((idx + (currentScore != null ? 1 : 0)) / sentences.length) * 100}%` }} />
+            </div>
+            <div className="rounded-md border border-border/60 bg-muted/30 p-3">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Coach says</div>
+              <p className="text-base leading-relaxed">{sentences[idx]}</p>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <Button size="sm" variant="outline" onClick={playCurrent} disabled={loadingAudio} className="gap-1">
+                  <Play className="w-4 h-4" /> {loadingAudio ? "Generating…" : "▶️ Play"}
+                </Button>
+                {!listening ? (
+                  <Button size="sm" onClick={startListening} disabled={!sttOk} className="gap-1">
+                    <Mic className="w-4 h-4" /> Repeat now
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="destructive" onClick={stopListening} className="gap-1">
+                    <MicOff className="w-4 h-4" /> Stop
+                  </Button>
+                )}
+                {listening && <span className="text-xs text-red-500 animate-pulse">● Listening…</span>}
+              </div>
+              <audio ref={audioRef} className="hidden" />
+            </div>
+
+            {said && (
+              <div className="rounded-md border border-border/60 p-3">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">You said</div>
+                <p className="text-sm">{said}</p>
+                {verdict && (
+                  <p className={`text-sm mt-2 font-medium ${verdict.tone}`}>
+                    {verdict.emoji} {verdict.text} · match {(currentScore! * 100).toFixed(0)}%
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={prev} disabled={idx === 0} className="gap-1">
+                <SkipBack className="w-4 h-4" /> Prev
+              </Button>
+              <Button size="sm" variant="ghost" onClick={retry} className="gap-1">
+                <Repeat className="w-4 h-4" /> Retry
+              </Button>
+              <Button size="sm" onClick={next} disabled={idx >= sentences.length - 1} className="gap-1">
+                Next <SkipForward className="w-4 h-4" />
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => { setSentences([]); setSaid(""); setScoresByIdx({}); }} className="ml-auto">
+                Change text
+              </Button>
+            </div>
+
+            {idx === sentences.length - 1 && currentScore != null && (
+              <div className="rounded-md border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 p-3 text-sm">
+                🎯 Shadow practice done — {completedCount}/{sentences.length} sentences cleared. Run it again with a different style to lock it in.
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+
+
 
 const Speaking = () => {
   const navigate = useNavigate();
@@ -797,6 +1057,21 @@ const Speaking = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Shadow Practice — Phase 2 */}
+        <ShadowPractice
+          defaultText={
+            feedback?.powerful ||
+            feedback?.natural ||
+            feedback?.role_style ||
+            scenario.strong_example_round_1 ||
+            scenario.round_1_prompt ||
+            scenario.your_task ||
+            ""
+          }
+        />
+
+
 
         {/* Feedback */}
         {feedback && (
