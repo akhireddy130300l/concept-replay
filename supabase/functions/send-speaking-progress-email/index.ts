@@ -328,7 +328,19 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     const force = body?.force === true;
 
-    const isCron = !!CRON_SECRET && req.headers.get("x-cron-secret") === CRON_SECRET;
+    // Resolve cron secret from vault (single source of truth), fall back to env.
+    let cronSecret = "";
+    try {
+      const tmp = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      const { data, error } = await tmp.rpc("get_cron_secret");
+      if (!error && typeof data === "string") cronSecret = data;
+    } catch { /* ignore */ }
+    if (!cronSecret) cronSecret = CRON_SECRET ?? "";
+
+    const authRaw = req.headers.get("Authorization") ?? "";
+    const isCron =
+      !!cronSecret &&
+      (req.headers.get("x-cron-secret") === cronSecret || authRaw === `Bearer ${cronSecret}`);
     let triggerUserId: string | null = null;
 
     if (!isCron) {
