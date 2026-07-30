@@ -458,6 +458,12 @@ Deno.serve(async (req) => {
       results.push({ to: r.report_email, ok, status: res.status, reason: ok ? undefined : `resend_${res.status}` });
     }
 
+    console.log(JSON.stringify({
+      phase: "send_speaking_progress_email",
+      recipients: recipients.length,
+      sent: results.filter((x) => x.ok).length,
+      statuses: results.map((x) => ({ status: x.status, ok: x.ok, reason: x.reason })),
+    }));
     return new Response(JSON.stringify({ ok: true, sent: results.filter((x) => x.ok).length, results }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
