@@ -333,6 +333,51 @@ export type Database = {
         }
         Relationships: []
       }
+      law_daily_lessons: {
+        Row: {
+          category: string | null
+          content: Json
+          created_at: string
+          difficulty: string | null
+          english_terms: Json
+          id: string
+          law_name: string
+          lesson_date: string
+          section_ref: string | null
+          sent_at: string | null
+          topic_key: string
+          user_id: string
+        }
+        Insert: {
+          category?: string | null
+          content?: Json
+          created_at?: string
+          difficulty?: string | null
+          english_terms?: Json
+          id?: string
+          law_name: string
+          lesson_date: string
+          section_ref?: string | null
+          sent_at?: string | null
+          topic_key: string
+          user_id: string
+        }
+        Update: {
+          category?: string | null
+          content?: Json
+          created_at?: string
+          difficulty?: string | null
+          english_terms?: Json
+          id?: string
+          law_name?: string
+          lesson_date?: string
+          section_ref?: string | null
+          sent_at?: string | null
+          topic_key?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       learned_topics: {
         Row: {
           created_at: string
