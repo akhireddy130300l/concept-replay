@@ -289,7 +289,15 @@ Deno.serve(async (req) => {
 
     const authHeader = req.headers.get("Authorization") ?? "";
     const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
-    const isCron = !!CRON_SECRET && (req.headers.get("x-cron-secret") === CRON_SECRET || bearer === CRON_SECRET);
+    // Vault is the single source of truth for CRON_SECRET; env is the fallback.
+    let cronSecret = "";
+    try {
+      const tmp = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      const { data, error } = await tmp.rpc("get_cron_secret");
+      if (!error && typeof data === "string") cronSecret = data;
+    } catch { /* ignore */ }
+    if (!cronSecret) cronSecret = CRON_SECRET ?? "";
+    const isCron = !!cronSecret && (req.headers.get("x-cron-secret") === cronSecret || bearer === cronSecret);
 
     let body: Record<string, any> = {};
     try { body = await req.json(); } catch { /* no body */ }
