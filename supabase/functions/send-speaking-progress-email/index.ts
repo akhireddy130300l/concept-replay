@@ -91,9 +91,10 @@ function card(title: string, inner: string, accent = "#e5e7eb"): string {
     <div style="margin-top:8px;">${inner}</div>
   </div>`;
 }
-function list(items: string[]): string {
-  if (!items.length) return `<div style="font-size:14px;color:#9ca3af;">Not enough data yet.</div>`;
-  return `<ul style="margin:0 0 0 18px;padding:0;font-size:14px;color:#1f2937;">${items
+function list(items: unknown[]): string {
+  const clean = (items ?? []).map(asStr).filter(Boolean);
+  if (!clean.length) return `<div style="font-size:14px;color:#9ca3af;">Not enough data yet.</div>`;
+  return `<ul style="margin:0 0 0 18px;padding:0;font-size:14px;color:#1f2937;">${clean
     .map((i) => `<li style="margin:5px 0;">${esc(i)}</li>`)
     .join("")}</ul>`;
 }
@@ -106,7 +107,31 @@ function beforeAfter(label: string, said: string, better: string, tint: string):
   </div>`;
 }
 
-async function geminiCoachSummary(payload: unknown, apiKey: string): Promise<string[] | null> {
+type CoachReport = {
+  blunt_assessment?: string;
+  biggest_mistakes?: Array<{ mistake?: string; why_it_costs_you?: string; fix?: string }>;
+  pattern_bullets?: string[];
+  level?: string;
+  level_reason?: string;
+  one_thing_today?: string;
+  drills?: Array<{ name?: string; how?: string; minutes?: number }>;
+  phrases_to_kill?: string[];
+  phrases_to_adopt?: string[];
+  next_7_days?: string[];
+};
+
+function asStr(v: unknown): string {
+  if (typeof v === "string") return v.trim();
+  if (v === null || v === undefined) return "";
+  if (Array.isArray(v)) return v.map(asStr).filter(Boolean).join(" — ");
+  if (typeof v === "object") return Object.values(v as Record<string, unknown>).map(asStr).filter(Boolean).join(" — ");
+  return String(v);
+}
+function strArr(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(asStr).filter(Boolean) : [];
+}
+
+async function geminiCoachReport(payload: unknown, apiKey: string): Promise<CoachReport | null> {
   try {
     const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
       method: "POST",
@@ -118,25 +143,39 @@ async function geminiCoachSummary(payload: unknown, apiKey: string): Promise<str
             parts: [
               {
                 text:
-                  "You are the speaker's Executive Communication Coach. Below is a JSON history of their speaking-gym sessions " +
-                  "(scores, weaknesses, filler habits, pace, targets). Write 4-6 short coaching bullets about the PATTERN across " +
-                  "sessions: what is genuinely improving, what keeps repeating, and the single highest-leverage change for today. " +
-                  "Be direct and specific, no flattery, no preamble. Return ONLY a JSON array of strings.\n\n" +
-                  JSON.stringify(payload).slice(0, 60000),
+                  "You are this person's Executive Communication Coach. Below is the JSON history of their speaking-gym sessions " +
+                  "(scores, transcript excerpts, weaknesses, filler habits, pace, targets).\n\n" +
+                  "BE BLUNT. No flattery, no hedging, no 'great job'. Name the mistakes directly and say what they cost the speaker " +
+                  "in a real room (credibility, authority, being interrupted, not being believed). Be specific to THEIR words, quote " +
+                  "their phrasing where useful. Never be cruel — be the coach who tells the truth so they improve fast.\n\n" +
+                  "Return STRICT JSON only, exactly these keys:\n" +
+                  `{
+  "blunt_assessment": "3-5 sentences. The honest verdict on how they currently come across.",
+  "biggest_mistakes": [{"mistake":"plain string","why_it_costs_you":"plain string","fix":"plain string"}],
+  "pattern_bullets": ["4-6 plain strings on what is improving vs what keeps repeating across sessions"],
+  "level": "one of: Beginner, Developing, Competent, Strong, Executive-ready",
+  "level_reason": "one sentence justifying the level",
+  "one_thing_today": "the single highest-leverage change for today's rep",
+  "drills": [{"name":"plain string","how":"plain string","minutes":5}],
+  "phrases_to_kill": ["plain strings they actually said that weaken them"],
+  "phrases_to_adopt": ["plain strings - stronger replacements"],
+  "next_7_days": ["5-7 plain strings, one focus per day"]
+}\n` +
+                  "Give 3-5 biggest_mistakes. Every array element must be a plain string unless the schema says an object.\n\n" +
+                  JSON.stringify(payload).slice(0, 80000),
               },
             ],
           },
         ],
-        generationConfig: { temperature: 0.6, responseMimeType: "application/json" },
+        generationConfig: { temperature: 0.65, responseMimeType: "application/json", maxOutputTokens: 4096 },
       }),
     });
     if (!res.ok) return null;
     const json = await res.json();
-    const text: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const text: string = json?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? "";
     const cleaned = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const parsed = JSON.parse(cleaned);
-    if (Array.isArray(parsed)) return parsed.map((x) => String(x)).filter(Boolean).slice(0, 6);
-    return null;
+    return parsed && typeof parsed === "object" ? (parsed as CoachReport) : null;
   } catch {
     return null;
   }
@@ -146,10 +185,10 @@ function renderEmail(opts: {
   sessions: Session[];
   streak: number;
   longest: number;
-  coachBullets: string[] | null;
+  coach: CoachReport | null;
   ctaUrl: string;
 }): string {
-  const { sessions, streak, longest, coachBullets, ctaUrl } = opts;
+  const { sessions, streak, longest, coach, ctaUrl } = opts;
   const latest = sessions[0];
   const withScores = sessions.filter((s) => sessionAvg(s.feedback) !== null);
   const overall = avg(withScores.map((s) => sessionAvg(s.feedback)!));
@@ -221,6 +260,68 @@ function renderEmail(opts: {
         </table>`
       : "";
 
+  // ---- blunt coaching blocks -------------------------------------------
+  const mistakes = Array.isArray(coach?.biggest_mistakes) ? coach!.biggest_mistakes!.slice(0, 5) : [];
+  const mistakesHtml = mistakes.length
+    ? mistakes
+        .map(
+          (m, i) => `<div style="margin:0 0 12px 0;padding:11px 13px;background:#fff7ed;border-left:3px solid #ea580c;border-radius:8px;">
+            <div style="font-size:13.5px;font-weight:700;color:#7c2d12;">${i + 1}. ${esc(asStr(m?.mistake))}</div>
+            ${m?.why_it_costs_you ? `<div style="font-size:13px;color:#9a3412;margin-top:4px;line-height:1.6;"><b>What it costs you:</b> ${esc(asStr(m.why_it_costs_you))}</div>` : ""}
+            ${m?.fix ? `<div style="font-size:13px;color:#065f46;margin-top:4px;line-height:1.6;"><b>Fix:</b> ${esc(asStr(m.fix))}</div>` : ""}
+          </div>`,
+        )
+        .join("")
+    : "";
+
+  const drills = Array.isArray(coach?.drills) ? coach!.drills!.slice(0, 4) : [];
+  const drillsHtml = drills.length
+    ? drills
+        .map(
+          (d) => `<div style="margin:0 0 9px 0;font-size:13.5px;color:#1f2937;line-height:1.6;">
+            <b style="color:#111827;">${esc(asStr(d?.name))}</b>${d?.minutes ? ` <span style="color:#6b7280;">· ${Number(d.minutes)} min</span>` : ""}
+            <div style="color:#4b5563;">${esc(asStr(d?.how))}</div>
+          </div>`,
+        )
+        .join("")
+    : "";
+
+  // Recent session log
+  const logRows = sessions
+    .slice(0, 8)
+    .map((s) => {
+      const a = sessionAvg(s.feedback);
+      const met = (s.improvement_target_met || s.feedback?.improvement_target_met) === "met";
+      const w = asStr(s.main_weakness || s.feedback?.main_weakness || "—");
+      return `<tr>
+        <td style="padding:6px 8px;font-size:12.5px;color:#374151;border-bottom:1px solid #f3f4f6;white-space:nowrap;">${esc(s.session_date ?? "")}</td>
+        <td style="padding:6px 8px;font-size:12.5px;color:#374151;border-bottom:1px solid #f3f4f6;">${esc(s.mode ?? "")}</td>
+        <td style="padding:6px 8px;font-size:12.5px;color:#111827;font-weight:700;border-bottom:1px solid #f3f4f6;">${fmt1(a)}</td>
+        <td style="padding:6px 8px;font-size:12.5px;border-bottom:1px solid #f3f4f6;color:${met ? "#047857" : "#b91c1c"};">${met ? "met" : "missed"}</td>
+        <td style="padding:6px 8px;font-size:12.5px;color:#6b7280;border-bottom:1px solid #f3f4f6;">${esc(w.slice(0, 60))}</td>
+      </tr>`;
+    })
+    .join("");
+  const logHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;table-layout:fixed;">
+      <tr>
+        ${["Date", "Mode", "Avg", "Target", "Main weakness"]
+          .map((h) => `<th align="left" style="font-size:11px;color:#6b7280;text-transform:uppercase;padding:0 8px 6px;">${h}</th>`)
+          .join("")}
+      </tr>${logRows}</table>`;
+
+  // Habits: pace + fillers
+  const paceRecent = avg(
+    sessions.slice(0, 5).map((s) => Number(s.feedback?.words_per_minute ?? s.feedback?.wpm)).filter((n) => Number.isFinite(n)),
+  );
+  const habitBits: string[] = [];
+  if (fillerRecent !== null) habitBits.push(`Filler words per session (last 5): ${fmt1(fillerRecent)}${fillerPrior !== null ? ` (was ${fmt1(fillerPrior)})` : ""}`);
+  if (paceRecent !== null) habitBits.push(`Speaking pace (last 5): ${Math.round(paceRecent)} words/min — target 130–160`);
+  const paceVerdicts = topCounts(sessions.slice(0, 10).map((s) => asStr(s.feedback?.pace_verdict)).filter(Boolean), 2);
+  if (paceVerdicts.length) habitBits.push(`Most common pace verdict: ${paceVerdicts[0][0]} (${paceVerdicts[0][1]}×)`);
+  const modeCounts = topCounts(sessions.map((s) => asStr(s.mode)).filter(Boolean), 5);
+  if (modeCounts.length) habitBits.push(`Practice mix: ${modeCounts.map(([m, c]) => `${m} ${c}×`).join(", ")}`);
+
+
   return `<!doctype html>
 <html><head><meta charset="utf-8"/><title>Your Speaking Progress Report</title></head>
 <body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
@@ -230,9 +331,19 @@ function renderEmail(opts: {
         <tr><td>
           <div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#6b7280;">Influence Speaking Gym</div>
           <h1 style="margin:6px 0 4px 0;font-size:22px;color:#111827;">Your Speaking Progress Report</h1>
-          <p style="font-size:14px;color:#374151;margin:0 0 18px 0;">
-            Everything you've spoken so far, what the coach heard, and exactly how you should have said it.
+          <p style="font-size:14px;color:#374151;margin:0 0 14px 0;">
+            No sugar-coating. Below is exactly how you currently come across, the mistakes that keep repeating,
+            and how you should have said it.
           </p>
+          ${
+            coach?.blunt_assessment
+              ? `<div style="background:#111827;border-radius:12px;padding:16px 18px;margin:0 0 14px 0;">
+                   <div style="font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#9ca3af;font-weight:700;">Straight talk from your coach</div>
+                   <div style="font-size:14.5px;color:#f9fafb;line-height:1.65;margin-top:7px;">${esc(asStr(coach.blunt_assessment))}</div>
+                   ${coach.level ? `<div style="margin-top:10px;font-size:13px;color:#c7d2fe;"><b>Current level: ${esc(asStr(coach.level))}</b>${coach.level_reason ? ` — ${esc(asStr(coach.level_reason))}` : ""}</div>` : ""}
+                 </div>`
+              : ""
+          }
 
           <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:14px;margin-bottom:14px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
@@ -261,11 +372,37 @@ function renderEmail(opts: {
             )}</div>`,
           )}
 
-          ${coachBullets && coachBullets.length ? card("Coach's read across all your sessions", list(coachBullets), "#c7d2fe") : ""}
+          ${mistakesHtml ? card("Your biggest mistakes right now — ranked", mistakesHtml, "#fdba74") : ""}
+          ${coach?.one_thing_today ? card("If you fix one thing today", `<div style="font-size:14.5px;color:#065f46;line-height:1.65;font-weight:600;">${esc(asStr(coach.one_thing_today))}</div>`, "#6ee7b7") : ""}
+
+          ${coach?.pattern_bullets?.length ? card("Coach's read across all your sessions", list(strArr(coach.pattern_bullets)), "#c7d2fe") : ""}
 
           ${card("What keeps holding you back", list(weaknesses.map(([w, c]) => (c > 1 ? `${w} (seen in ${c} sessions)` : w))))}
           ${card("Fix list — most repeated corrections", list(fixes.map(([w, c]) => (c > 1 ? `${w} (${c}×)` : w))))}
           ${card("What you're consistently doing well", list(wins.map(([w, c]) => (c > 1 ? `${w} (${c}×)` : w))))}
+          ${habitBits.length ? card("Delivery habits — fillers, pace, practice mix", list(habitBits)) : ""}
+          ${card("Recent session log", logHtml)}
+          ${
+            coach?.phrases_to_kill?.length || coach?.phrases_to_adopt?.length
+              ? card(
+                  "Language upgrade — across all your sessions",
+                  `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                    <tr>
+                      <td style="width:50%;vertical-align:top;padding-right:6px;">
+                        <div style="font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:5px;">Stop saying</div>
+                        ${list(strArr(coach?.phrases_to_kill).slice(0, 6))}
+                      </td>
+                      <td style="width:50%;vertical-align:top;padding-left:6px;">
+                        <div style="font-size:12px;color:#047857;font-weight:700;margin-bottom:5px;">Say this instead</div>
+                        ${list(strArr(coach?.phrases_to_adopt).slice(0, 6))}
+                      </td>
+                    </tr>
+                  </table>`,
+                  "#fecaca",
+                )
+              : ""
+          }
+
 
           ${
             latest
@@ -295,6 +432,8 @@ function renderEmail(opts: {
                 )
               : ""
           }
+          ${drillsHtml ? card("Drills prescribed for you", drillsHtml, "#bbf7d0") : ""}
+          ${coach?.next_7_days?.length ? card("Your next 7 days — one focus per day", list(strArr(coach.next_7_days)), "#ddd6fe") : ""}
 
           <div style="text-align:center;margin:18px 0 6px 0;">
             <a href="${esc(ctaUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:10px;font-size:15px;">Start today's session</a>
@@ -416,18 +555,22 @@ Deno.serve(async (req) => {
         .eq("user_id", r.user_id)
         .maybeSingle();
 
-      let coachBullets: string[] | null = null;
+      let coach: CoachReport | null = null;
       if (GEMINI_API_KEY) {
-        coachBullets = await geminiCoachSummary(
+        coach = await geminiCoachReport(
           sessions.slice(0, 15).map((s) => ({
             date: s.session_date,
             mode: s.mode,
             scenario: s.scenario_title,
+            transcript_excerpt: excerpt(s.transcript ?? "", 900),
             scores: s.feedback?.scores ?? null,
+            hard_truth: s.feedback?.hard_truth ?? null,
             main_weakness: s.main_weakness ?? s.feedback?.main_weakness ?? null,
             what_to_fix: s.feedback?.what_to_fix ?? null,
             did_well: s.feedback?.did_well ?? null,
+            weak_phrases: s.feedback?.weak_phrases ?? null,
             filler_count: s.feedback?.filler_count ?? null,
+            words_per_minute: s.feedback?.words_per_minute ?? s.feedback?.wpm ?? null,
             pace_verdict: s.feedback?.pace_verdict ?? null,
             target: s.improvement_target,
             target_met: s.improvement_target_met ?? s.feedback?.improvement_target_met ?? null,
@@ -440,7 +583,7 @@ Deno.serve(async (req) => {
         sessions,
         streak: state?.current_streak ?? 0,
         longest: state?.longest_streak ?? 0,
-        coachBullets,
+        coach,
         ctaUrl: `${APP_BASE_URL || ""}/speaking-gym`,
       });
 

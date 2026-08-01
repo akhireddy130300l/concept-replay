@@ -147,7 +147,7 @@ Return STRICT JSON only, no markdown, with EXACTLY these keys:
   "ingredients": ["3-6 elements that must be proved/satisfied"],
   "examples": [{"title": "short label", "facts": "a concrete everyday Indian scenario, 2-3 sentences", "outcome": "how the law applies and the likely legal result"}],
   "landmark_cases": [{"case": "case name", "principle": "one-line ratio"}],
-  "loopholes_and_misuse": ["3-5 points: how this provision is exploited, misused, or where it is weak in practice, and the safeguard/counter-argument for each"],
+  "loopholes_and_misuse": ["3-5 items. EACH ITEM MUST BE A PLAIN STRING (never an object), written as: the loophole/misuse in practice — then the safeguard or counter-argument, separated by an em dash"],
   "how_lawyers_argue": "3-4 sentences showing how an advocate would actually argue this in court, in courtroom register",
   "english_terms": [{"term": "legal/English term", "meaning": "plain meaning", "used_in_a_sentence": "an advocate-style sentence using it"}],
   "practice_question": "one applied question the learner should answer mentally",
@@ -183,6 +183,26 @@ function renderEmail(o: {
       .join("")}</ul>`;
 
   const arr = (v: unknown): any[] => (Array.isArray(v) ? v : []);
+
+  // Gemini sometimes returns objects instead of strings inside string arrays.
+  // Flatten any shape into readable text so we never print "[object Object]".
+  const toText = (v: unknown): string => {
+    if (v === null || v === undefined) return "";
+    if (typeof v === "string") return v.trim();
+    if (typeof v === "number" || typeof v === "boolean") return String(v);
+    if (Array.isArray(v)) return v.map(toText).filter(Boolean).join(" — ");
+    if (typeof v === "object") {
+      const o = v as Record<string, unknown>;
+      const label = ["point", "loophole", "issue", "misuse", "title", "name", "text", "description", "gap"]
+        .map((k) => o[k]).find((x) => typeof x === "string" && x.trim());
+      const fix = ["safeguard", "counter", "counter_argument", "counterArgument", "remedy", "response", "solution", "explanation", "detail"]
+        .map((k) => o[k]).find((x) => typeof x === "string" && x.trim());
+      if (label || fix) return [label, fix].filter(Boolean).map((s) => String(s).trim()).join(" — ");
+      return Object.values(o).map(toText).filter(Boolean).join(" — ");
+    }
+    return String(v);
+  };
+  const strList = (v: unknown): string[] => arr(v).map(toText).filter(Boolean);
 
   const examplesHtml = arr(lesson.examples)
     .map(
@@ -238,10 +258,10 @@ function renderEmail(o: {
 
   ${card("What this law says", p(String(lesson.bare_provision_gist ?? "")))}
   ${card("In plain English", p(String(lesson.plain_explanation ?? "")))}
-  ${card("Ingredients that must be proved", list(arr(lesson.ingredients).map(String)))}
+  ${card("Ingredients that must be proved", list(strList(lesson.ingredients)))}
   ${card("Worked examples", examplesHtml)}
   ${card("Landmark cases", casesHtml)}
-  ${card("Loopholes, misuse & the counter-argument", list(arr(lesson.loopholes_and_misuse).map(String)), "#fecaca")}
+  ${card("Loopholes, misuse & the counter-argument", list(strList(lesson.loopholes_and_misuse)), "#fecaca")}
   ${card("How an advocate argues this in court", p(String(lesson.how_lawyers_argue ?? "")))}
   ${card("Advocate's English — terms to start using", termsHtml, "#c7d2fe")}
   ${card("Today's practice question", p(String(lesson.practice_question ?? "")))}
