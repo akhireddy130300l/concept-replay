@@ -204,7 +204,88 @@ async function geminiCoachReport(payload: unknown, apiKey: string): Promise<Coac
   }
 }
 
+// ---- Personalised 7-day drill schedule --------------------------------
+function dayLabel(offset: number): string {
+  const d = new Date(Date.now() + offset * 86400000);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(d);
+}
+
+const FALLBACK_DRILLS: Array<(m: string) => PlanExercise[]> = [
+  (m) => [
+    { name: "Name the mistake out loud", how: `Say in one sentence how "${m}" showed up in your last session, then re-record that same opening without it.`, minutes: 5 },
+    { name: "60-second cold open", how: "Pick any scenario, speak 60 seconds with your conclusion in the first sentence. Record and replay once.", minutes: 6 },
+    { name: "Silence reps", how: "Repeat the same 60 seconds, replacing every filler with a full pause. Count the fillers you still make.", minutes: 4 },
+  ],
+  (m) => [
+    { name: "Point-Reason-Example-Point", how: `Structure a 90-second answer as P-R-E-P, deliberately correcting "${m}".`, minutes: 7 },
+    { name: "Pace metronome", how: "Re-run the same answer at 130–160 words/min — roughly 2.5 words per second. Time yourself.", minutes: 5 },
+    { name: "Shadow practice", how: "Run Shadow Practice on the Executive Leader rewrite from your latest session.", minutes: 4 },
+  ],
+  (m) => [
+    { name: "Pressure round", how: `Do a full 3-round session (opening, pressure, close) with "${m}" as your stated improvement target.`, minutes: 10 },
+    { name: "Phrase swap", how: "Read your 'Stop saying' list aloud, then say the stronger replacement three times each.", minutes: 5 },
+  ],
+];
+
+function buildFallbackPlan(mistakes: string[]): PlanDay[] {
+  const pool = mistakes.length ? mistakes : ["unclear structure", "filler words", "low executive presence"];
+  return Array.from({ length: 7 }, (_, i) => {
+    const m = pool[i % pool.length];
+    const exercises =
+      i === 6
+        ? [
+            { name: "Full integration rep", how: `Complete one full 3-round session applying every fix from this week — especially "${pool[0]}". No notes.`, minutes: 12 },
+            { name: "Self-review", how: "Play back your own recording and score yourself on clarity, structure and presence before reading the AI feedback.", minutes: 6 },
+          ]
+        : FALLBACK_DRILLS[i % FALLBACK_DRILLS.length](m);
+    return {
+      day: i + 1,
+      focus: i === 6 ? "Put it all together" : `Attack: ${m}`,
+      targets_mistake: i === 6 ? pool.slice(0, 3).join(", ") : m,
+      exercises,
+      total_minutes: exercises.reduce((a, e) => a + (Number(e.minutes) || 0), 0),
+      success_check:
+        i === 6
+          ? "You complete all 3 rounds without repeating this week's top mistake."
+          : `Your recording shows a visible reduction in "${m}" versus yesterday.`,
+    };
+  });
+}
+
+function renderWeeklyPlan(plan: PlanDay[]): string {
+  return plan
+    .slice(0, 7)
+    .map((d, i) => {
+      const ex = Array.isArray(d?.exercises) ? d.exercises! : [];
+      const total = Number(d?.total_minutes) || ex.reduce((a, e) => a + (Number(e?.minutes) || 0), 0);
+      const rows = ex
+        .map(
+          (e) => `<div style="margin:6px 0;font-size:13.5px;color:#1f2937;line-height:1.55;">
+            <b style="color:#111827;">${esc(asStr(e?.name))}</b>${e?.minutes ? ` <span style="color:#6d28d9;font-weight:700;">· ${Number(e.minutes)} min</span>` : ""}
+            <div style="color:#4b5563;">${esc(asStr(e?.how))}</div>
+          </div>`,
+        )
+        .join("");
+      return `<div style="margin:0 0 10px 0;padding:12px 13px;background:${i % 2 ? "#faf5ff" : "#f5f3ff"};border-left:3px solid #7c3aed;border-radius:8px;">
+        <div style="font-size:13.5px;font-weight:700;color:#4c1d95;">
+          Day ${Number(d?.day) || i + 1} · ${esc(dayLabel(i))} — ${esc(asStr(d?.focus) || "Practice")}
+          ${total ? `<span style="float:right;font-size:12px;color:#6d28d9;">${total} min</span>` : ""}
+        </div>
+        ${d?.targets_mistake ? `<div style="font-size:12.5px;color:#7c3aed;margin-top:3px;">Targets: ${esc(asStr(d.targets_mistake))}</div>` : ""}
+        ${rows}
+        ${d?.success_check ? `<div style="font-size:12.5px;color:#065f46;margin-top:6px;"><b>Done when:</b> ${esc(asStr(d.success_check))}</div>` : ""}
+      </div>`;
+    })
+    .join("");
+}
+
 function renderEmail(opts: {
+
   sessions: Session[];
   streak: number;
   longest: number;
