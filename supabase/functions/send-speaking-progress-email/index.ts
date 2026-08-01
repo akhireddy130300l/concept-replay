@@ -372,11 +372,37 @@ function renderEmail(opts: {
             )}</div>`,
           )}
 
-          ${coachBullets && coachBullets.length ? card("Coach's read across all your sessions", list(coachBullets), "#c7d2fe") : ""}
+          ${mistakesHtml ? card("Your biggest mistakes right now — ranked", mistakesHtml, "#fdba74") : ""}
+          ${coach?.one_thing_today ? card("If you fix one thing today", `<div style="font-size:14.5px;color:#065f46;line-height:1.65;font-weight:600;">${esc(asStr(coach.one_thing_today))}</div>`, "#6ee7b7") : ""}
+
+          ${coach?.pattern_bullets?.length ? card("Coach's read across all your sessions", list(strArr(coach.pattern_bullets)), "#c7d2fe") : ""}
 
           ${card("What keeps holding you back", list(weaknesses.map(([w, c]) => (c > 1 ? `${w} (seen in ${c} sessions)` : w))))}
           ${card("Fix list — most repeated corrections", list(fixes.map(([w, c]) => (c > 1 ? `${w} (${c}×)` : w))))}
           ${card("What you're consistently doing well", list(wins.map(([w, c]) => (c > 1 ? `${w} (${c}×)` : w))))}
+          ${habitBits.length ? card("Delivery habits — fillers, pace, practice mix", list(habitBits)) : ""}
+          ${card("Recent session log", logHtml)}
+          ${
+            coach?.phrases_to_kill?.length || coach?.phrases_to_adopt?.length
+              ? card(
+                  "Language upgrade — across all your sessions",
+                  `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+                    <tr>
+                      <td style="width:50%;vertical-align:top;padding-right:6px;">
+                        <div style="font-size:12px;color:#b91c1c;font-weight:700;margin-bottom:5px;">Stop saying</div>
+                        ${list(strArr(coach?.phrases_to_kill).slice(0, 6))}
+                      </td>
+                      <td style="width:50%;vertical-align:top;padding-left:6px;">
+                        <div style="font-size:12px;color:#047857;font-weight:700;margin-bottom:5px;">Say this instead</div>
+                        ${list(strArr(coach?.phrases_to_adopt).slice(0, 6))}
+                      </td>
+                    </tr>
+                  </table>`,
+                  "#fecaca",
+                )
+              : ""
+          }
+
 
           ${
             latest
