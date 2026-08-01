@@ -147,7 +147,7 @@ Return STRICT JSON only, no markdown, with EXACTLY these keys:
   "ingredients": ["3-6 elements that must be proved/satisfied"],
   "examples": [{"title": "short label", "facts": "a concrete everyday Indian scenario, 2-3 sentences", "outcome": "how the law applies and the likely legal result"}],
   "landmark_cases": [{"case": "case name", "principle": "one-line ratio"}],
-  "loopholes_and_misuse": ["3-5 points: how this provision is exploited, misused, or where it is weak in practice, and the safeguard/counter-argument for each"],
+  "loopholes_and_misuse": ["3-5 items. EACH ITEM MUST BE A PLAIN STRING (never an object), written as: the loophole/misuse in practice — then the safeguard or counter-argument, separated by an em dash"],
   "how_lawyers_argue": "3-4 sentences showing how an advocate would actually argue this in court, in courtroom register",
   "english_terms": [{"term": "legal/English term", "meaning": "plain meaning", "used_in_a_sentence": "an advocate-style sentence using it"}],
   "practice_question": "one applied question the learner should answer mentally",
