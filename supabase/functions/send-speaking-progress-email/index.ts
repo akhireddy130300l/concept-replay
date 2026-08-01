@@ -432,6 +432,8 @@ function renderEmail(opts: {
                 )
               : ""
           }
+          ${drillsHtml ? card("Drills prescribed for you", drillsHtml, "#bbf7d0") : ""}
+          ${coach?.next_7_days?.length ? card("Your next 7 days — one focus per day", list(strArr(coach.next_7_days)), "#ddd6fe") : ""}
 
           <div style="text-align:center;margin:18px 0 6px 0;">
             <a href="${esc(ctaUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:10px;font-size:15px;">Start today's session</a>
