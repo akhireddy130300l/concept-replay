@@ -107,6 +107,16 @@ function beforeAfter(label: string, said: string, better: string, tint: string):
   </div>`;
 }
 
+type PlanExercise = { name?: string; how?: string; minutes?: number };
+type PlanDay = {
+  day?: number;
+  focus?: string;
+  targets_mistake?: string;
+  exercises?: PlanExercise[];
+  total_minutes?: number;
+  success_check?: string;
+};
+
 type CoachReport = {
   blunt_assessment?: string;
   biggest_mistakes?: Array<{ mistake?: string; why_it_costs_you?: string; fix?: string }>;
@@ -118,7 +128,9 @@ type CoachReport = {
   phrases_to_kill?: string[];
   phrases_to_adopt?: string[];
   next_7_days?: string[];
+  weekly_plan?: PlanDay[];
 };
+
 
 function asStr(v: unknown): string {
   if (typeof v === "string") return v.trim();
@@ -159,9 +171,20 @@ async function geminiCoachReport(payload: unknown, apiKey: string): Promise<Coac
   "drills": [{"name":"plain string","how":"plain string","minutes":5}],
   "phrases_to_kill": ["plain strings they actually said that weaken them"],
   "phrases_to_adopt": ["plain strings - stronger replacements"],
-  "next_7_days": ["5-7 plain strings, one focus per day"]
+  "next_7_days": ["5-7 plain strings, one focus per day"],
+  "weekly_plan": [
+    {"day":1,"focus":"plain string","targets_mistake":"which repeating mistake this day attacks",
+     "exercises":[{"name":"plain string","how":"exact step-by-step instruction using THEIR scenario/phrasing","minutes":5}],
+     "total_minutes":15,"success_check":"a measurable pass/fail check for the day"}
+  ]
 }\n` +
-                  "Give 3-5 biggest_mistakes. Every array element must be a plain string unless the schema says an object.\n\n" +
+                  "Give 3-5 biggest_mistakes.\n" +
+                  "weekly_plan MUST contain exactly 7 days (day 1..7), each with 2-3 exercises, each exercise with a realistic " +
+                  "minutes value, and total_minutes between 10 and 20. Each day must target the user's ACTUAL top repeating " +
+                  "mistakes (see top_repeating_mistakes in the data) — cycle through them, hardest first, and make day 7 a full " +
+                  "integration rep. Instructions must be concrete and specific to their scenarios, not generic advice.\n" +
+                  "Every array element must be a plain string unless the schema says an object.\n\n" +
+
                   JSON.stringify(payload).slice(0, 80000),
               },
             ],
@@ -181,7 +204,88 @@ async function geminiCoachReport(payload: unknown, apiKey: string): Promise<Coac
   }
 }
 
+// ---- Personalised 7-day drill schedule --------------------------------
+function dayLabel(offset: number): string {
+  const d = new Date(Date.now() + offset * 86400000);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(d);
+}
+
+const FALLBACK_DRILLS: Array<(m: string) => PlanExercise[]> = [
+  (m) => [
+    { name: "Name the mistake out loud", how: `Say in one sentence how "${m}" showed up in your last session, then re-record that same opening without it.`, minutes: 5 },
+    { name: "60-second cold open", how: "Pick any scenario, speak 60 seconds with your conclusion in the first sentence. Record and replay once.", minutes: 6 },
+    { name: "Silence reps", how: "Repeat the same 60 seconds, replacing every filler with a full pause. Count the fillers you still make.", minutes: 4 },
+  ],
+  (m) => [
+    { name: "Point-Reason-Example-Point", how: `Structure a 90-second answer as P-R-E-P, deliberately correcting "${m}".`, minutes: 7 },
+    { name: "Pace metronome", how: "Re-run the same answer at 130–160 words/min — roughly 2.5 words per second. Time yourself.", minutes: 5 },
+    { name: "Shadow practice", how: "Run Shadow Practice on the Executive Leader rewrite from your latest session.", minutes: 4 },
+  ],
+  (m) => [
+    { name: "Pressure round", how: `Do a full 3-round session (opening, pressure, close) with "${m}" as your stated improvement target.`, minutes: 10 },
+    { name: "Phrase swap", how: "Read your 'Stop saying' list aloud, then say the stronger replacement three times each.", minutes: 5 },
+  ],
+];
+
+function buildFallbackPlan(mistakes: string[]): PlanDay[] {
+  const pool = mistakes.length ? mistakes : ["unclear structure", "filler words", "low executive presence"];
+  return Array.from({ length: 7 }, (_, i) => {
+    const m = pool[i % pool.length];
+    const exercises =
+      i === 6
+        ? [
+            { name: "Full integration rep", how: `Complete one full 3-round session applying every fix from this week — especially "${pool[0]}". No notes.`, minutes: 12 },
+            { name: "Self-review", how: "Play back your own recording and score yourself on clarity, structure and presence before reading the AI feedback.", minutes: 6 },
+          ]
+        : FALLBACK_DRILLS[i % FALLBACK_DRILLS.length](m);
+    return {
+      day: i + 1,
+      focus: i === 6 ? "Put it all together" : `Attack: ${m}`,
+      targets_mistake: i === 6 ? pool.slice(0, 3).join(", ") : m,
+      exercises,
+      total_minutes: exercises.reduce((a, e) => a + (Number(e.minutes) || 0), 0),
+      success_check:
+        i === 6
+          ? "You complete all 3 rounds without repeating this week's top mistake."
+          : `Your recording shows a visible reduction in "${m}" versus yesterday.`,
+    };
+  });
+}
+
+function renderWeeklyPlan(plan: PlanDay[]): string {
+  return plan
+    .slice(0, 7)
+    .map((d, i) => {
+      const ex = Array.isArray(d?.exercises) ? d.exercises! : [];
+      const total = Number(d?.total_minutes) || ex.reduce((a, e) => a + (Number(e?.minutes) || 0), 0);
+      const rows = ex
+        .map(
+          (e) => `<div style="margin:6px 0;font-size:13.5px;color:#1f2937;line-height:1.55;">
+            <b style="color:#111827;">${esc(asStr(e?.name))}</b>${e?.minutes ? ` <span style="color:#6d28d9;font-weight:700;">· ${Number(e.minutes)} min</span>` : ""}
+            <div style="color:#4b5563;">${esc(asStr(e?.how))}</div>
+          </div>`,
+        )
+        .join("");
+      return `<div style="margin:0 0 10px 0;padding:12px 13px;background:${i % 2 ? "#faf5ff" : "#f5f3ff"};border-left:3px solid #7c3aed;border-radius:8px;">
+        <div style="font-size:13.5px;font-weight:700;color:#4c1d95;">
+          Day ${Number(d?.day) || i + 1} · ${esc(dayLabel(i))} — ${esc(asStr(d?.focus) || "Practice")}
+          ${total ? `<span style="float:right;font-size:12px;color:#6d28d9;">${total} min</span>` : ""}
+        </div>
+        ${d?.targets_mistake ? `<div style="font-size:12.5px;color:#7c3aed;margin-top:3px;">Targets: ${esc(asStr(d.targets_mistake))}</div>` : ""}
+        ${rows}
+        ${d?.success_check ? `<div style="font-size:12.5px;color:#065f46;margin-top:6px;"><b>Done when:</b> ${esc(asStr(d.success_check))}</div>` : ""}
+      </div>`;
+    })
+    .join("");
+}
+
 function renderEmail(opts: {
+
   sessions: Session[];
   streak: number;
   longest: number;
@@ -286,7 +390,24 @@ function renderEmail(opts: {
         .join("")
     : "";
 
+  // Personalised 7-day drill schedule (AI plan, else deterministic from repeating mistakes)
+  const repeatingMistakes = [
+    ...mistakes.map((m) => asStr(m?.mistake)).filter(Boolean),
+    ...weaknesses.filter(([, c]) => c > 1).map(([w]) => w),
+    ...fixes.filter(([, c]) => c > 1).map(([w]) => w),
+  ].filter((v, i, a) => v && a.indexOf(v) === i).slice(0, 5);
+  const aiPlan = Array.isArray(coach?.weekly_plan) ? coach!.weekly_plan!.filter((d) => d && Array.isArray(d.exercises) && d.exercises.length) : [];
+  const plan: PlanDay[] = aiPlan.length >= 5 ? aiPlan : buildFallbackPlan(repeatingMistakes);
+  const planTotal = plan.slice(0, 7).reduce(
+    (a, d) => a + (Number(d?.total_minutes) || (d.exercises ?? []).reduce((x, e) => x + (Number(e?.minutes) || 0), 0)),
+    0,
+  );
+  const planHtml =
+    `<div style="font-size:13px;color:#4b5563;margin-bottom:8px;">Built from your top repeating mistakes${repeatingMistakes.length ? `: <b>${esc(repeatingMistakes.slice(0, 3).join(", "))}</b>` : ""}. Total this week: <b>${planTotal} min</b>.</div>` +
+    renderWeeklyPlan(plan);
+
   // Recent session log
+
   const logRows = sessions
     .slice(0, 8)
     .map((s) => {
@@ -433,7 +554,7 @@ function renderEmail(opts: {
               : ""
           }
           ${drillsHtml ? card("Drills prescribed for you", drillsHtml, "#bbf7d0") : ""}
-          ${coach?.next_7_days?.length ? card("Your next 7 days — one focus per day", list(strArr(coach.next_7_days)), "#ddd6fe") : ""}
+          ${card("Your personalised 7-day drill schedule", planHtml, "#ddd6fe")}
 
           <div style="text-align:center;margin:18px 0 6px 0;">
             <a href="${esc(ctaUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:10px;font-size:15px;">Start today's session</a>
@@ -558,25 +679,35 @@ Deno.serve(async (req) => {
       let coach: CoachReport | null = null;
       if (GEMINI_API_KEY) {
         coach = await geminiCoachReport(
-          sessions.slice(0, 15).map((s) => ({
-            date: s.session_date,
-            mode: s.mode,
-            scenario: s.scenario_title,
-            transcript_excerpt: excerpt(s.transcript ?? "", 900),
-            scores: s.feedback?.scores ?? null,
-            hard_truth: s.feedback?.hard_truth ?? null,
-            main_weakness: s.main_weakness ?? s.feedback?.main_weakness ?? null,
-            what_to_fix: s.feedback?.what_to_fix ?? null,
-            did_well: s.feedback?.did_well ?? null,
-            weak_phrases: s.feedback?.weak_phrases ?? null,
-            filler_count: s.feedback?.filler_count ?? null,
-            words_per_minute: s.feedback?.words_per_minute ?? s.feedback?.wpm ?? null,
-            pace_verdict: s.feedback?.pace_verdict ?? null,
-            target: s.improvement_target,
-            target_met: s.improvement_target_met ?? s.feedback?.improvement_target_met ?? null,
-          })),
+          {
+            top_repeating_mistakes: topCounts(
+              [
+                ...sessions.map((s) => asStr(s.main_weakness ?? s.feedback?.main_weakness ?? "")),
+                ...sessions.flatMap((s) => (Array.isArray(s.feedback?.what_to_fix) ? s.feedback!.what_to_fix.map(asStr) : [])),
+              ].filter(Boolean),
+              6,
+            ).map(([mistake, times]) => ({ mistake, times })),
+            sessions: sessions.slice(0, 15).map((s) => ({
+              date: s.session_date,
+              mode: s.mode,
+              scenario: s.scenario_title,
+              transcript_excerpt: excerpt(s.transcript ?? "", 900),
+              scores: s.feedback?.scores ?? null,
+              hard_truth: s.feedback?.hard_truth ?? null,
+              main_weakness: s.main_weakness ?? s.feedback?.main_weakness ?? null,
+              what_to_fix: s.feedback?.what_to_fix ?? null,
+              did_well: s.feedback?.did_well ?? null,
+              weak_phrases: s.feedback?.weak_phrases ?? null,
+              filler_count: s.feedback?.filler_count ?? null,
+              words_per_minute: s.feedback?.words_per_minute ?? s.feedback?.wpm ?? null,
+              pace_verdict: s.feedback?.pace_verdict ?? null,
+              target: s.improvement_target,
+              target_met: s.improvement_target_met ?? s.feedback?.improvement_target_met ?? null,
+            })),
+          },
           GEMINI_API_KEY,
         );
+
       }
 
       const html = renderEmail({
