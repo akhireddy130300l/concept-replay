@@ -184,10 +184,10 @@ function renderEmail(opts: {
   sessions: Session[];
   streak: number;
   longest: number;
-  coachBullets: string[] | null;
+  coach: CoachReport | null;
   ctaUrl: string;
 }): string {
-  const { sessions, streak, longest, coachBullets, ctaUrl } = opts;
+  const { sessions, streak, longest, coach, ctaUrl } = opts;
   const latest = sessions[0];
   const withScores = sessions.filter((s) => sessionAvg(s.feedback) !== null);
   const overall = avg(withScores.map((s) => sessionAvg(s.feedback)!));
