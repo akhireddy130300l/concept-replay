@@ -107,6 +107,16 @@ function beforeAfter(label: string, said: string, better: string, tint: string):
   </div>`;
 }
 
+type PlanExercise = { name?: string; how?: string; minutes?: number };
+type PlanDay = {
+  day?: number;
+  focus?: string;
+  targets_mistake?: string;
+  exercises?: PlanExercise[];
+  total_minutes?: number;
+  success_check?: string;
+};
+
 type CoachReport = {
   blunt_assessment?: string;
   biggest_mistakes?: Array<{ mistake?: string; why_it_costs_you?: string; fix?: string }>;
@@ -118,7 +128,9 @@ type CoachReport = {
   phrases_to_kill?: string[];
   phrases_to_adopt?: string[];
   next_7_days?: string[];
+  weekly_plan?: PlanDay[];
 };
+
 
 function asStr(v: unknown): string {
   if (typeof v === "string") return v.trim();
