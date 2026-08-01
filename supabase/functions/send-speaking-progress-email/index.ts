@@ -171,9 +171,20 @@ async function geminiCoachReport(payload: unknown, apiKey: string): Promise<Coac
   "drills": [{"name":"plain string","how":"plain string","minutes":5}],
   "phrases_to_kill": ["plain strings they actually said that weaken them"],
   "phrases_to_adopt": ["plain strings - stronger replacements"],
-  "next_7_days": ["5-7 plain strings, one focus per day"]
+  "next_7_days": ["5-7 plain strings, one focus per day"],
+  "weekly_plan": [
+    {"day":1,"focus":"plain string","targets_mistake":"which repeating mistake this day attacks",
+     "exercises":[{"name":"plain string","how":"exact step-by-step instruction using THEIR scenario/phrasing","minutes":5}],
+     "total_minutes":15,"success_check":"a measurable pass/fail check for the day"}
+  ]
 }\n` +
-                  "Give 3-5 biggest_mistakes. Every array element must be a plain string unless the schema says an object.\n\n" +
+                  "Give 3-5 biggest_mistakes.\n" +
+                  "weekly_plan MUST contain exactly 7 days (day 1..7), each with 2-3 exercises, each exercise with a realistic " +
+                  "minutes value, and total_minutes between 10 and 20. Each day must target the user's ACTUAL top repeating " +
+                  "mistakes (see top_repeating_mistakes in the data) — cycle through them, hardest first, and make day 7 a full " +
+                  "integration rep. Instructions must be concrete and specific to their scenarios, not generic advice.\n" +
+                  "Every array element must be a plain string unless the schema says an object.\n\n" +
+
                   JSON.stringify(payload).slice(0, 80000),
               },
             ],
