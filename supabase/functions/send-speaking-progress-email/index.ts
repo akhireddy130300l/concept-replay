@@ -679,25 +679,35 @@ Deno.serve(async (req) => {
       let coach: CoachReport | null = null;
       if (GEMINI_API_KEY) {
         coach = await geminiCoachReport(
-          sessions.slice(0, 15).map((s) => ({
-            date: s.session_date,
-            mode: s.mode,
-            scenario: s.scenario_title,
-            transcript_excerpt: excerpt(s.transcript ?? "", 900),
-            scores: s.feedback?.scores ?? null,
-            hard_truth: s.feedback?.hard_truth ?? null,
-            main_weakness: s.main_weakness ?? s.feedback?.main_weakness ?? null,
-            what_to_fix: s.feedback?.what_to_fix ?? null,
-            did_well: s.feedback?.did_well ?? null,
-            weak_phrases: s.feedback?.weak_phrases ?? null,
-            filler_count: s.feedback?.filler_count ?? null,
-            words_per_minute: s.feedback?.words_per_minute ?? s.feedback?.wpm ?? null,
-            pace_verdict: s.feedback?.pace_verdict ?? null,
-            target: s.improvement_target,
-            target_met: s.improvement_target_met ?? s.feedback?.improvement_target_met ?? null,
-          })),
+          {
+            top_repeating_mistakes: topCounts(
+              [
+                ...sessions.map((s) => asStr(s.main_weakness ?? s.feedback?.main_weakness ?? "")),
+                ...sessions.flatMap((s) => (Array.isArray(s.feedback?.what_to_fix) ? s.feedback!.what_to_fix.map(asStr) : [])),
+              ].filter(Boolean),
+              6,
+            ).map(([mistake, times]) => ({ mistake, times })),
+            sessions: sessions.slice(0, 15).map((s) => ({
+              date: s.session_date,
+              mode: s.mode,
+              scenario: s.scenario_title,
+              transcript_excerpt: excerpt(s.transcript ?? "", 900),
+              scores: s.feedback?.scores ?? null,
+              hard_truth: s.feedback?.hard_truth ?? null,
+              main_weakness: s.main_weakness ?? s.feedback?.main_weakness ?? null,
+              what_to_fix: s.feedback?.what_to_fix ?? null,
+              did_well: s.feedback?.did_well ?? null,
+              weak_phrases: s.feedback?.weak_phrases ?? null,
+              filler_count: s.feedback?.filler_count ?? null,
+              words_per_minute: s.feedback?.words_per_minute ?? s.feedback?.wpm ?? null,
+              pace_verdict: s.feedback?.pace_verdict ?? null,
+              target: s.improvement_target,
+              target_met: s.improvement_target_met ?? s.feedback?.improvement_target_met ?? null,
+            })),
+          },
           GEMINI_API_KEY,
         );
+
       }
 
       const html = renderEmail({
