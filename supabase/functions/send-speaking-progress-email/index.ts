@@ -586,8 +586,6 @@ Deno.serve(async (req) => {
         coach,
         ctaUrl: `${APP_BASE_URL || ""}/speaking-gym`,
       });
-        ctaUrl: `${APP_BASE_URL || ""}/speaking-gym`,
-      });
 
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
