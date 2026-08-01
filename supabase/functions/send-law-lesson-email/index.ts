@@ -258,10 +258,10 @@ function renderEmail(o: {
 
   ${card("What this law says", p(String(lesson.bare_provision_gist ?? "")))}
   ${card("In plain English", p(String(lesson.plain_explanation ?? "")))}
-  ${card("Ingredients that must be proved", list(arr(lesson.ingredients).map(String)))}
+  ${card("Ingredients that must be proved", list(strList(lesson.ingredients)))}
   ${card("Worked examples", examplesHtml)}
   ${card("Landmark cases", casesHtml)}
-  ${card("Loopholes, misuse & the counter-argument", list(arr(lesson.loopholes_and_misuse).map(String)), "#fecaca")}
+  ${card("Loopholes, misuse & the counter-argument", list(strList(lesson.loopholes_and_misuse)), "#fecaca")}
   ${card("How an advocate argues this in court", p(String(lesson.how_lawyers_argue ?? "")))}
   ${card("Advocate's English — terms to start using", termsHtml, "#c7d2fe")}
   ${card("Today's practice question", p(String(lesson.practice_question ?? "")))}
