@@ -260,6 +260,68 @@ function renderEmail(opts: {
         </table>`
       : "";
 
+  // ---- blunt coaching blocks -------------------------------------------
+  const mistakes = Array.isArray(coach?.biggest_mistakes) ? coach!.biggest_mistakes!.slice(0, 5) : [];
+  const mistakesHtml = mistakes.length
+    ? mistakes
+        .map(
+          (m, i) => `<div style="margin:0 0 12px 0;padding:11px 13px;background:#fff7ed;border-left:3px solid #ea580c;border-radius:8px;">
+            <div style="font-size:13.5px;font-weight:700;color:#7c2d12;">${i + 1}. ${esc(asStr(m?.mistake))}</div>
+            ${m?.why_it_costs_you ? `<div style="font-size:13px;color:#9a3412;margin-top:4px;line-height:1.6;"><b>What it costs you:</b> ${esc(asStr(m.why_it_costs_you))}</div>` : ""}
+            ${m?.fix ? `<div style="font-size:13px;color:#065f46;margin-top:4px;line-height:1.6;"><b>Fix:</b> ${esc(asStr(m.fix))}</div>` : ""}
+          </div>`,
+        )
+        .join("")
+    : "";
+
+  const drills = Array.isArray(coach?.drills) ? coach!.drills!.slice(0, 4) : [];
+  const drillsHtml = drills.length
+    ? drills
+        .map(
+          (d) => `<div style="margin:0 0 9px 0;font-size:13.5px;color:#1f2937;line-height:1.6;">
+            <b style="color:#111827;">${esc(asStr(d?.name))}</b>${d?.minutes ? ` <span style="color:#6b7280;">· ${Number(d.minutes)} min</span>` : ""}
+            <div style="color:#4b5563;">${esc(asStr(d?.how))}</div>
+          </div>`,
+        )
+        .join("")
+    : "";
+
+  // Recent session log
+  const logRows = sessions
+    .slice(0, 8)
+    .map((s) => {
+      const a = sessionAvg(s.feedback);
+      const met = (s.improvement_target_met || s.feedback?.improvement_target_met) === "met";
+      const w = asStr(s.main_weakness || s.feedback?.main_weakness || "—");
+      return `<tr>
+        <td style="padding:6px 8px;font-size:12.5px;color:#374151;border-bottom:1px solid #f3f4f6;white-space:nowrap;">${esc(s.session_date ?? "")}</td>
+        <td style="padding:6px 8px;font-size:12.5px;color:#374151;border-bottom:1px solid #f3f4f6;">${esc(s.mode ?? "")}</td>
+        <td style="padding:6px 8px;font-size:12.5px;color:#111827;font-weight:700;border-bottom:1px solid #f3f4f6;">${fmt1(a)}</td>
+        <td style="padding:6px 8px;font-size:12.5px;border-bottom:1px solid #f3f4f6;color:${met ? "#047857" : "#b91c1c"};">${met ? "met" : "missed"}</td>
+        <td style="padding:6px 8px;font-size:12.5px;color:#6b7280;border-bottom:1px solid #f3f4f6;">${esc(w.slice(0, 60))}</td>
+      </tr>`;
+    })
+    .join("");
+  const logHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;table-layout:fixed;">
+      <tr>
+        ${["Date", "Mode", "Avg", "Target", "Main weakness"]
+          .map((h) => `<th align="left" style="font-size:11px;color:#6b7280;text-transform:uppercase;padding:0 8px 6px;">${h}</th>`)
+          .join("")}
+      </tr>${logRows}</table>`;
+
+  // Habits: pace + fillers
+  const paceRecent = avg(
+    sessions.slice(0, 5).map((s) => Number(s.feedback?.words_per_minute ?? s.feedback?.wpm)).filter((n) => Number.isFinite(n)),
+  );
+  const habitBits: string[] = [];
+  if (fillerRecent !== null) habitBits.push(`Filler words per session (last 5): ${fmt1(fillerRecent)}${fillerPrior !== null ? ` (was ${fmt1(fillerPrior)})` : ""}`);
+  if (paceRecent !== null) habitBits.push(`Speaking pace (last 5): ${Math.round(paceRecent)} words/min — target 130–160`);
+  const paceVerdicts = topCounts(sessions.slice(0, 10).map((s) => asStr(s.feedback?.pace_verdict)).filter(Boolean), 2);
+  if (paceVerdicts.length) habitBits.push(`Most common pace verdict: ${paceVerdicts[0][0]} (${paceVerdicts[0][1]}×)`);
+  const modeCounts = topCounts(sessions.map((s) => asStr(s.mode)).filter(Boolean), 5);
+  if (modeCounts.length) habitBits.push(`Practice mix: ${modeCounts.map(([m, c]) => `${m} ${c}×`).join(", ")}`);
+
+
   return `<!doctype html>
 <html><head><meta charset="utf-8"/><title>Your Speaking Progress Report</title></head>
 <body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
