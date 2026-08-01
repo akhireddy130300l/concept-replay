@@ -184,6 +184,26 @@ function renderEmail(o: {
 
   const arr = (v: unknown): any[] => (Array.isArray(v) ? v : []);
 
+  // Gemini sometimes returns objects instead of strings inside string arrays.
+  // Flatten any shape into readable text so we never print "[object Object]".
+  const toText = (v: unknown): string => {
+    if (v === null || v === undefined) return "";
+    if (typeof v === "string") return v.trim();
+    if (typeof v === "number" || typeof v === "boolean") return String(v);
+    if (Array.isArray(v)) return v.map(toText).filter(Boolean).join(" — ");
+    if (typeof v === "object") {
+      const o = v as Record<string, unknown>;
+      const label = ["point", "loophole", "issue", "misuse", "title", "name", "text", "description", "gap"]
+        .map((k) => o[k]).find((x) => typeof x === "string" && x.trim());
+      const fix = ["safeguard", "counter", "counter_argument", "counterArgument", "remedy", "response", "solution", "explanation", "detail"]
+        .map((k) => o[k]).find((x) => typeof x === "string" && x.trim());
+      if (label || fix) return [label, fix].filter(Boolean).map((s) => String(s).trim()).join(" — ");
+      return Object.values(o).map(toText).filter(Boolean).join(" — ");
+    }
+    return String(v);
+  };
+  const strList = (v: unknown): string[] => arr(v).map(toText).filter(Boolean);
+
   const examplesHtml = arr(lesson.examples)
     .map(
       (e: any) => `<div style="margin:0 0 12px 0;padding:10px 12px;background:#f8fafc;border-left:3px solid #6366f1;border-radius:6px;">
