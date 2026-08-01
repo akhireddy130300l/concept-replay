@@ -91,9 +91,10 @@ function card(title: string, inner: string, accent = "#e5e7eb"): string {
     <div style="margin-top:8px;">${inner}</div>
   </div>`;
 }
-function list(items: string[]): string {
-  if (!items.length) return `<div style="font-size:14px;color:#9ca3af;">Not enough data yet.</div>`;
-  return `<ul style="margin:0 0 0 18px;padding:0;font-size:14px;color:#1f2937;">${items
+function list(items: unknown[]): string {
+  const clean = (items ?? []).map(asStr).filter(Boolean);
+  if (!clean.length) return `<div style="font-size:14px;color:#9ca3af;">Not enough data yet.</div>`;
+  return `<ul style="margin:0 0 0 18px;padding:0;font-size:14px;color:#1f2937;">${clean
     .map((i) => `<li style="margin:5px 0;">${esc(i)}</li>`)
     .join("")}</ul>`;
 }
