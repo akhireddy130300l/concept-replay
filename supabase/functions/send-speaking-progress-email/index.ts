@@ -106,7 +106,31 @@ function beforeAfter(label: string, said: string, better: string, tint: string):
   </div>`;
 }
 
-async function geminiCoachSummary(payload: unknown, apiKey: string): Promise<string[] | null> {
+type CoachReport = {
+  blunt_assessment?: string;
+  biggest_mistakes?: Array<{ mistake?: string; why_it_costs_you?: string; fix?: string }>;
+  pattern_bullets?: string[];
+  level?: string;
+  level_reason?: string;
+  one_thing_today?: string;
+  drills?: Array<{ name?: string; how?: string; minutes?: number }>;
+  phrases_to_kill?: string[];
+  phrases_to_adopt?: string[];
+  next_7_days?: string[];
+};
+
+function asStr(v: unknown): string {
+  if (typeof v === "string") return v.trim();
+  if (v === null || v === undefined) return "";
+  if (Array.isArray(v)) return v.map(asStr).filter(Boolean).join(" — ");
+  if (typeof v === "object") return Object.values(v as Record<string, unknown>).map(asStr).filter(Boolean).join(" — ");
+  return String(v);
+}
+function strArr(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(asStr).filter(Boolean) : [];
+}
+
+async function geminiCoachReport(payload: unknown, apiKey: string): Promise<CoachReport | null> {
   try {
     const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
       method: "POST",
@@ -118,25 +142,39 @@ async function geminiCoachSummary(payload: unknown, apiKey: string): Promise<str
             parts: [
               {
                 text:
-                  "You are the speaker's Executive Communication Coach. Below is a JSON history of their speaking-gym sessions " +
-                  "(scores, weaknesses, filler habits, pace, targets). Write 4-6 short coaching bullets about the PATTERN across " +
-                  "sessions: what is genuinely improving, what keeps repeating, and the single highest-leverage change for today. " +
-                  "Be direct and specific, no flattery, no preamble. Return ONLY a JSON array of strings.\n\n" +
-                  JSON.stringify(payload).slice(0, 60000),
+                  "You are this person's Executive Communication Coach. Below is the JSON history of their speaking-gym sessions " +
+                  "(scores, transcript excerpts, weaknesses, filler habits, pace, targets).\n\n" +
+                  "BE BLUNT. No flattery, no hedging, no 'great job'. Name the mistakes directly and say what they cost the speaker " +
+                  "in a real room (credibility, authority, being interrupted, not being believed). Be specific to THEIR words, quote " +
+                  "their phrasing where useful. Never be cruel — be the coach who tells the truth so they improve fast.\n\n" +
+                  "Return STRICT JSON only, exactly these keys:\n" +
+                  `{
+  "blunt_assessment": "3-5 sentences. The honest verdict on how they currently come across.",
+  "biggest_mistakes": [{"mistake":"plain string","why_it_costs_you":"plain string","fix":"plain string"}],
+  "pattern_bullets": ["4-6 plain strings on what is improving vs what keeps repeating across sessions"],
+  "level": "one of: Beginner, Developing, Competent, Strong, Executive-ready",
+  "level_reason": "one sentence justifying the level",
+  "one_thing_today": "the single highest-leverage change for today's rep",
+  "drills": [{"name":"plain string","how":"plain string","minutes":5}],
+  "phrases_to_kill": ["plain strings they actually said that weaken them"],
+  "phrases_to_adopt": ["plain strings - stronger replacements"],
+  "next_7_days": ["5-7 plain strings, one focus per day"]
+}\n` +
+                  "Give 3-5 biggest_mistakes. Every array element must be a plain string unless the schema says an object.\n\n" +
+                  JSON.stringify(payload).slice(0, 80000),
               },
             ],
           },
         ],
-        generationConfig: { temperature: 0.6, responseMimeType: "application/json" },
+        generationConfig: { temperature: 0.65, responseMimeType: "application/json", maxOutputTokens: 4096 },
       }),
     });
     if (!res.ok) return null;
     const json = await res.json();
-    const text: string = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const text: string = json?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? "";
     const cleaned = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const parsed = JSON.parse(cleaned);
-    if (Array.isArray(parsed)) return parsed.map((x) => String(x)).filter(Boolean).slice(0, 6);
-    return null;
+    return parsed && typeof parsed === "object" ? (parsed as CoachReport) : null;
   } catch {
     return null;
   }
