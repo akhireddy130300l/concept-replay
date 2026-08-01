@@ -331,9 +331,19 @@ function renderEmail(opts: {
         <tr><td>
           <div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#6b7280;">Influence Speaking Gym</div>
           <h1 style="margin:6px 0 4px 0;font-size:22px;color:#111827;">Your Speaking Progress Report</h1>
-          <p style="font-size:14px;color:#374151;margin:0 0 18px 0;">
-            Everything you've spoken so far, what the coach heard, and exactly how you should have said it.
+          <p style="font-size:14px;color:#374151;margin:0 0 14px 0;">
+            No sugar-coating. Below is exactly how you currently come across, the mistakes that keep repeating,
+            and how you should have said it.
           </p>
+          ${
+            coach?.blunt_assessment
+              ? `<div style="background:#111827;border-radius:12px;padding:16px 18px;margin:0 0 14px 0;">
+                   <div style="font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#9ca3af;font-weight:700;">Straight talk from your coach</div>
+                   <div style="font-size:14.5px;color:#f9fafb;line-height:1.65;margin-top:7px;">${esc(asStr(coach.blunt_assessment))}</div>
+                   ${coach.level ? `<div style="margin-top:10px;font-size:13px;color:#c7d2fe;"><b>Current level: ${esc(asStr(coach.level))}</b>${coach.level_reason ? ` — ${esc(asStr(coach.level_reason))}` : ""}</div>` : ""}
+                 </div>`
+              : ""
+          }
 
           <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:14px;margin-bottom:14px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
