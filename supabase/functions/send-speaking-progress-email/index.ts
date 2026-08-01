@@ -390,7 +390,24 @@ function renderEmail(opts: {
         .join("")
     : "";
 
+  // Personalised 7-day drill schedule (AI plan, else deterministic from repeating mistakes)
+  const repeatingMistakes = [
+    ...mistakes.map((m) => asStr(m?.mistake)).filter(Boolean),
+    ...weaknesses.filter(([, c]) => c > 1).map(([w]) => w),
+    ...fixes.filter(([, c]) => c > 1).map(([w]) => w),
+  ].filter((v, i, a) => v && a.indexOf(v) === i).slice(0, 5);
+  const aiPlan = Array.isArray(coach?.weekly_plan) ? coach!.weekly_plan!.filter((d) => d && Array.isArray(d.exercises) && d.exercises.length) : [];
+  const plan: PlanDay[] = aiPlan.length >= 5 ? aiPlan : buildFallbackPlan(repeatingMistakes);
+  const planTotal = plan.slice(0, 7).reduce(
+    (a, d) => a + (Number(d?.total_minutes) || (d.exercises ?? []).reduce((x, e) => x + (Number(e?.minutes) || 0), 0)),
+    0,
+  );
+  const planHtml =
+    `<div style="font-size:13px;color:#4b5563;margin-bottom:8px;">Built from your top repeating mistakes${repeatingMistakes.length ? `: <b>${esc(repeatingMistakes.slice(0, 3).join(", "))}</b>` : ""}. Total this week: <b>${planTotal} min</b>.</div>` +
+    renderWeeklyPlan(plan);
+
   // Recent session log
+
   const logRows = sessions
     .slice(0, 8)
     .map((s) => {
