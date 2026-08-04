@@ -108,7 +108,13 @@ const ROADMAP: Array<{ stage: string; detail: string }> = [
 
 type Feedback = Record<string, unknown>;
 
-async function geminiJSON(apiKey: string, prompt: string): Promise<Record<string, any> | null> {
+type GeminiResult =
+  | { ok: true; lesson: Record<string, any> }
+  | { ok: false; reason: string; status: number | null };
+
+async function geminiJSONOnce(apiKey: string, prompt: string): Promise<GeminiResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
   try {
     const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
       method: "POST",
@@ -117,20 +123,66 @@ async function geminiJSON(apiKey: string, prompt: string): Promise<Record<string
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.4, responseMimeType: "application/json", maxOutputTokens: 4096 },
       }),
+      signal: controller.signal,
     });
     if (!res.ok) {
-      console.log(JSON.stringify({ phase: "gemini", status: res.status, body: (await res.text()).slice(0, 400) }));
-      return null;
+      const body = (await res.text()).slice(0, 400);
+      console.log(JSON.stringify({ phase: "gemini", status: res.status, body }));
+      const reason = res.status === 429 ? "gemini_rate_limited" : res.status >= 500 ? "gemini_upstream_error" : "gemini_http_error";
+      return { ok: false, reason, status: res.status };
     }
     const j = await res.json();
     const text: string = j?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? "";
     const cleaned = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-    return JSON.parse(cleaned);
+    try {
+      return { ok: true, lesson: JSON.parse(cleaned) };
+    } catch {
+      console.log(JSON.stringify({ phase: "gemini", error: "parse_failed", preview: cleaned.slice(0, 200) }));
+      return { ok: false, reason: "gemini_parse_failed", status: 200 };
+    }
   } catch (e) {
-    console.log(JSON.stringify({ phase: "gemini", error: e instanceof Error ? e.message : "unknown" }));
-    return null;
+    const msg = e instanceof Error ? e.message : "unknown";
+    console.log(JSON.stringify({ phase: "gemini", error: msg }));
+    return { ok: false, reason: msg.includes("abort") ? "gemini_timeout" : "gemini_network_error", status: null };
+  } finally {
+    clearTimeout(timer);
   }
 }
+
+// Up to 3 attempts; only retry transient failures (429 / 5xx / timeout / network).
+async function geminiJSON(apiKey: string, prompt: string): Promise<GeminiResult> {
+  const retryable = new Set(["gemini_rate_limited", "gemini_upstream_error", "gemini_timeout", "gemini_network_error"]);
+  let last: GeminiResult = { ok: false, reason: "gemini_not_attempted", status: null };
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    last = await geminiJSONOnce(apiKey, prompt);
+    console.log(JSON.stringify({ phase: "gemini_attempt", attempt, ok: last.ok, reason: last.ok ? null : last.reason }));
+    if (last.ok || !retryable.has(last.reason)) return last;
+    if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 4000));
+  }
+  return last;
+}
+
+// Deterministic lesson body used when Gemini is unavailable, so a day is never skipped.
+function fallbackLesson(topic: typeof CURRICULUM[number], prevLawName: string | null): Record<string, any> {
+  return {
+    headline: `${topic.law} — ${topic.section}: today's provision, delivered without AI commentary.`,
+    plain_explanation:
+      `Today's scheduled topic is ${topic.section} of the ${topic.law} (${topic.category}, ${topic.difficulty} level). ` +
+      `The AI drafting service was unavailable when this email was generated, so this edition carries the syllabus entry only. ` +
+      `Read the bare provision from a reliable source (India Code or the official gazette text) and note the elements it requires. ` +
+      `Tomorrow's edition resumes the full lesson, and this topic will be re-issued in expanded form once drafting succeeds.`,
+    bare_provision_gist: `Refer to the official text of ${topic.section}, ${topic.law}.`,
+    ingredients: [],
+    examples: [],
+    landmark_cases: [],
+    loopholes_and_misuse: [],
+    how_lawyers_argue: "",
+    english_terms: [],
+    recap: prevLawName ? `Previously covered: ${prevLawName}.` : "This is your first lesson.",
+    fallback: true,
+  };
+}
+
 
 function buildPrompt(topic: typeof CURRICULUM[number], prevLawName: string | null, lessonNumber: number) {
   return `You are a Senior Advocate of the Supreme Court of India teaching a motivated self-learner (not a law student) one law per day.
@@ -341,9 +393,15 @@ Deno.serve(async (req) => {
     }
 
     const now = new Date();
-    // Cron runs twice (DST-safe); only send at 18:00 ET.
-    if (isCron && !force && etHour(now) !== 18) {
-      return new Response(JSON.stringify({ ok: true, skipped: "not_6pm_et", et_hour: etHour(now) }), {
+    const hourEt = etHour(now);
+    // Primary send at 18:00 ET; 19:00-21:00 ET are catch-up retries that only
+    // act when today's lesson has not been sent (idempotent via already_sent_today).
+    const SEND_HOUR = 18;
+    const CATCHUP_HOURS = [19, 20, 21];
+    const isCatchup = CATCHUP_HOURS.includes(hourEt);
+    console.log(JSON.stringify({ phase: "start", is_cron: isCron, force, et_hour: hourEt, catchup: isCatchup }));
+    if (isCron && !force && hourEt !== SEND_HOUR && !isCatchup) {
+      return new Response(JSON.stringify({ ok: true, skipped: "outside_send_window", et_hour: hourEt }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -356,6 +414,7 @@ Deno.serve(async (req) => {
       recipients = (data ?? []).filter((r: any) => !!r.report_email);
     } else if (triggerUserId) {
       const { data } = await admin
+
         .from("portfolio_feature_access")
         .select("user_id, report_email")
         .eq("user_id", triggerUserId)
@@ -368,8 +427,9 @@ Deno.serve(async (req) => {
       recipients = [data as any];
     }
 
+    console.log(JSON.stringify({ phase: "recipients", count: recipients.length }));
     if (recipients.length === 0) {
-      return new Response(JSON.stringify({ ok: true, sent: 0, note: "No authorized recipients." }), {
+      return new Response(JSON.stringify({ ok: false, sent: 0, reason: "no_authorized_recipients" }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -388,6 +448,7 @@ Deno.serve(async (req) => {
         .not("sent_at", "is", null)
         .maybeSingle();
       if (todays && !force) {
+        console.log(JSON.stringify({ phase: "skip", reason: "already_sent_today", user_id: r.user_id }));
         results.push({ to: r.report_email, ok: true, skipped: "already_sent_today" });
         continue;
       }
@@ -402,6 +463,7 @@ Deno.serve(async (req) => {
       const seen = new Set(history.map((h: any) => h.topic_key));
       const topic = CURRICULUM.find((c) => !seen.has(c.key));
       if (!topic) {
+        console.log(JSON.stringify({ phase: "skip", reason: "syllabus_complete", user_id: r.user_id }));
         results.push({ to: r.report_email, ok: true, skipped: "syllabus_complete" });
         continue;
       }
@@ -410,11 +472,23 @@ Deno.serve(async (req) => {
       const prevLawName = prev ? `${prev.law_name} — ${prev.section_ref ?? ""}`.trim() : null;
       const lessonNumber = history.length + 1;
 
-      const lesson = await geminiJSON(GEMINI_API_KEY, buildPrompt(topic, prevLawName, lessonNumber));
-      if (!lesson) {
-        results.push({ to: r.report_email, ok: false, reason: "gemini_failed" });
+      const g = await geminiJSON(GEMINI_API_KEY, buildPrompt(topic, prevLawName, lessonNumber));
+      // Never skip a day: fall back to a deterministic lesson body.
+      const usedFallback = !g.ok;
+      const lesson = g.ok ? g.lesson : fallbackLesson(topic, prevLawName);
+      const geminiReason = g.ok ? null : g.reason;
+      console.log(JSON.stringify({ phase: "gemini_result", ok: g.ok, reason: geminiReason, topic: topic.key }));
+
+      // On a cron run, hold the fallback edition until the last catch-up hour so the
+      // earlier hours get a clean shot at the full AI lesson (and no duplicate emails).
+      const LAST_CATCHUP_HOUR = 21;
+      if (usedFallback && isCron && !force && hourEt !== LAST_CATCHUP_HOUR) {
+        console.log(JSON.stringify({ phase: "defer_fallback", et_hour: hourEt, reason: geminiReason, topic: topic.key }));
+        results.push({ to: r.report_email, ok: false, deferred: true, reason: geminiReason, topic: topic.key });
         continue;
       }
+
+
 
       const categoriesCovered = Array.from(new Set([...history.map((h: any) => h.category).filter(Boolean), topic.category]));
       const html = renderEmail({ topic, lesson, lessonNumber, totalTopics: CURRICULUM.length, categoriesCovered, ctaUrl });
@@ -425,13 +499,18 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           from: "Indian Law Daily <onboarding@resend.dev>",
           to: [r.report_email],
-          subject: `Law ${lessonNumber}: ${topic.law} — ${topic.section}`,
+          subject: `Law ${lessonNumber}: ${topic.law} — ${topic.section}${usedFallback ? " (short edition)" : ""}`,
           html,
         }),
       });
       const ok = res.status >= 200 && res.status < 300;
+      let resendError: string | null = null;
+      if (!ok) resendError = (await res.text()).slice(0, 300);
+      console.log(JSON.stringify({ phase: "resend", ok, status: res.status, error: resendError, topic: topic.key }));
 
-      if (ok) {
+      // Only record a lesson when the full AI edition went out. A fallback edition
+      // leaves no row, so the same topic is retried on the next catch-up run / next day.
+      if (ok && !usedFallback) {
         await admin.from("law_daily_lessons").upsert(
           {
             user_id: r.user_id,
@@ -448,12 +527,27 @@ Deno.serve(async (req) => {
           { onConflict: "user_id,topic_key" },
         );
       }
-      results.push({ to: r.report_email, ok, status: res.status, topic: topic.key, lessonNumber });
+
+      results.push({
+        to: r.report_email,
+        ok,
+        status: res.status,
+        topic: topic.key,
+        lessonNumber,
+        fallback: usedFallback,
+        gemini_reason: geminiReason,
+        resend_error: resendError,
+      });
     }
 
-    return new Response(JSON.stringify({ ok: true, sent: results.filter((x) => x.ok && !x.skipped).length, results }), {
+    const sent = results.filter((x) => x.ok && !x.skipped).length;
+    const failed = results.filter((x) => !x.ok);
+    const overallOk = failed.length === 0 && !results.some((x) => x.fallback);
+    console.log(JSON.stringify({ phase: "done", sent, failures: failed.length, et_hour: hourEt }));
+    return new Response(JSON.stringify({ ok: overallOk, sent, results }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
   } catch (e) {
     console.log(JSON.stringify({ phase: "law_lesson_email", error: e instanceof Error ? e.message : "unknown" }));
     return new Response(JSON.stringify({ error: "Unexpected error" }), {
