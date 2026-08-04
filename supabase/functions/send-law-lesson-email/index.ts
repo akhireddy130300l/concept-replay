@@ -497,7 +497,9 @@ Deno.serve(async (req) => {
       if (!ok) resendError = (await res.text()).slice(0, 300);
       console.log(JSON.stringify({ phase: "resend", ok, status: res.status, error: resendError, topic: topic.key }));
 
-      if (ok) {
+      // Only record a lesson when the full AI edition went out. A fallback edition
+      // leaves no row, so the same topic is retried on the next catch-up run / next day.
+      if (ok && !usedFallback) {
         await admin.from("law_daily_lessons").upsert(
           {
             user_id: r.user_id,
@@ -507,14 +509,14 @@ Deno.serve(async (req) => {
             section_ref: topic.section,
             category: topic.category,
             difficulty: topic.difficulty,
-            content: { ...lesson, fallback: usedFallback },
+            content: lesson,
             english_terms: lesson.english_terms ?? [],
-            // Fallback editions stay unsent so a later catch-up run re-issues the full lesson.
-            sent_at: usedFallback ? null : new Date().toISOString(),
+            sent_at: new Date().toISOString(),
           },
           { onConflict: "user_id,topic_key" },
         );
       }
+
       results.push({
         to: r.report_email,
         ok,
