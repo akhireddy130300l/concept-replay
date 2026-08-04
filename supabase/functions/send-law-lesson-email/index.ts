@@ -393,9 +393,15 @@ Deno.serve(async (req) => {
     }
 
     const now = new Date();
-    // Cron runs twice (DST-safe); only send at 18:00 ET.
-    if (isCron && !force && etHour(now) !== 18) {
-      return new Response(JSON.stringify({ ok: true, skipped: "not_6pm_et", et_hour: etHour(now) }), {
+    const hourEt = etHour(now);
+    // Primary send at 18:00 ET; 19:00-21:00 ET are catch-up retries that only
+    // act when today's lesson has not been sent (idempotent via already_sent_today).
+    const SEND_HOUR = 18;
+    const CATCHUP_HOURS = [19, 20, 21];
+    const isCatchup = CATCHUP_HOURS.includes(hourEt);
+    console.log(JSON.stringify({ phase: "start", is_cron: isCron, force, et_hour: hourEt, catchup: isCatchup }));
+    if (isCron && !force && hourEt !== SEND_HOUR && !isCatchup) {
+      return new Response(JSON.stringify({ ok: true, skipped: "outside_send_window", et_hour: hourEt }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -408,6 +414,7 @@ Deno.serve(async (req) => {
       recipients = (data ?? []).filter((r: any) => !!r.report_email);
     } else if (triggerUserId) {
       const { data } = await admin
+
         .from("portfolio_feature_access")
         .select("user_id, report_email")
         .eq("user_id", triggerUserId)
