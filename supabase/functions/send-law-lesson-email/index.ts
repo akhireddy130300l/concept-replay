@@ -479,6 +479,17 @@ Deno.serve(async (req) => {
       const geminiReason = g.ok ? null : g.reason;
       console.log(JSON.stringify({ phase: "gemini_result", ok: g.ok, reason: geminiReason, topic: topic.key }));
 
+      // On a cron run, hold the fallback edition until the last catch-up hour so the
+      // earlier hours get a clean shot at the full AI lesson (and no duplicate emails).
+      const LAST_CATCHUP_HOUR = 21;
+      if (usedFallback && isCron && !force && hourEt !== LAST_CATCHUP_HOUR) {
+        console.log(JSON.stringify({ phase: "defer_fallback", et_hour: hourEt, reason: geminiReason, topic: topic.key }));
+        results.push({ to: r.report_email, ok: false, deferred: true, reason: geminiReason, topic: topic.key });
+        continue;
+      }
+
+
+
       const categoriesCovered = Array.from(new Set([...history.map((h: any) => h.category).filter(Boolean), topic.category]));
       const html = renderEmail({ topic, lesson, lessonNumber, totalTopics: CURRICULUM.length, categoriesCovered, ctaUrl });
 
