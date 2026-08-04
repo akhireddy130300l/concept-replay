@@ -108,7 +108,13 @@ const ROADMAP: Array<{ stage: string; detail: string }> = [
 
 type Feedback = Record<string, unknown>;
 
-async function geminiJSON(apiKey: string, prompt: string): Promise<Record<string, any> | null> {
+type GeminiResult =
+  | { ok: true; lesson: Record<string, any> }
+  | { ok: false; reason: string; status: number | null };
+
+async function geminiJSONOnce(apiKey: string, prompt: string): Promise<GeminiResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
   try {
     const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
       method: "POST",
@@ -117,20 +123,66 @@ async function geminiJSON(apiKey: string, prompt: string): Promise<Record<string
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.4, responseMimeType: "application/json", maxOutputTokens: 4096 },
       }),
+      signal: controller.signal,
     });
     if (!res.ok) {
-      console.log(JSON.stringify({ phase: "gemini", status: res.status, body: (await res.text()).slice(0, 400) }));
-      return null;
+      const body = (await res.text()).slice(0, 400);
+      console.log(JSON.stringify({ phase: "gemini", status: res.status, body }));
+      const reason = res.status === 429 ? "gemini_rate_limited" : res.status >= 500 ? "gemini_upstream_error" : "gemini_http_error";
+      return { ok: false, reason, status: res.status };
     }
     const j = await res.json();
     const text: string = j?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? "";
     const cleaned = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-    return JSON.parse(cleaned);
+    try {
+      return { ok: true, lesson: JSON.parse(cleaned) };
+    } catch {
+      console.log(JSON.stringify({ phase: "gemini", error: "parse_failed", preview: cleaned.slice(0, 200) }));
+      return { ok: false, reason: "gemini_parse_failed", status: 200 };
+    }
   } catch (e) {
-    console.log(JSON.stringify({ phase: "gemini", error: e instanceof Error ? e.message : "unknown" }));
-    return null;
+    const msg = e instanceof Error ? e.message : "unknown";
+    console.log(JSON.stringify({ phase: "gemini", error: msg }));
+    return { ok: false, reason: msg.includes("abort") ? "gemini_timeout" : "gemini_network_error", status: null };
+  } finally {
+    clearTimeout(timer);
   }
 }
+
+// Up to 3 attempts; only retry transient failures (429 / 5xx / timeout / network).
+async function geminiJSON(apiKey: string, prompt: string): Promise<GeminiResult> {
+  const retryable = new Set(["gemini_rate_limited", "gemini_upstream_error", "gemini_timeout", "gemini_network_error"]);
+  let last: GeminiResult = { ok: false, reason: "gemini_not_attempted", status: null };
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    last = await geminiJSONOnce(apiKey, prompt);
+    console.log(JSON.stringify({ phase: "gemini_attempt", attempt, ok: last.ok, reason: last.ok ? null : last.reason }));
+    if (last.ok || !retryable.has(last.reason)) return last;
+    if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 4000));
+  }
+  return last;
+}
+
+// Deterministic lesson body used when Gemini is unavailable, so a day is never skipped.
+function fallbackLesson(topic: typeof CURRICULUM[number], prevLawName: string | null): Record<string, any> {
+  return {
+    headline: `${topic.law} — ${topic.section}: today's provision, delivered without AI commentary.`,
+    plain_explanation:
+      `Today's scheduled topic is ${topic.section} of the ${topic.law} (${topic.category}, ${topic.difficulty} level). ` +
+      `The AI drafting service was unavailable when this email was generated, so this edition carries the syllabus entry only. ` +
+      `Read the bare provision from a reliable source (India Code or the official gazette text) and note the elements it requires. ` +
+      `Tomorrow's edition resumes the full lesson, and this topic will be re-issued in expanded form once drafting succeeds.`,
+    bare_provision_gist: `Refer to the official text of ${topic.section}, ${topic.law}.`,
+    ingredients: [],
+    examples: [],
+    landmark_cases: [],
+    loopholes_and_misuse: [],
+    how_lawyers_argue: "",
+    english_terms: [],
+    recap: prevLawName ? `Previously covered: ${prevLawName}.` : "This is your first lesson.",
+    fallback: true,
+  };
+}
+
 
 function buildPrompt(topic: typeof CURRICULUM[number], prevLawName: string | null, lessonNumber: number) {
   return `You are a Senior Advocate of the Supreme Court of India teaching a motivated self-learner (not a law student) one law per day.
