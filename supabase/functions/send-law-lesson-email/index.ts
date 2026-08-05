@@ -222,9 +222,10 @@ function renderEmail(o: {
   lessonNumber: number;
   totalTopics: number;
   categoriesCovered: string[];
+  memoryHooks: Array<{ ref: string; label: string; question: string }>;
   ctaUrl: string;
 }): string {
-  const { topic, lesson, lessonNumber, totalTopics, categoriesCovered, ctaUrl } = o;
+  const { topic, lesson, lessonNumber, totalTopics, categoriesCovered, memoryHooks, ctaUrl } = o;
   const card = (title: string, body: string, accent = "#e5e7eb") =>
     `<div style="border:1px solid ${accent};border-radius:12px;padding:14px 16px;margin:0 0 14px 0;">
        <div style="font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#6b7280;font-weight:700;margin-bottom:8px;">${esc(title)}</div>
