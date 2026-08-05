@@ -203,6 +203,7 @@ Return STRICT JSON only, no markdown, with EXACTLY these keys:
   "how_lawyers_argue": "3-4 sentences showing how an advocate would actually argue this in court, in courtroom register",
   "english_terms": [{"term": "legal/English term", "meaning": "plain meaning", "used_in_a_sentence": "an advocate-style sentence using it"}],
   "practice_question": "one applied question the learner should answer mentally",
+  "memory_hook": {"label": "1-3 word nickname for this provision, e.g. Equality / Freedom / Life & Liberty", "trigger_question": "the single question to ask yourself to know this provision is engaged, phrased like: Is the government depriving me of life or personal liberty through a fair, just and reasonable procedure?"},
   "recap": {"law": "${prevLawName ?? "Introduction"}", "summary": "60-90 word refresher of the previously learned law", "one_line_test": "one quick recall question on it"}
 }
 
