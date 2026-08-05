@@ -292,6 +292,9 @@ export function renderPrivateReportHtml(input: ReportInput): string {
 
           ${rows}
 
+          ${actionPlanHtml}
+
+
           <div style="font-size:11px;color:#9ca3af;margin-top:4px;">Data sources — Market prices and OHLCV: Yahoo Finance (regular session). Analyst recommendation ratings and company peers: Finnhub.</div>
           <div style="font-size:12px;color:#6b7280;background:#f9fafb;border-radius:8px;padding:12px;margin-top:10px;">
             This report uses the latest available regular-session data and is decision support only. It does not automatically buy or sell securities.
