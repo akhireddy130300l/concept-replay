@@ -321,6 +321,18 @@ function renderEmail(o: {
   ${card("Advocate's English — terms to start using", termsHtml, "#c7d2fe")}
   ${card("Today's practice question", p(String(lesson.practice_question ?? "")))}
 
+  ${memoryHooks.length > 0 ? card(
+    "Easy way to remember — everything you've learned so far",
+    `<div style="font-size:12.5px;color:#6b7280;line-height:1.6;margin-bottom:10px;">One line per provision. Read it top to bottom; it is your recall drill.</div>
+     ${memoryHooks.map((h) => `<div style="margin:0 0 10px 0;padding-bottom:9px;border-bottom:1px solid #f3f4f6;">
+        <div style="font-size:13.5px;color:#111827;line-height:1.6;"><b>${esc(h.ref)}</b> = <span style="color:#4338ca;font-weight:700;">“${esc(h.label)}”</span></div>
+        <div style="font-size:13.5px;color:#374151;line-height:1.6;">→ ${esc(h.question)}</div>
+      </div>`).join("")}`,
+    "#a7f3d0",
+  ) : ""}
+
+
+
   ${card(
     "Your progress",
     `<div style="font-size:13.5px;color:#1f2937;line-height:1.6;">Lesson <b>${lessonNumber}</b> of ${totalTopics} in the core syllabus (${pct}%).</div>
