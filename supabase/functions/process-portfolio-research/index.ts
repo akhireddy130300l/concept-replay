@@ -18,6 +18,8 @@ import {
 } from "../_shared/portfolio-calc.ts";
 import { fallbackInterpretation, generateInterpretation, GEMINI_MODEL, type Interpretation } from "../_shared/ai-gateway.ts";
 import { renderPrivateReportHtml, sendPrivateReport, type HoldingReportRow, type PeerDetail } from "../_shared/email-private.ts";
+import { buildBuyIdeas, buildSellIdeas, featuresFrom, loadCalibration, modelMeta } from "../_shared/portfolio-actions.ts";
+
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
