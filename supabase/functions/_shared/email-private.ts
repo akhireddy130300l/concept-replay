@@ -52,7 +52,9 @@ export type ReportInput = {
   interpretation: Interpretation;
   requestedAtUtcIso: string;
   userTimezone: string | null;
+  actionPlan?: ActionPlan | null;
 };
+
 
 const fmtMoney = (v: number | null) =>
   v === null ? "<span style=\"color:#9ca3af\">Average cost unavailable</span>" :
