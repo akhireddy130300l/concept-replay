@@ -178,6 +178,7 @@ function fallbackLesson(topic: typeof CURRICULUM[number], prevLawName: string | 
     loopholes_and_misuse: [],
     how_lawyers_argue: "",
     english_terms: [],
+    memory_hook: { label: topic.category, trigger_question: `Does this situation involve ${topic.section} of the ${topic.law}?` },
     recap: prevLawName ? `Previously covered: ${prevLawName}.` : "This is your first lesson.",
     fallback: true,
   };
@@ -203,6 +204,7 @@ Return STRICT JSON only, no markdown, with EXACTLY these keys:
   "how_lawyers_argue": "3-4 sentences showing how an advocate would actually argue this in court, in courtroom register",
   "english_terms": [{"term": "legal/English term", "meaning": "plain meaning", "used_in_a_sentence": "an advocate-style sentence using it"}],
   "practice_question": "one applied question the learner should answer mentally",
+  "memory_hook": {"label": "1-3 word nickname for this provision, e.g. Equality / Freedom / Life & Liberty", "trigger_question": "the single question to ask yourself to know this provision is engaged, phrased like: Is the government depriving me of life or personal liberty through a fair, just and reasonable procedure?"},
   "recap": {"law": "${prevLawName ?? "Introduction"}", "summary": "60-90 word refresher of the previously learned law", "one_line_test": "one quick recall question on it"}
 }
 
@@ -220,9 +222,10 @@ function renderEmail(o: {
   lessonNumber: number;
   totalTopics: number;
   categoriesCovered: string[];
+  memoryHooks: Array<{ ref: string; label: string; question: string }>;
   ctaUrl: string;
 }): string {
-  const { topic, lesson, lessonNumber, totalTopics, categoriesCovered, ctaUrl } = o;
+  const { topic, lesson, lessonNumber, totalTopics, categoriesCovered, memoryHooks, ctaUrl } = o;
   const card = (title: string, body: string, accent = "#e5e7eb") =>
     `<div style="border:1px solid ${accent};border-radius:12px;padding:14px 16px;margin:0 0 14px 0;">
        <div style="font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:#6b7280;font-weight:700;margin-bottom:8px;">${esc(title)}</div>
@@ -317,6 +320,18 @@ function renderEmail(o: {
   ${card("How an advocate argues this in court", p(String(lesson.how_lawyers_argue ?? "")))}
   ${card("Advocate's English — terms to start using", termsHtml, "#c7d2fe")}
   ${card("Today's practice question", p(String(lesson.practice_question ?? "")))}
+
+  ${memoryHooks.length > 0 ? card(
+    "Easy way to remember — everything you've learned so far",
+    `<div style="font-size:12.5px;color:#6b7280;line-height:1.6;margin-bottom:10px;">One line per provision. Read it top to bottom; it is your recall drill.</div>
+     ${memoryHooks.map((h) => `<div style="margin:0 0 10px 0;padding-bottom:9px;border-bottom:1px solid #f3f4f6;">
+        <div style="font-size:13.5px;color:#111827;line-height:1.6;"><b>${esc(h.ref)}</b> = <span style="color:#4338ca;font-weight:700;">“${esc(h.label)}”</span></div>
+        <div style="font-size:13.5px;color:#374151;line-height:1.6;">→ ${esc(h.question)}</div>
+      </div>`).join("")}`,
+    "#a7f3d0",
+  ) : ""}
+
+
 
   ${card(
     "Your progress",
@@ -491,7 +506,32 @@ Deno.serve(async (req) => {
 
 
       const categoriesCovered = Array.from(new Set([...history.map((h: any) => h.category).filter(Boolean), topic.category]));
-      const html = renderEmail({ topic, lesson, lessonNumber, totalTopics: CURRICULUM.length, categoriesCovered, ctaUrl });
+
+      // Cumulative "easy way to remember" list: every past lesson (oldest first) + today.
+      const hookFor = (ref: string, content: any, fallbackLabel: string, fallbackQ: string) => {
+        const mh = content?.memory_hook ?? {};
+        const label = typeof mh.label === "string" && mh.label.trim() ? mh.label.trim() : fallbackLabel;
+        const question =
+          typeof mh.trigger_question === "string" && mh.trigger_question.trim()
+            ? mh.trigger_question.trim()
+            : typeof content?.headline === "string" && content.headline.trim()
+              ? content.headline.trim()
+              : fallbackQ;
+        return { ref, label, question };
+      };
+      const memoryHooks = [
+        ...[...history].reverse().map((h: any) =>
+          hookFor(
+            `${h.section_ref ?? h.law_name}`,
+            h.content,
+            h.category ?? "Key rule",
+            `Does this situation involve ${h.section_ref ?? h.law_name}?`,
+          ),
+        ),
+        hookFor(topic.section, lesson, topic.category, `Does this situation involve ${topic.section}?`),
+      ];
+
+      const html = renderEmail({ topic, lesson, lessonNumber, totalTopics: CURRICULUM.length, categoriesCovered, memoryHooks, ctaUrl });
 
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
