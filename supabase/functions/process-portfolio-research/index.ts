@@ -335,6 +335,80 @@ Deno.serve(async (req) => {
     };
   }
 
+  // 9b) ML-scored action plan (what to trim / what to buy, 2 weeks – 1 month).
+  toolsAttempted.push("action_model");
+  let actionPlan: Awaited<ReturnType<typeof buildActionPlan>> | null = null;
+  try {
+    actionPlan = await buildActionPlan();
+    toolsSucceeded.push("action_model");
+  } catch (e) {
+    console.log(JSON.stringify({ phase: "action_model", request_id: requestId, failure_category: "action_plan_failed", message: e instanceof Error ? e.message.slice(0, 120) : "unknown" }));
+  }
+
+  async function buildActionPlan() {
+    const cal = await loadCalibration(admin);
+
+    const sells = buildSellIdeas(
+      items.map((it, idx) => {
+        const row = holdingRows[idx];
+        const peerMedian = row.peerAnalysis && row.peerAnalysis.available
+          ? (row.peerAnalysis as any).medianPeerOneSessionReturn ?? null
+          : null;
+        const own1s = row.technicals?.return1Session ?? null;
+        const peerLift = own1s !== null && typeof peerMedian === "number" ? own1s - peerMedian : null;
+        return {
+          ticker: it.ticker.toUpperCase(),
+          features: featuresFrom(row.technicals, peerLift, row.analyst?.signal ?? null),
+          technicals: row.technicals,
+          weightPct: baseMetricsList[idx].weightPct,
+          unrealizedPLPct: baseMetricsList[idx].unrealizedPLPct,
+          concentrationLevel: baseMetricsList[idx].concentrationLevel,
+        };
+      }),
+      cal,
+    );
+
+    const held = new Set(items.map((it) => it.ticker.toUpperCase()));
+
+    // Candidate universe: peers of held names (already fetched) + recently
+    // researched swing tickers from this app's own pipeline.
+    const candidates: Array<{ ticker: string; technicals: any; source: string }> = [];
+    for (const peers of peerMap.values()) {
+      if (!peers) continue;
+      for (const sym of peers) {
+        const r = yahooResults.get(sym.toUpperCase());
+        if (r && r.ok) candidates.push({ ticker: sym, technicals: computeTechnicals(r.chart), source: "Peer of your holding" });
+      }
+    }
+
+    const since = new Date(Date.now() - 21 * 86_400_000).toISOString().slice(0, 10);
+    const swingRes = await admin
+      .from("swing_trade_checked_tickers")
+      .select("ticker, final_score, created_at")
+      .gte("created_at", since)
+      .order("final_score", { ascending: false })
+      .limit(25);
+    const swingSyms = (swingRes.data ?? [])
+      .map((r: any) => String(r.ticker || "").toUpperCase())
+      .filter((s: string) => s && !held.has(s));
+    const uniqueSwing = [...new Set(swingSyms)].slice(0, 12);
+    if (uniqueSwing.length > 0) {
+      const extra = await cache.getMany(uniqueSwing, 6);
+      for (const sym of uniqueSwing) {
+        const r = extra.get(sym);
+        if (r && r.ok) candidates.push({ ticker: sym, technicals: computeTechnicals(r.chart), source: "Swing research shortlist" });
+      }
+    }
+
+    const buys = buildBuyIdeas(candidates, cal, held, 3);
+    console.log(JSON.stringify({
+      phase: "action_model", request_id: requestId,
+      calibrated: cal.calibrated, sample_size: cal.sampleSize,
+      candidates: candidates.length, buys: buys.length,
+    }));
+    return { sells, buys, model: modelMeta(cal) };
+  }
+
   // 10) Render + send email — to server-controlled report_email only.
   toolsAttempted.push("resend.email");
   const html = renderPrivateReportHtml({
@@ -343,7 +417,9 @@ Deno.serve(async (req) => {
     interpretation,
     requestedAtUtcIso,
     userTimezone,
+    actionPlan,
   });
+
   let emailSent = false;
   if (RESEND_KEY) {
     const sendRes = await sendPrivateReport(reportEmail, html, RESEND_KEY);
