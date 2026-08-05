@@ -178,6 +178,7 @@ function fallbackLesson(topic: typeof CURRICULUM[number], prevLawName: string | 
     loopholes_and_misuse: [],
     how_lawyers_argue: "",
     english_terms: [],
+    memory_hook: { label: topic.category, trigger_question: `Does this situation involve ${topic.section} of the ${topic.law}?` },
     recap: prevLawName ? `Previously covered: ${prevLawName}.` : "This is your first lesson.",
     fallback: true,
   };
