@@ -7,6 +7,8 @@ import type { Technicals, SupportCondition, VolumeCondition, RsiCategory } from 
 import { classifyRsi, rsiWording } from "./technicals.ts";
 import type { AnalystRecommendation } from "./finnhub.ts";
 import type { Interpretation } from "./ai-gateway.ts";
+import type { ActionPlan } from "./portfolio-actions.ts";
+
 
 export type PeerDetail = {
   symbol: string;
