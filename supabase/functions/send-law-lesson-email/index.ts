@@ -506,7 +506,32 @@ Deno.serve(async (req) => {
 
 
       const categoriesCovered = Array.from(new Set([...history.map((h: any) => h.category).filter(Boolean), topic.category]));
-      const html = renderEmail({ topic, lesson, lessonNumber, totalTopics: CURRICULUM.length, categoriesCovered, ctaUrl });
+
+      // Cumulative "easy way to remember" list: every past lesson (oldest first) + today.
+      const hookFor = (ref: string, content: any, fallbackLabel: string, fallbackQ: string) => {
+        const mh = content?.memory_hook ?? {};
+        const label = typeof mh.label === "string" && mh.label.trim() ? mh.label.trim() : fallbackLabel;
+        const question =
+          typeof mh.trigger_question === "string" && mh.trigger_question.trim()
+            ? mh.trigger_question.trim()
+            : typeof content?.headline === "string" && content.headline.trim()
+              ? content.headline.trim()
+              : fallbackQ;
+        return { ref, label, question };
+      };
+      const memoryHooks = [
+        ...[...history].reverse().map((h: any) =>
+          hookFor(
+            `${h.section_ref ?? h.law_name}`,
+            h.content,
+            h.category ?? "Key rule",
+            `Does this situation involve ${h.section_ref ?? h.law_name}?`,
+          ),
+        ),
+        hookFor(topic.section, lesson, topic.category, `Does this situation involve ${topic.section}?`),
+      ];
+
+      const html = renderEmail({ topic, lesson, lessonNumber, totalTopics: CURRICULUM.length, categoriesCovered, memoryHooks, ctaUrl });
 
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
