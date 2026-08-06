@@ -579,6 +579,134 @@ export type Database = {
         }
         Relationships: []
       }
+      ml_model_promotions: {
+        Row: {
+          actor_user_id: string | null
+          created_at: string
+          from_status: string | null
+          id: string
+          model_version_id: string
+          reason: string | null
+          to_status: string
+        }
+        Insert: {
+          actor_user_id?: string | null
+          created_at?: string
+          from_status?: string | null
+          id?: string
+          model_version_id: string
+          reason?: string | null
+          to_status: string
+        }
+        Update: {
+          actor_user_id?: string | null
+          created_at?: string
+          from_status?: string | null
+          id?: string
+          model_version_id?: string
+          reason?: string | null
+          to_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ml_model_promotions_model_version_id_fkey"
+            columns: ["model_version_id"]
+            isOneToOne: false
+            referencedRelation: "model_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ml_training_jobs: {
+        Row: {
+          best_model: string | null
+          created_at: string
+          dataset_version: string | null
+          embargo_days: number | null
+          error_message: string | null
+          finished_at: string | null
+          github_run_url: string | null
+          id: string
+          label_horizon: string
+          logs: string | null
+          matured_rows: number | null
+          positive_rate: number | null
+          purge_days: number | null
+          started_at: string
+          status: string
+          test_end: string | null
+          test_rows: number | null
+          test_start: string | null
+          total_rows: number | null
+          train_end: string | null
+          train_rows: number | null
+          train_start: string | null
+          trigger_source: string
+          updated_at: string
+          val_end: string | null
+          val_rows: number | null
+          val_start: string | null
+        }
+        Insert: {
+          best_model?: string | null
+          created_at?: string
+          dataset_version?: string | null
+          embargo_days?: number | null
+          error_message?: string | null
+          finished_at?: string | null
+          github_run_url?: string | null
+          id?: string
+          label_horizon?: string
+          logs?: string | null
+          matured_rows?: number | null
+          positive_rate?: number | null
+          purge_days?: number | null
+          started_at?: string
+          status?: string
+          test_end?: string | null
+          test_rows?: number | null
+          test_start?: string | null
+          total_rows?: number | null
+          train_end?: string | null
+          train_rows?: number | null
+          train_start?: string | null
+          trigger_source?: string
+          updated_at?: string
+          val_end?: string | null
+          val_rows?: number | null
+          val_start?: string | null
+        }
+        Update: {
+          best_model?: string | null
+          created_at?: string
+          dataset_version?: string | null
+          embargo_days?: number | null
+          error_message?: string | null
+          finished_at?: string | null
+          github_run_url?: string | null
+          id?: string
+          label_horizon?: string
+          logs?: string | null
+          matured_rows?: number | null
+          positive_rate?: number | null
+          purge_days?: number | null
+          started_at?: string
+          status?: string
+          test_end?: string | null
+          test_rows?: number | null
+          test_start?: string | null
+          total_rows?: number | null
+          train_end?: string | null
+          train_rows?: number | null
+          train_start?: string | null
+          trigger_source?: string
+          updated_at?: string
+          val_end?: string | null
+          val_rows?: number | null
+          val_start?: string | null
+        }
+        Relationships: []
+      }
       ml_universe_russell1000: {
         Row: {
           added_at: string
@@ -637,27 +765,78 @@ export type Database = {
       }
       model_versions: {
         Row: {
+          algorithm: string | null
+          artifact: Json | null
+          baseline_comparison: Json | null
           created_at: string
+          dataset_version: string | null
+          feature_importance: Json | null
+          feature_order: Json | null
+          feature_version: string | null
           hyperparameters: Json | null
           id: string
+          is_immutable: boolean
+          label_horizon: string | null
+          metrics: Json | null
           model_id: string | null
           notes: string | null
+          preprocessing: Json | null
+          promoted_at: string | null
+          promoted_by: string | null
+          status: string
+          test_window: unknown
+          train_window: unknown
+          training_job_id: string | null
           version: string
         }
         Insert: {
+          algorithm?: string | null
+          artifact?: Json | null
+          baseline_comparison?: Json | null
           created_at?: string
+          dataset_version?: string | null
+          feature_importance?: Json | null
+          feature_order?: Json | null
+          feature_version?: string | null
           hyperparameters?: Json | null
           id?: string
+          is_immutable?: boolean
+          label_horizon?: string | null
+          metrics?: Json | null
           model_id?: string | null
           notes?: string | null
+          preprocessing?: Json | null
+          promoted_at?: string | null
+          promoted_by?: string | null
+          status?: string
+          test_window?: unknown
+          train_window?: unknown
+          training_job_id?: string | null
           version: string
         }
         Update: {
+          algorithm?: string | null
+          artifact?: Json | null
+          baseline_comparison?: Json | null
           created_at?: string
+          dataset_version?: string | null
+          feature_importance?: Json | null
+          feature_order?: Json | null
+          feature_version?: string | null
           hyperparameters?: Json | null
           id?: string
+          is_immutable?: boolean
+          label_horizon?: string | null
+          metrics?: Json | null
           model_id?: string | null
           notes?: string | null
+          preprocessing?: Json | null
+          promoted_at?: string | null
+          promoted_by?: string | null
+          status?: string
+          test_window?: unknown
+          train_window?: unknown
+          training_job_id?: string | null
           version?: string
         }
         Relationships: [
@@ -666,6 +845,13 @@ export type Database = {
             columns: ["model_id"]
             isOneToOne: false
             referencedRelation: "trained_models"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "model_versions_training_job_id_fkey"
+            columns: ["training_job_id"]
+            isOneToOne: false
+            referencedRelation: "ml_training_jobs"
             referencedColumns: ["id"]
           },
         ]
@@ -874,6 +1060,7 @@ export type Database = {
           feature_store_id: string | null
           features_snapshot: Json | null
           id: string
+          mode: string
           model_version: string | null
           model_version_id: string | null
           predicted_at: string
@@ -882,6 +1069,7 @@ export type Database = {
           prediction_date: string | null
           probability: number | null
           ticker: string | null
+          training_example_id: string | null
           why_prediction: Json | null
         }
         Insert: {
@@ -893,6 +1081,7 @@ export type Database = {
           feature_store_id?: string | null
           features_snapshot?: Json | null
           id?: string
+          mode?: string
           model_version?: string | null
           model_version_id?: string | null
           predicted_at?: string
@@ -901,6 +1090,7 @@ export type Database = {
           prediction_date?: string | null
           probability?: number | null
           ticker?: string | null
+          training_example_id?: string | null
           why_prediction?: Json | null
         }
         Update: {
@@ -912,6 +1102,7 @@ export type Database = {
           feature_store_id?: string | null
           features_snapshot?: Json | null
           id?: string
+          mode?: string
           model_version?: string | null
           model_version_id?: string | null
           predicted_at?: string
@@ -920,6 +1111,7 @@ export type Database = {
           prediction_date?: string | null
           probability?: number | null
           ticker?: string | null
+          training_example_id?: string | null
           why_prediction?: Json | null
         }
         Relationships: [
@@ -935,6 +1127,34 @@ export type Database = {
             columns: ["model_version_id"]
             isOneToOne: false
             referencedRelation: "model_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prediction_history_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: false
+            referencedRelation: "ml_training_dataset_v2"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prediction_history_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: false
+            referencedRelation: "ml_training_dataset_v3"
+            referencedColumns: ["example_id"]
+          },
+          {
+            foreignKeyName: "prediction_history_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: false
+            referencedRelation: "swing_ml_training_dataset_v1"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prediction_history_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: false
+            referencedRelation: "swing_training_examples"
             referencedColumns: ["id"]
           },
         ]
@@ -1040,6 +1260,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ml_training_dataset_v2"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rl_experiences_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: false
+            referencedRelation: "ml_training_dataset_v3"
+            referencedColumns: ["example_id"]
           },
           {
             foreignKeyName: "rl_experiences_training_example_id_fkey"
@@ -2031,6 +2258,13 @@ export type Database = {
             foreignKeyName: "swing_training_outcomes_training_example_id_fkey"
             columns: ["training_example_id"]
             isOneToOne: true
+            referencedRelation: "ml_training_dataset_v3"
+            referencedColumns: ["example_id"]
+          },
+          {
+            foreignKeyName: "swing_training_outcomes_training_example_id_fkey"
+            columns: ["training_example_id"]
+            isOneToOne: true
             referencedRelation: "swing_ml_training_dataset_v1"
             referencedColumns: ["id"]
           },
@@ -2354,6 +2588,93 @@ export type Database = {
           was_selected: boolean | null
           weak_volume_flag: boolean | null
           yahoo_snapshot: Json | null
+        }
+        Relationships: []
+      }
+      ml_training_dataset_v3: {
+        Row: {
+          analyst_buy_count: number | null
+          analyst_hold_count: number | null
+          analyst_score: number | null
+          analyst_sell_count: number | null
+          analyst_signal: string | null
+          baseline_final_score: number | null
+          baseline_rule_score: number | null
+          baseline_was_selected: boolean | null
+          checked_at: string | null
+          confidence: string | null
+          confidence_score: number | null
+          current_price: number | null
+          data_quality_flags: string[] | null
+          dataset_version: string | null
+          decision_date: string | null
+          distance_from_support_pct: number | null
+          distance_to_resistance_pct: number | null
+          entry_status: string | null
+          exa_negative_signal_count: number | null
+          exa_neutral_signal_count: number | null
+          exa_positive_signal_count: number | null
+          exa_result_count: number | null
+          exa_source_quality_score: number | null
+          example_id: string | null
+          extended_flag: boolean | null
+          feature_version: string | null
+          finnhub_available: boolean | null
+          gap_to_selected: number | null
+          has_analyst_upgrade_signal: boolean | null
+          has_cash_burn_signal: boolean | null
+          has_contract_win_signal: boolean | null
+          has_downgrade_signal: boolean | null
+          has_earnings_beat_signal: boolean | null
+          has_earnings_miss_signal: boolean | null
+          has_fda_approval_signal: boolean | null
+          has_guidance_cut_signal: boolean | null
+          has_high_valuation_signal: boolean | null
+          has_insider_selling_signal: boolean | null
+          has_investigation_signal: boolean | null
+          has_lawsuit_signal: boolean | null
+          has_margin_pressure_signal: boolean | null
+          has_material_lawsuit_signal: boolean | null
+          has_partnership_signal: boolean | null
+          has_price_target_raise_signal: boolean | null
+          has_raised_outlook_signal: boolean | null
+          has_revenue_growth_signal: boolean | null
+          high_volatility_flag: boolean | null
+          industry: string | null
+          label_10_session: string | null
+          label_matured: boolean | null
+          market_cap: number | null
+          market_regime_label: string | null
+          max_drawdown_pct: number | null
+          max_gain_pct: number | null
+          momentum_status: string | null
+          near_miss: boolean | null
+          near_resistance_flag: boolean | null
+          one_session_return_pct: number | null
+          outcome_10_session: number | null
+          overbought_flag: boolean | null
+          peer_confirmation_score: number | null
+          peer_count: number | null
+          pipeline_version: string | null
+          return_pct_current: number | null
+          risk_reward: number | null
+          sector: string | null
+          selection_blocker: string | null
+          sessions_elapsed: number | null
+          seven_session_return_pct: number | null
+          status_at_check: string | null
+          target_10_session: number | null
+          target_supports_trade: boolean | null
+          target_upside_pct: number | null
+          technical_score: number | null
+          ticker: string | null
+          training_source: string | null
+          twenty_session_return_pct: number | null
+          upside_vs_risk: number | null
+          volatility_score: number | null
+          volume_confirmation: string | null
+          volume_strength: number | null
+          weak_volume_flag: boolean | null
         }
         Relationships: []
       }
