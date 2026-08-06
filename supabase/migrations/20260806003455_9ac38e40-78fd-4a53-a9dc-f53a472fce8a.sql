@@ -1,0 +1,1 @@
+ALTER VIEW public.ml_training_dataset_v3 SET (security_invoker = on);

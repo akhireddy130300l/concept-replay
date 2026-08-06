@@ -1,0 +1,37 @@
+name: Swing ML Training
+
+on:
+  workflow_dispatch:
+    inputs:
+      trigger_source:
+        description: Who requested this run
+        required: false
+        default: manual
+  # Recurring schedule stays disabled until the first live run is verified.
+  # schedule:
+  #   - cron: "0 8 * * 1"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r ml_training/requirements.txt
+
+      - name: Unit tests (splits, leakage guard, metrics)
+        run: python -m pytest ml_training/tests -q
+
+      - name: Train candidate models
+        env:
+          SUPABASE_FUNCTIONS_URL: ${{ secrets.SUPABASE_FUNCTIONS_URL }}
+          ML_TRAINING_KEY: ${{ secrets.ML_TRAINING_KEY }}
+          TRIGGER_SOURCE: ${{ github.event.inputs.trigger_source || 'github_actions' }}
+        run: python -m ml_training.train

@@ -42,3 +42,6 @@ verify_jwt = true
 [functions.send-law-lesson-email]
 verify_jwt = false
 
+[functions.ml-model-registry]
+verify_jwt = false
+
