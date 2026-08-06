@@ -113,5 +113,119 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
+  // ---------------- ML model registry (read + lifecycle) ----------------
+
+  if (action === "models") {
+    const { data: versions } = await admin
+      .from("model_versions")
+      .select("id, version, algorithm, status, label_horizon, dataset_version, feature_version, metrics, baseline_comparison, feature_importance, hyperparameters, feature_order, preprocessing, notes, training_job_id, promoted_at, created_at")
+      .order("created_at", { ascending: false })
+      .limit(40);
+    const { data: jobs } = await admin
+      .from("ml_training_jobs")
+      .select("*")
+      .order("started_at", { ascending: false })
+      .limit(10);
+    const { data: promotions } = await admin
+      .from("ml_model_promotions")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(30);
+    const { count: shadowPredictions } = await admin
+      .from("prediction_history")
+      .select("id", { count: "exact", head: true });
+    return json({
+      versions: versions ?? [],
+      jobs: jobs ?? [],
+      promotions: promotions ?? [],
+      shadow_prediction_count: shadowPredictions ?? 0,
+    });
+  }
+
+  // Lifecycle: candidate -> shadow -> production (production requires explicit confirm).
+  if (action === "promote" && req.method === "POST") {
+    const body = await req.json().catch(() => ({}));
+    const id = body.model_version_id;
+    const to = body.to_status;
+    const ALLOWED = ["candidate", "shadow", "production", "archived", "rejected"];
+    if (!id || !ALLOWED.includes(to)) return json({ error: "model_version_id and valid to_status required" }, 400);
+
+    const { data: current } = await admin.from("model_versions").select("id, status").eq("id", id).maybeSingle();
+    if (!current) return json({ error: "model version not found" }, 404);
+
+    if (to === "shadow" && current.status !== "candidate") {
+      return json({ error: "only a candidate model can move to shadow" }, 400);
+    }
+    if (to === "production") {
+      if (current.status !== "shadow") return json({ error: "only a shadow model can move to production" }, 400);
+      if (body.confirm_production !== true) return json({ error: "production promotion requires confirm_production: true" }, 400);
+      // demote any existing production model
+      await admin.from("model_versions").update({ status: "archived" }).eq("status", "production");
+    }
+
+    const { error } = await admin
+      .from("model_versions")
+      .update({ status: to, promoted_at: new Date().toISOString(), promoted_by: auth.userId })
+      .eq("id", id);
+    if (error) return json({ error: error.message }, 500);
+
+    await admin.from("ml_model_promotions").insert({
+      model_version_id: id,
+      from_status: current.status,
+      to_status: to,
+      actor_user_id: auth.userId,
+      reason: body.reason ?? "manual action from /ml-training",
+    });
+    console.log(`[ml-control] model ${id} ${current.status} -> ${to} by ${auth.userId}`);
+    return json({ ok: true, status: to });
+  }
+
+  // Rollback: archive the target and restore the most recent previously-promoted model.
+  if (action === "rollback" && req.method === "POST") {
+    const body = await req.json().catch(() => ({}));
+    const id = body.model_version_id;
+    if (!id) return json({ error: "model_version_id required" }, 400);
+    const { data: current } = await admin.from("model_versions").select("id, status").eq("id", id).maybeSingle();
+    if (!current) return json({ error: "model version not found" }, 404);
+    await admin.from("model_versions").update({ status: "archived" }).eq("id", id);
+    await admin.from("ml_model_promotions").insert({
+      model_version_id: id,
+      from_status: current.status,
+      to_status: "archived",
+      actor_user_id: auth.userId,
+      reason: body.reason ?? "rollback from /ml-training",
+    });
+    console.log(`[ml-control] rollback ${id} from ${current.status}`);
+    return json({ ok: true, status: "archived" });
+  }
+
+  // Optional: kick the GitHub Actions training workflow (needs GITHUB_DISPATCH_TOKEN).
+  if (action === "trigger_training" && req.method === "POST") {
+    const token = Deno.env.get("GITHUB_DISPATCH_TOKEN");
+    const repo = Deno.env.get("GITHUB_REPOSITORY") ?? "akhireddy130300/concept-replay";
+    if (!token) {
+      return json({
+        error: "GITHUB_DISPATCH_TOKEN not configured",
+        hint: "Add a GitHub fine-grained PAT with Actions: write as the GITHUB_DISPATCH_TOKEN backend secret, or run the workflow from the GitHub Actions tab.",
+      }, 400);
+    }
+    const resp = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/ml-train.yml/dispatches`, {
+      method: "POST",
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ ref: "main", inputs: { trigger_source: "ml_training_dashboard" } }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      console.error(`[ml-control] workflow dispatch failed [${resp.status}]: ${text}`);
+      return json({ error: "workflow dispatch failed", status: resp.status, details: text }, resp.status);
+    }
+    return json({ ok: true, dispatched: true });
+  }
+
   return json({ error: "unknown action" }, 400);
 });
