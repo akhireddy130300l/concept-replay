@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -18,13 +18,35 @@ def test_split_dates_are_chronological_and_disjoint():
 
 
 def test_purge_and_embargo_removes_overlapping_train_dates():
-    dates = [date(2026, 1, d) for d in range(1, 31)]
+    # Realistic spacing: ~2 decision days per week over several months, so the
+    # 21-day purge+embargo gap still leaves usable train/val dates.
+    dates = [date(2026, 1, 1) + timedelta(days=3 * i) for i in range(40)]
     tr, va, te = split_dates(dates, 0.6, 0.2)
     kept_tr, kept_va = apply_purge_embargo(tr, va, te, purge_days=16, embargo_days=5)
+    assert kept_tr, "purge must not wipe out the entire train split for realistic spacing"
     assert max(kept_tr) <= min(va + te)
     assert (min(va + te) - max(kept_tr)).days >= 21
     if kept_va:
         assert (min(te) - max(kept_va)).days >= 21
+
+
+def test_purge_never_leaks_when_dates_are_dense():
+    dates = [date(2026, 1, d) for d in range(1, 31)]
+    tr, va, te = split_dates(dates, 0.6, 0.2)
+    kept_tr, kept_va = apply_purge_embargo(tr, va, te, purge_days=16, embargo_days=5)
+    # Dense daily dates: correct behaviour is to drop everything inside the gap.
+    assert all((min(va + te) - d).days >= 21 for d in kept_tr)
+
+
+def test_rule_decision_fields_are_not_model_features():
+    from ml_training.features import RULE_DECISION_COLUMNS
+
+    cols = feature_columns()
+    for banned in RULE_DECISION_COLUMNS:
+        assert banned not in cols
+    with pytest.raises(ValueError):
+        assert_no_leakage(cols + ["gap_to_selected"])
+
 
 
 def test_whole_decision_dates_stay_together():

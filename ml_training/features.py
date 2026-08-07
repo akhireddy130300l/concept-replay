@@ -33,7 +33,6 @@ NUMERIC_FEATURES = [
     "exa_neutral_signal_count",
     "exa_source_quality_score",
     "confidence_score",
-    "gap_to_selected",
 ]
 
 BOOLEAN_FEATURES = [
@@ -44,7 +43,6 @@ BOOLEAN_FEATURES = [
     "extended_flag",
     "target_supports_trade",
     "finnhub_available",
-    "near_miss",
     "has_revenue_growth_signal",
     "has_raised_outlook_signal",
     "has_earnings_beat_signal",
@@ -71,7 +69,6 @@ CATEGORICAL_FEATURES = [
     "volume_confirmation",
     "analyst_signal",
     "confidence",
-    "status_at_check",
     "sector",
     "market_regime_label",
 ]
@@ -94,6 +91,11 @@ LEAKY_COLUMNS = [
 # candidate model cannot simply relearn the existing rules.
 BASELINE_COLUMNS = ["baseline_rule_score", "baseline_final_score", "baseline_was_selected"]
 
+# Rule-decision-derived fields. Kept in the dataset as metadata/analysis columns
+# but NEVER used as model inputs — they teach the model to imitate the rule
+# engine instead of predicting market outcomes.
+RULE_DECISION_COLUMNS = ["gap_to_selected", "near_miss", "status_at_check", "selection_blocker"]
+
 TARGET = "target_10_session"
 DATE_COL = "decision_date"
 
@@ -103,9 +105,10 @@ def feature_columns() -> list[str]:
 
 
 def assert_no_leakage(columns: list[str]) -> None:
-    bad = sorted(set(columns) & set(LEAKY_COLUMNS + BASELINE_COLUMNS))
+    bad = sorted(set(columns) & set(LEAKY_COLUMNS + BASELINE_COLUMNS + RULE_DECISION_COLUMNS))
     if bad:
-        raise ValueError(f"leakage guard tripped — future/baseline columns in feature matrix: {bad}")
+        raise ValueError(
+            f"leakage guard tripped — future/baseline/rule-decision columns in feature matrix: {bad}")
 
 
 def prepare_frame(df: pd.DataFrame) -> pd.DataFrame:
