@@ -167,15 +167,28 @@ def main() -> int:
                     continue
                 proba = pipe.predict_proba(parts[split][cols])[:, 1]
                 metrics[split] = evaluate(y[split], proba, groups[split], rets[split], dds[split])
-            log(f"[train] {name}: test pr_auc={metrics['test']['pr_auc']:.3f} "
-                f"p@3={metrics['test']['precision_at_3']:.3f} roc={metrics['test']['roc_auc']:.3f}")
+            log(f"[train] {name}: val pr_auc={metrics.get('val', {}).get('pr_auc', float('nan')):.3f} "
+                f"val p@3={metrics.get('val', {}).get('precision_at_3', float('nan')):.3f} | "
+                f"test pr_auc={metrics['test']['pr_auc']:.3f} (report only)")
             results.append({"name": name, "pipeline": pipe, "metrics": metrics})
 
         if not results:
             raise RuntimeError("no estimators could be trained")
 
-        best = max(results, key=lambda r: (r["metrics"]["test"]["pr_auc"] if np.isfinite(r["metrics"]["test"]["pr_auc"]) else -1))
-        log(f"[train] best candidate by test PR-AUC: {best['name']}")
+        # Model selection uses VALIDATION metrics only. The test split is read
+        # exactly once, for the final unbiased report — never for selection.
+        def _val_key(r):
+            m = r["metrics"].get("val") or {}
+            pr = m.get("pr_auc", float("nan"))
+            p3 = m.get("precision_at_3", float("nan"))
+            return (pr if np.isfinite(pr) else -1, p3 if np.isfinite(p3) else -1)
+
+        if not any(r["metrics"].get("val") for r in results):
+            raise RuntimeError("validation split empty — cannot select a model without validation metrics")
+        best = max(results, key=_val_key)
+        log(f"[train] best candidate by VALIDATION PR-AUC: {best['name']} "
+            f"(val pr_auc={best['metrics']['val']['pr_auc']:.3f}); "
+            f"test metrics reported once, not used for selection")
 
         registered = []
         for r in results:
@@ -205,7 +218,7 @@ def main() -> int:
                 "train_window": f"[{min(windows['train'])},{max(windows['train'])}]" if windows["train"] else None,
                 "test_window": f"[{min(windows['test'])},{max(windows['test'])}]" if windows["test"] else None,
                 "notes": f"automated run; purge={settings.purge_days}d embargo={settings.embargo_days}d; "
-                         f"chronological split by decision_date; candidate only",
+                         f"chronological split by decision_date; model selected on VALIDATION only; candidate only",
             }
             res = registry.register_model(settings, payload)
             registered.append({"algorithm": r["name"], "model_version_id": res["model_version_id"]})
