@@ -18,6 +18,8 @@ export default function MLTraining() {
   const [runs, setRuns] = useState<Row[]>([]);
   const [dayLogs, setDayLogs] = useState<Row[]>([]);
   const [drift, setDrift] = useState<Row[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [stats, setStats] = useState({ total: 0, live: 0, historical: 0, completed10: 0, win: 0, loss: 0, flat: 0, avgReturn: 0, avgDD: 0, historicalDays: 0 });
 
   const [startDate, setStartDate] = useState("2025-05-01");
@@ -35,11 +37,14 @@ export default function MLTraining() {
   }
 
   async function loadRuns() {
-    const { data } = await supabase.functions.invoke("ml-training-control?action=status", { method: "GET" as any });
-    if (data?.runs) setRuns(data.runs);
-    if (data?.recent_day_logs) setDayLogs(data.recent_day_logs);
-    const s = data?.committed_summary;
-    if (s) {
+    try {
+      const { data, error } = await supabase.functions.invoke("ml-training-control?action=status", { method: "GET" as any });
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+      setRuns(data?.runs ?? []);
+      setDayLogs(data?.recent_day_logs ?? []);
+      const s = data?.committed_summary;
+      if (!s) throw new Error("Backend returned no training summary");
       setStats({
         total: Number(s.total_examples ?? 0),
         live: Number(s.live_examples ?? 0),
@@ -52,8 +57,12 @@ export default function MLTraining() {
         avgDD: Number(s.avg_max_drawdown_pct ?? 0),
         historicalDays: Number(s.historical_days_saved ?? 0),
       });
+      setLoadError(null);
+    } catch (e: any) {
+      setLoadError(e?.message ?? String(e));
     }
   }
+
 
   useEffect(() => {
     loadAll();
@@ -88,6 +97,8 @@ export default function MLTraining() {
   const readinessPct = Math.min(100, Math.round((stats.completed10 / 1000) * 100));
   const readinessLabel = readinessPct < 20 ? "Collecting data" : readinessPct < 60 ? "Good" : readinessPct < 90 ? "Excellent" : "Ready for first ML model";
   const activeRun = runs.find((r) => r.status === "running");
+  const statsUnavailable = !!loadError && stats.total === 0;
+
 
   if (examples === null) return <div className="p-8">Loading ML training data…</div>;
 
@@ -97,6 +108,18 @@ export default function MLTraining() {
         <h1 className="text-2xl font-semibold">ML Training Data</h1>
         <p className="text-sm text-muted-foreground">Foundation dashboard — collecting labeled examples. No model deployed yet.</p>
       </header>
+
+      {loadError && (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <div className="text-sm font-medium text-destructive">Unable to load ML training data</div>
+            <div className="text-xs text-muted-foreground mt-1 break-words">{loadError}</div>
+            <div className="text-xs text-muted-foreground mt-1">Counts below may be stale or unavailable — they are not real zeros.</div>
+            <Button className="mt-3" size="sm" variant="outline" onClick={() => { loadRuns(); loadAll(); }}>Retry</Button>
+          </CardContent>
+        </Card>
+      )}
+
 
       <Card>
         <CardHeader><CardTitle>Historical Replay</CardTitle></CardHeader>
@@ -152,8 +175,9 @@ export default function MLTraining() {
           ["Avg return", `${stats.avgReturn.toFixed(2)}%`],
           ["Avg max DD", `${stats.avgDD.toFixed(2)}%`],
         ].map(([label, value]) => (
-          <Card key={label as string}><CardContent className="pt-6"><div className="text-xs text-muted-foreground">{label}</div><div className="text-2xl font-semibold">{value}</div></CardContent></Card>
+          <Card key={label as string}><CardContent className="pt-6"><div className="text-xs text-muted-foreground">{label}</div><div className="text-2xl font-semibold">{statsUnavailable ? "—" : value}</div></CardContent></Card>
         ))}
+
       </div>
 
       <Card>
