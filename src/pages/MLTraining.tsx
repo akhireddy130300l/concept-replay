@@ -35,11 +35,14 @@ export default function MLTraining() {
   }
 
   async function loadRuns() {
-    const { data } = await supabase.functions.invoke("ml-training-control?action=status", { method: "GET" as any });
-    if (data?.runs) setRuns(data.runs);
-    if (data?.recent_day_logs) setDayLogs(data.recent_day_logs);
-    const s = data?.committed_summary;
-    if (s) {
+    try {
+      const { data, error } = await supabase.functions.invoke("ml-training-control?action=status", { method: "GET" as any });
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+      setRuns(data?.runs ?? []);
+      setDayLogs(data?.recent_day_logs ?? []);
+      const s = data?.committed_summary;
+      if (!s) throw new Error("Backend returned no training summary");
       setStats({
         total: Number(s.total_examples ?? 0),
         live: Number(s.live_examples ?? 0),
@@ -52,8 +55,12 @@ export default function MLTraining() {
         avgDD: Number(s.avg_max_drawdown_pct ?? 0),
         historicalDays: Number(s.historical_days_saved ?? 0),
       });
+      setLoadError(null);
+    } catch (e: any) {
+      setLoadError(e?.message ?? String(e));
     }
   }
+
 
   useEffect(() => {
     loadAll();
