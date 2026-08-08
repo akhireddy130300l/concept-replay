@@ -18,6 +18,8 @@ export default function MLTraining() {
   const [runs, setRuns] = useState<Row[]>([]);
   const [dayLogs, setDayLogs] = useState<Row[]>([]);
   const [drift, setDrift] = useState<Row[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [stats, setStats] = useState({ total: 0, live: 0, historical: 0, completed10: 0, win: 0, loss: 0, flat: 0, avgReturn: 0, avgDD: 0, historicalDays: 0 });
 
   const [startDate, setStartDate] = useState("2025-05-01");
