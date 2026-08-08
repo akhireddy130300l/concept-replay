@@ -97,6 +97,8 @@ export default function MLTraining() {
   const readinessPct = Math.min(100, Math.round((stats.completed10 / 1000) * 100));
   const readinessLabel = readinessPct < 20 ? "Collecting data" : readinessPct < 60 ? "Good" : readinessPct < 90 ? "Excellent" : "Ready for first ML model";
   const activeRun = runs.find((r) => r.status === "running");
+  const statsUnavailable = !!loadError && stats.total === 0;
+
 
   if (examples === null) return <div className="p-8">Loading ML training data…</div>;
 
