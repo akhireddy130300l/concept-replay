@@ -107,6 +107,18 @@ export default function MLTraining() {
         <p className="text-sm text-muted-foreground">Foundation dashboard — collecting labeled examples. No model deployed yet.</p>
       </header>
 
+      {loadError && (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <div className="text-sm font-medium text-destructive">Unable to load ML training data</div>
+            <div className="text-xs text-muted-foreground mt-1 break-words">{loadError}</div>
+            <div className="text-xs text-muted-foreground mt-1">Counts below may be stale or unavailable — they are not real zeros.</div>
+            <Button className="mt-3" size="sm" variant="outline" onClick={() => { loadRuns(); loadAll(); }}>Retry</Button>
+          </CardContent>
+        </Card>
+      )}
+
+
       <Card>
         <CardHeader><CardTitle>Historical Replay</CardTitle></CardHeader>
         <CardContent className="space-y-4">
