@@ -173,8 +173,9 @@ export default function MLTraining() {
           ["Avg return", `${stats.avgReturn.toFixed(2)}%`],
           ["Avg max DD", `${stats.avgDD.toFixed(2)}%`],
         ].map(([label, value]) => (
-          <Card key={label as string}><CardContent className="pt-6"><div className="text-xs text-muted-foreground">{label}</div><div className="text-2xl font-semibold">{value}</div></CardContent></Card>
+          <Card key={label as string}><CardContent className="pt-6"><div className="text-xs text-muted-foreground">{label}</div><div className="text-2xl font-semibold">{statsUnavailable ? "—" : value}</div></CardContent></Card>
         ))}
+
       </div>
 
       <Card>
