@@ -1062,7 +1062,11 @@ const Speaking = () => {
           </CardContent>
         </Card>
 
+        {/* Quick Drills — offline micro-practice */}
+        <QuickDrills />
+
         {/* Shadow Practice — Phase 2 */}
+
         <ShadowPractice
           defaultText={
             feedback?.powerful ||
