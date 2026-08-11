@@ -11,7 +11,9 @@ import {
   type SpeakingFeedback, type SpeakingMode, type Scenario,
 } from "@/lib/speaking/content";
 import { classifyGate, gateLabel, type GateStatus } from "@/lib/speaking/gate";
+import QuickDrills from "@/components/speaking/QuickDrills";
 import { Mic, MicOff, Sparkles, Flame, CheckCircle2, AlertTriangle, ArrowLeft, Trophy, Target, RefreshCw, Play, SkipForward, SkipBack, Repeat } from "lucide-react";
+
 
 const BASELINE_TARGET = "Speak clearly with structure and finish with one strong closing line.";
 
@@ -1062,7 +1064,11 @@ const Speaking = () => {
           </CardContent>
         </Card>
 
+        {/* Quick Drills — offline micro-practice */}
+        <QuickDrills />
+
         {/* Shadow Practice — Phase 2 */}
+
         <ShadowPractice
           defaultText={
             feedback?.powerful ||
