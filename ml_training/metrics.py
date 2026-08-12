@@ -102,8 +102,10 @@ def evaluate(y: np.ndarray, proba: np.ndarray, groups: np.ndarray, returns, draw
     for k in KS:
         out[f"precision_at_{k}"] = _precision_at_k(proba, y, groups, k)
     out.update(_return_stats(proba, np.asarray(returns, dtype=float), np.asarray(drawdowns, dtype=float), groups))
+    out.update(expected_value(proba, np.asarray(returns, dtype=float), groups))
     out.update(calibration(y, proba))
     return out
+
 
 
 def calibration(y: np.ndarray, proba: np.ndarray, bins: int = 10) -> dict:
