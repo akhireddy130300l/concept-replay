@@ -24,9 +24,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from . import data, features, registry
+from .calibration import ProbabilityCalibrator
 from .config import Settings
 from .metrics import evaluate
 from .splits import chronological_split
+from .walkforward import fold_masks, summarize, walk_forward_windows
+
 
 
 def build_preprocessor() -> ColumnTransformer:
@@ -190,6 +193,61 @@ def main() -> int:
             f"(val pr_auc={best['metrics']['val']['pr_auc']:.3f}); "
             f"test metrics reported once, not used for selection")
 
+        # ---- purged walk-forward CV for the selected algorithm -----------
+        # One split is one lucky number; folds give a mean +/- std. Folds are
+        # cut from train+val only so the test split stays a one-shot read.
+        wf_summary: dict = {"folds": 0}
+        try:
+            cv_df = df[masks["train"] | masks["val"]]
+            folds = walk_forward_windows(
+                list(cv_df[features.DATE_COL].unique()),
+                n_folds=4, purge_days=settings.purge_days, embargo_days=settings.embargo_days)
+            fold_metrics = []
+            for i, (tr_m, va_m) in enumerate(fold_masks(cv_df, folds), start=1):
+                tr_part, va_part = cv_df[tr_m], cv_df[va_m]
+                if len(tr_part) < 50 or len(va_part) < 10:
+                    continue
+                ytr = tr_part[features.TARGET].to_numpy()
+                yva = va_part[features.TARGET].to_numpy()
+                if len(np.unique(ytr)) < 2 or len(np.unique(yva)) < 2:
+                    continue
+                est = dict(candidate_estimators())[best["name"]]
+                fold_pipe = Pipeline([("pre", build_preprocessor()), ("model", est)])
+                fold_pipe.fit(tr_part[cols], ytr)
+                p = fold_pipe.predict_proba(va_part[cols])[:, 1]
+                fold_metrics.append(evaluate(
+                    yva, p, va_part[features.DATE_COL].to_numpy(),
+                    va_part["outcome_10_session"].to_numpy(), va_part["max_drawdown_pct"].to_numpy()))
+            if fold_metrics:
+                wf_summary = summarize(fold_metrics, keys=("pr_auc", "roc_auc", "precision_at_3", "ev_per_trade"))
+                log(f"[train] walk-forward ({wf_summary['folds']} folds): "
+                    f"pr_auc={wf_summary['pr_auc_mean']:.3f}+/-{wf_summary['pr_auc_std']:.3f} "
+                    f"ev/trade={wf_summary.get('ev_per_trade_mean', float('nan')):.2f}%")
+            else:
+                log("[train] walk-forward skipped: not enough usable folds")
+        except Exception as exc:  # pragma: no cover - never block a run on CV
+            log(f"[train] walk-forward failed (non-fatal): {type(exc).__name__}: {exc}")
+            wf_summary = {"folds": 0, "error": f"{type(exc).__name__}: {exc}"}
+
+        # ---- isotonic calibration, fit on VALIDATION only ----------------
+        calibrator = ProbabilityCalibrator()
+        if len(parts["val"]):
+            val_raw = best["pipeline"].predict_proba(parts["val"][cols])[:, 1]
+            calibrator.fit(val_raw, y["val"])
+        if calibrator.is_fitted:
+            cal_test = calibrator.transform(best["pipeline"].predict_proba(parts["test"][cols])[:, 1])
+            best["metrics"]["test_calibrated"] = evaluate(
+                y["test"], cal_test, groups["test"], rets["test"], dds["test"])
+            log(f"[train] calibrated on {calibrator.fitted_on} val rows: "
+                f"ECE {best['metrics']['test']['calibration_error']:.3f} -> "
+                f"{best['metrics']['test_calibrated']['calibration_error']:.3f}, "
+                f"Brier {best['metrics']['test']['brier']:.3f} -> "
+                f"{best['metrics']['test_calibrated']['brier']:.3f}")
+        else:
+            log("[train] calibration skipped: validation fold too small or single-class")
+        best["metrics"]["walk_forward"] = wf_summary
+
+
         registered = []
         for r in results:
             if settings.dry_run:
@@ -228,7 +286,8 @@ def main() -> int:
                 shadow = data.load_unmatured(settings)
                 if not shadow.empty:
                     sdf = features.prepare_frame(shadow)
-                    proba = r["pipeline"].predict_proba(sdf[cols])[:, 1]
+                    raw = r["pipeline"].predict_proba(sdf[cols])[:, 1]
+                    proba = calibrator.transform(raw)
                     preds = [{
                         "ticker": row.ticker,
                         "prediction_date": str(row.decision_date),
@@ -238,7 +297,9 @@ def main() -> int:
                         "training_example_id": row.example_id,
                     } for row, p in zip(sdf.itertuples(), proba)]
                     out = registry.log_predictions(settings, res["model_version_id"], payload["version"], preds)
-                    log(f"[train] shadow predictions logged: {out.get('inserted', 0)}")
+                    log(f"[train] shadow predictions logged: {out.get('inserted', 0)} "
+                        f"({'calibrated' if calibrator.is_fitted else 'raw'} probabilities)")
+
 
         if not settings.dry_run:
             registry.complete_job(
