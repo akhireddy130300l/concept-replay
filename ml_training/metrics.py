@@ -77,8 +77,10 @@ def expected_value(scores: np.ndarray, returns: np.ndarray, groups: np.ndarray,
 
 
 def evaluate(y: np.ndarray, proba: np.ndarray, groups: np.ndarray, returns, drawdowns, threshold: float = 0.5) -> dict:
-
+    y = np.asarray(y).astype(int)
+    proba = np.asarray(proba, dtype=float)
     pred = (proba >= threshold).astype(int)
+
     out: dict[str, float] = {}
     try:
         out["roc_auc"] = float(roc_auc_score(y, proba))
