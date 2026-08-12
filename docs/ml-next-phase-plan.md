@@ -24,12 +24,17 @@ Prerequisite: Cloud backend online + verified row counts in `swing_training_exam
 ## Phase B — Stronger tabular before deep learning
 
 1. Gradient boosting with monotonic constraints on features where direction is known
-   (e.g. higher analyst upside should not lower probability).
-2. Probability calibration (isotonic on the validation fold) — the email needs honest
-   probabilities, not just a ranking.
-3. Purged, embargoed walk-forward CV instead of a single split; report mean ± std.
-4. Cost-sensitive evaluation: expected value per trade using the deterministic
-   entry/target/stop from `computeTradingPlan()`, not accuracy.
+   (e.g. higher analyst upside should not lower probability). — *pending*
+2. **Done:** Probability calibration — isotonic fit on the validation fold only
+   (`ml_training/calibration.py`), applied to test metrics (`test_calibrated`) and to
+   shadow predictions. Ranking is preserved; Brier and ECE improve.
+3. **Done:** Purged, embargoed walk-forward CV (`ml_training/walkforward.py`) over the
+   train+val region, reported as mean ± std under `metrics.walk_forward`. The test split
+   is still read exactly once.
+4. **Done:** Cost-sensitive evaluation — `expected_value()` in `ml_training/metrics.py`
+   reports EV per trade, win rate, worst trade and downside mean on the top-3 picks per
+   decision date, net of a 0.15% round-trip friction assumption.
+
 
 ## Phase C — Sequence models (the actual deep-learning step)
 
