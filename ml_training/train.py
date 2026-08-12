@@ -286,7 +286,8 @@ def main() -> int:
                 shadow = data.load_unmatured(settings)
                 if not shadow.empty:
                     sdf = features.prepare_frame(shadow)
-                    proba = r["pipeline"].predict_proba(sdf[cols])[:, 1]
+                    raw = r["pipeline"].predict_proba(sdf[cols])[:, 1]
+                    proba = calibrator.transform(raw)
                     preds = [{
                         "ticker": row.ticker,
                         "prediction_date": str(row.decision_date),
@@ -296,7 +297,9 @@ def main() -> int:
                         "training_example_id": row.example_id,
                     } for row, p in zip(sdf.itertuples(), proba)]
                     out = registry.log_predictions(settings, res["model_version_id"], payload["version"], preds)
-                    log(f"[train] shadow predictions logged: {out.get('inserted', 0)}")
+                    log(f"[train] shadow predictions logged: {out.get('inserted', 0)} "
+                        f"({'calibrated' if calibrator.is_fitted else 'raw'} probabilities)")
+
 
         if not settings.dry_run:
             registry.complete_job(
