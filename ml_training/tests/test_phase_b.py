@@ -46,10 +46,11 @@ def test_calibrator_preserves_ranking_and_improves_calibration():
     cal = ProbabilityCalibrator().fit(proba, y)
     assert cal.is_fitted
     out = cal.transform(proba)
-    # Monotone map => ordering is unchanged.
-    assert np.array_equal(np.argsort(np.argsort(out)), np.argsort(np.argsort(proba))) or \
-        np.corrcoef(out, proba)[0, 1] > 0.9
+    # Isotonic is weakly monotone: it may flatten ties but never inverts order.
+    order = np.argsort(proba)
+    assert np.all(np.diff(out[order]) >= -1e-12)
     assert abs(out.mean() - y.mean()) < abs(proba.mean() - y.mean())
+
     assert out.min() >= 0.0 and out.max() <= 1.0
 
 
