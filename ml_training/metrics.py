@@ -47,9 +47,37 @@ def _return_stats(scores: np.ndarray, returns: np.ndarray, drawdowns: np.ndarray
     }
 
 
+def expected_value(scores: np.ndarray, returns: np.ndarray, groups: np.ndarray,
+                   k: int = 3, cost_pct: float = 0.15) -> dict:
+    """Cost-sensitive EV per trade for the top-k picks of each decision date.
+
+    `cost_pct` is round-trip friction (spread + slippage) in percent, subtracted
+    from every realised return. Accuracy is not the objective — money is.
+    """
+    per_trade: list[float] = []
+    for g in pd.unique(groups):
+        m = groups == g
+        s = scores[m]
+        if len(s) == 0:
+            continue
+        top = np.argsort(-s)[: min(k, len(s))]
+        per_trade.extend((np.asarray(returns[m], dtype=float)[top] - cost_pct).tolist())
+    r = pd.Series(per_trade, dtype="float64").dropna()
+    if not len(r):
+        return {"ev_per_trade": float("nan"), "ev_win_rate": float("nan"), "ev_trades": 0}
+    downside = r[r < 0]
+    return {
+        "ev_per_trade": float(r.mean()),
+        "ev_median": float(r.median()),
+        "ev_win_rate": float((r > 0).mean()),
+        "ev_worst": float(r.min()),
+        "ev_downside_mean": float(downside.mean()) if len(downside) else 0.0,
+        "ev_trades": int(len(r)),
+    }
+
+
 def evaluate(y: np.ndarray, proba: np.ndarray, groups: np.ndarray, returns, drawdowns, threshold: float = 0.5) -> dict:
-    y = np.asarray(y).astype(int)
-    proba = np.asarray(proba, dtype=float)
+
     pred = (proba >= threshold).astype(int)
     out: dict[str, float] = {}
     try:
