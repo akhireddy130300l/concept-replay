@@ -17,6 +17,9 @@ class Settings:
     embargo_days: int = 5
     train_frac: float = 0.60
     val_frac: float = 0.20
+    # Fraction of the validation region reserved for probability calibration.
+    # Calibration must never be fit on the observations used to select the model.
+    calib_frac: float = 0.35
     min_matured_rows: int = 400
     min_test_rows: int = 50
     trigger_source: str = "github_actions"
@@ -38,6 +41,7 @@ class Settings:
             functions_url=url,
             ml_training_key=key,
             dataset_version=os.environ.get("DATASET_VERSION", "dataset_v1"),
+            calib_frac=float(os.environ.get("CALIB_FRAC", 0.35)),
             purge_days=int(os.environ.get("PURGE_DAYS", 16)),
             embargo_days=int(os.environ.get("EMBARGO_DAYS", 5)),
             trigger_source=os.environ.get("TRIGGER_SOURCE", "github_actions"),
