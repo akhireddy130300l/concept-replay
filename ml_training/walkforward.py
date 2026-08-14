@@ -61,8 +61,24 @@ def walk_forward_windows(
 
 
 def summarize(fold_metrics: list[dict], keys: tuple[str, ...] = ("pr_auc", "roc_auc", "precision_at_3")) -> dict:
-    """Mean/std per metric across folds, ignoring non-finite values."""
-    out: dict[str, float | int] = {"folds": len(fold_metrics)}
+    """Mean/std per metric across folds, ignoring non-finite values.
+
+    IMPORTANT: the standard deviation here is descriptive spread across folds,
+    NOT an independent-sample confidence interval. Labels are forward-looking
+    over a 10-session horizon, so observations issued within the horizon of each
+    other overlap and are positively correlated; the same market move appears in
+    many rows. Naive std therefore understates true uncertainty. The output
+    carries `overlapping_labels` so downstream reports cannot quietly present it
+    as a statistical error bar. A time-block bootstrap over non-overlapping
+    date blocks is the defensible upgrade — proposed, deliberately not
+    implemented until it can be validated against the real dataset.
+    """
+    out: dict[str, float | int | bool | str] = {
+        "folds": len(fold_metrics),
+        "overlapping_labels": True,
+        "std_interpretation": "descriptive spread across folds; labels overlap, "
+                              "not an independent-sample confidence interval",
+    }
     for k in keys:
         vals = [float(m[k]) for m in fold_metrics if k in m and np.isfinite(m.get(k, np.nan))]
         out[f"{k}_mean"] = float(np.mean(vals)) if vals else float("nan")
