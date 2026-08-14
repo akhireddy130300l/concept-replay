@@ -23,7 +23,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from . import data, features, registry
+from . import data, features, integrity, registry
 from .calibration import ProbabilityCalibrator
 from .config import Settings
 from .metrics import evaluate
@@ -122,6 +122,12 @@ def main() -> int:
         log(f"[train] matured rows fetched: {len(df)}")
         if df.empty:
             raise RuntimeError("no matured training rows returned by export")
+        df, dup_report = integrity.enforce_uniqueness(df)
+        log(f"[train] duplicate audit: rows={dup_report['rows']} "
+            f"duplicate_keys={dup_report['duplicate_keys']} "
+            f"exact_duplicate_rows={dup_report['exact_duplicate_rows']} "
+            f"conflicting_keys={dup_report['conflicting_keys']} "
+            f"rows_after_dedup={dup_report.get('rows_after_dedup', dup_report['rows'])}")
         df = features.prepare_frame(df)
         df = df[df[features.TARGET].notna()].copy()
         df[features.TARGET] = df[features.TARGET].astype(int)
@@ -131,7 +137,8 @@ def main() -> int:
             raise RuntimeError(f"not enough matured rows ({len(df)} < {settings.min_matured_rows})")
 
         masks, windows = chronological_split(
-            df, settings.train_frac, settings.val_frac, settings.purge_days, settings.embargo_days)
+            df, settings.train_frac, settings.val_frac, settings.purge_days, settings.embargo_days,
+            calib_frac=settings.calib_frac)
         for split, m in masks.items():
             log(f"[train] {split}: rows={int(m.sum())} dates={len(windows[split])}")
         if int(masks["test"].sum()) < settings.min_test_rows:
@@ -145,14 +152,18 @@ def main() -> int:
         groups = {s: p[features.DATE_COL].to_numpy() for s, p in parts.items()}
         rets = {s: p["outcome_10_session"].to_numpy() for s, p in parts.items()}
         dds = {s: p["max_drawdown_pct"].to_numpy() for s, p in parts.items()}
+        # Deterministic tie-break key for every top-k computation.
+        ties = {s: (p["ticker"].astype(str).to_numpy() if "ticker" in p.columns else None)
+                for s, p in parts.items()}
 
         # ---- baselines -------------------------------------------------
         baselines = {
-            "always_positive": evaluate(y["test"], np.ones(len(y["test"])), groups["test"], rets["test"], dds["test"]),
+            "always_positive": evaluate(y["test"], np.ones(len(y["test"])), groups["test"], rets["test"],
+                                        dds["test"], tie_break=ties["test"]),
             "rule_engine": evaluate(
                 y["test"],
                 pd.to_numeric(parts["test"]["baseline_rule_score"], errors="coerce").fillna(0).clip(0, 10).to_numpy() / 10.0,
-                groups["test"], rets["test"], dds["test"]),
+                groups["test"], rets["test"], dds["test"], tie_break=ties["test"]),
         }
         prev = None if settings.dry_run else registry.previous_model(settings)
         if prev:
@@ -169,7 +180,8 @@ def main() -> int:
                 if len(parts[split]) == 0:
                     continue
                 proba = pipe.predict_proba(parts[split][cols])[:, 1]
-                metrics[split] = evaluate(y[split], proba, groups[split], rets[split], dds[split])
+                metrics[split] = evaluate(y[split], proba, groups[split], rets[split], dds[split],
+                                          tie_break=ties[split])
             log(f"[train] {name}: val pr_auc={metrics.get('val', {}).get('pr_auc', float('nan')):.3f} "
                 f"val p@3={metrics.get('val', {}).get('precision_at_3', float('nan')):.3f} | "
                 f"test pr_auc={metrics['test']['pr_auc']:.3f} (report only)")
@@ -217,7 +229,9 @@ def main() -> int:
                 p = fold_pipe.predict_proba(va_part[cols])[:, 1]
                 fold_metrics.append(evaluate(
                     yva, p, va_part[features.DATE_COL].to_numpy(),
-                    va_part["outcome_10_session"].to_numpy(), va_part["max_drawdown_pct"].to_numpy()))
+                    va_part["outcome_10_session"].to_numpy(), va_part["max_drawdown_pct"].to_numpy(),
+                    tie_break=(va_part["ticker"].astype(str).to_numpy()
+                               if "ticker" in va_part.columns else None)))
             if fold_metrics:
                 wf_summary = summarize(fold_metrics, keys=("pr_auc", "roc_auc", "precision_at_3", "ev_per_trade"))
                 log(f"[train] walk-forward ({wf_summary['folds']} folds): "
@@ -229,23 +243,33 @@ def main() -> int:
             log(f"[train] walk-forward failed (non-fatal): {type(exc).__name__}: {exc}")
             wf_summary = {"folds": 0, "error": f"{type(exc).__name__}: {exc}"}
 
-        # ---- isotonic calibration, fit on VALIDATION only ----------------
+        # ---- isotonic calibration, fit on the DEDICATED CALIBRATION slice -
+        # Never the selection-validation fold (that fold chose the model) and
+        # never the test fold. If the slice is too small we stay uncalibrated.
         calibrator = ProbabilityCalibrator()
-        if len(parts["val"]):
-            val_raw = best["pipeline"].predict_proba(parts["val"][cols])[:, 1]
-            calibrator.fit(val_raw, y["val"])
+        if len(parts["calib"]):
+            cal_raw = best["pipeline"].predict_proba(parts["calib"][cols])[:, 1]
+            calibrator.fit(cal_raw, y["calib"])
         if calibrator.is_fitted:
             cal_test = calibrator.transform(best["pipeline"].predict_proba(parts["test"][cols])[:, 1])
             best["metrics"]["test_calibrated"] = evaluate(
-                y["test"], cal_test, groups["test"], rets["test"], dds["test"])
-            log(f"[train] calibrated on {calibrator.fitted_on} val rows: "
+                y["test"], cal_test, groups["test"], rets["test"], dds["test"], tie_break=ties["test"])
+            log(f"[train] calibrated on {calibrator.fitted_on} dedicated calibration rows: "
                 f"ECE {best['metrics']['test']['calibration_error']:.3f} -> "
                 f"{best['metrics']['test_calibrated']['calibration_error']:.3f}, "
                 f"Brier {best['metrics']['test']['brier']:.3f} -> "
                 f"{best['metrics']['test_calibrated']['brier']:.3f}")
         else:
-            log("[train] calibration skipped: validation fold too small or single-class")
+            log("[train] calibration skipped: dedicated calibration slice too small or "
+                "single-class — reporting uncalibrated probabilities (selection fold is NOT reused)")
         best["metrics"]["walk_forward"] = wf_summary
+        best["metrics"]["data_integrity"] = dup_report
+        # Universe membership is current-day, not point-in-time: delisted and
+        # removed names are absent. Every historical evaluation carries this.
+        best["metrics"]["survivorship_bias_warning"] = True
+        for r in results:
+            r["metrics"].setdefault("data_integrity", dup_report)
+            r["metrics"].setdefault("survivorship_bias_warning", True)
 
 
         registered = []
@@ -276,7 +300,10 @@ def main() -> int:
                 "train_window": f"[{min(windows['train'])},{max(windows['train'])}]" if windows["train"] else None,
                 "test_window": f"[{min(windows['test'])},{max(windows['test'])}]" if windows["test"] else None,
                 "notes": f"automated run; purge={settings.purge_days}d embargo={settings.embargo_days}d; "
-                         f"chronological split by decision_date; model selected on VALIDATION only; candidate only",
+                         f"chronological split by decision_date; model selected on VALIDATION only; "
+                         f"calibration fit on a separate chronological slice; deterministic top-k "
+                         f"(ties broken by ticker); survivorship bias present (current universe); "
+                         f"candidate only",
             }
             res = registry.register_model(settings, payload)
             registered.append({"algorithm": r["name"], "model_version_id": res["model_version_id"]})
