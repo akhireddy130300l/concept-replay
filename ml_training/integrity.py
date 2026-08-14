@@ -25,6 +25,8 @@ class DuplicateRowsError(RuntimeError):
 
 def _key_frame(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
+    if "ticker" not in out.columns:
+        out["ticker"] = [f"__row_{i}" for i in range(len(out))]
     if "dataset_version" not in out.columns:
         out["dataset_version"] = "unknown"
     return out
