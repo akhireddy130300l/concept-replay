@@ -25,32 +25,60 @@ Prerequisite: Cloud backend online + verified row counts in `swing_training_exam
 
 1. Gradient boosting with monotonic constraints on features where direction is known
    (e.g. higher analyst upside should not lower probability). — *pending*
-2. **Done:** Probability calibration — isotonic fit on the validation fold only
-   (`ml_training/calibration.py`), applied to test metrics (`test_calibrated`) and to
-   shadow predictions. Ranking is preserved; Brier and ECE improve.
+2. **Done:** Probability calibration — isotonic regression fitted on a dedicated chronological
+   `calib` slice carved from the validation region (`ml_training/splits.py::carve_calibration`).
+   If the slice is too small or disjoint, probabilities remain uncalibrated. Calibrated scores
+   are applied to test metrics (`test_calibrated`) and to shadow predictions. Ranking is preserved
+   because isotonic regression is monotone.
 3. **Done:** Purged, embargoed walk-forward CV (`ml_training/walkforward.py`) over the
    train+val region, reported as mean ± std under `metrics.walk_forward`. The test split
-   is still read exactly once.
+   is still read exactly once. The ± std is descriptive only because label windows overlap
+   inside each fold.
 4. **Done:** Cost-sensitive evaluation — `expected_value()` in `ml_training/metrics.py`
    reports EV per trade, win rate, worst trade and downside mean on the top-3 picks per
    decision date, net of a 0.15% round-trip friction assumption.
+5. **Done:** Deterministic top-k ranking — ties broken by ticker symbol as a stable secondary
+   key (`ml_training/metrics.py::top_k_indices`).
+6. **Done:** Duplicate integrity — `ml_training/integrity.py` runs before training.
+   - Exact duplicates on `(ticker, decision_date, dataset_version)` are reported and collapsed.
+   - Conflicting duplicates (same key, different feature values) fail the training job.
+7. **Done:** Historical evaluations carry `survivorship_bias_warning: true` because the replay
+   universe was seeded from the current Russell 1000 membership.
 
+## Canonical progression after Phase B
+
+```text
+Phase B hardening
+  -> real historical walk-forward backtest  (first mandatory gate)
+  -> calibration + EV-after-cost validation vs deterministic baseline
+  -> GBDT / ranking model
+  -> volatility-normalised targets
+  -> sequence model
+  -> regime conditioning
+  -> live shadow evaluation
+  -> manual production promotion
+```
+
+Rules:
+- Do **not** implement sequence / deep-learning models merely because 5,000 outcomes are available.
+  They are justified only after the tabular/ranking baseline has plateaued on genuine out-of-sample
+  EV per trade and Precision@3.
+- Same chronological split machinery — never shuffle.
+- Ensemble with the tabular model rather than replacing it; a deep model gets a weight only
+  if it beats the boosted baseline on walk-forward validation PR-AUC **and** on EV per trade.
+- Export to ONNX for Deno inference; the Edge Function must never call Python at request time.
 
 ## Phase C — Sequence models (the actual deep-learning step)
 
-Only start once Phase B plateaus and there are ≥ 5,000 matured outcomes.
+Only start once Phase B has produced a real historical walk-forward backtest with calibrated
+probabilities and EV after costs, beating the deterministic baseline, and the tabular/ranking
+baseline has plateaued.
 
 | Model | Input | Why |
 | --- | --- | --- |
 | 1D-CNN / TCN | 60 days of OHLCV + volume z-scores | Learns shape patterns the hand-made indicators miss |
 | GRU / LSTM | Same window + regime channel | Captures ordering and momentum decay |
 | Small Transformer | Multi-ticker window with market-index channel | Cross-sectional context, relative strength |
-
-Rules:
-- Same chronological split machinery — never shuffle.
-- Ensemble with the tabular model rather than replacing it; deep model gets a weight only
-  if it beats the boosted baseline on walk-forward validation PR-AUC **and** on EV per trade.
-- Export to ONNX for Deno inference; the Edge Function must never call Python at request time.
 
 ## Phase D — Regime awareness
 
@@ -86,3 +114,5 @@ Gates for shadow → production:
 - No auto-promotion to production.
 - No change to the deterministic entry/target/stop math.
 - No LLM in the scoring path — Gemini/Exa stay in research and narration only.
+- No accuracy, profitability, calibration improvement, or superiority claim over the deterministic
+  rule engine until the real historical backtest has run against restored Cloud data.
