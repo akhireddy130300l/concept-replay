@@ -8,7 +8,7 @@ Lovable Cloud is paused, so **no production ML performance is claimed anywhere i
 
 ## 1. Test suite — actually run
 
-`pytest ml_training/tests -v` → **14 passed, 0 failed, 1.56s** (Python 3.13, scikit-learn/pandas/numpy).
+`pytest ml_training/tests -v` → **32 passed, 0 failed** (Python 3.13, scikit-learn/pandas/numpy).
 
 | Test | Result |
 | --- | --- |
@@ -16,6 +16,7 @@ Lovable Cloud is paused, so **no production ML performance is claimed anywhere i
 | walk_forward_validation_blocks_move_forward_in_time | PASS |
 | walk_forward_returns_nothing_when_history_is_too_short | PASS |
 | summarize_reports_mean_and_std | PASS |
+| summarize_flags_overlapping_labels | PASS |
 | calibrator_preserves_ranking_and_improves_calibration | PASS |
 | calibrator_is_a_noop_without_enough_data | PASS |
 | expected_value_subtracts_costs_and_counts_trades | PASS |
@@ -26,12 +27,51 @@ Lovable Cloud is paused, so **no production ML performance is claimed anywhere i
 | whole_decision_dates_stay_together | PASS |
 | leakage_guard_rejects_future_columns | PASS |
 | metrics_are_sane_on_perfect_scores | PASS |
+| clean_dataset_reports_no_duplicates | PASS |
+| exact_duplicates_are_reported_and_collapsed | PASS |
+| exact_duplicates_can_be_made_fatal | PASS |
+| conflicting_duplicates_fail_the_job | PASS |
+| conflicting_duplicates_are_never_silently_dropped | PASS |
+| same_ticker_different_dates_is_not_a_duplicate | PASS |
+| same_key_different_dataset_version_is_not_a_duplicate | PASS |
+| top_k_breaks_ties_by_secondary_key | PASS |
+| top_k_is_invariant_to_row_shuffling | PASS |
+| precision_at_k_is_invariant_to_row_order | PASS |
+| expected_value_is_invariant_to_row_order | PASS |
+| always_positive_baseline_is_deterministic_under_shuffle | PASS |
+| isotonic_collapsed_ties_still_rank_deterministically | PASS |
+| calibration_slice_is_disjoint_from_selection_validation | PASS |
+| calibration_slice_falls_back_to_empty_when_too_small | PASS |
+| chronological_split_exposes_a_calib_mask_ordered_in_time | PASS |
+| uncalibrated_fallback_leaves_scores_untouched | PASS |
 
 These prove the code obeys its own contracts. They prove **nothing** about predictive skill on real market data.
 
 ---
 
-## 2. Findings against the requested checklist
+## 2. Phase B hardening completed
+
+The following gaps from the previous audit have now been addressed in code:
+
+- **Duplicate protection:** Implemented in `ml_training/integrity.py`. Exact duplicates on
+  `(ticker, decision_date, dataset_version)` are reported and collapsed; conflicting duplicates
+  fail the training job.
+- **Deterministic ranking:** Implemented in `ml_training/metrics.py::top_k_indices`. Ties are
+  broken by ticker symbol, making precision@k invariant to row shuffling and tie density.
+- **Dedicated calibration split:** Implemented in `ml_training/splits.py::carve_calibration`.
+  A chronological `calib` slice is carved from the validation region, disjoint from model-selection
+  validation by at least `purge_days + embargo_days`. If the slice is too small, calibration no-ops
+  and probabilities remain uncalibrated.
+- **Isotonic tie handling:** `ProbabilityCalibrator` preserves ranking even when isotonic
+  regression collapses raw scores into ties; deterministic tie-breaking still applies.
+- **Survivorship warning:** Historical evaluations now carry `survivorship_bias_warning: true`
+  because the replay universe is seeded from the current Russell 1000 membership.
+- **Overlapping-label uncertainty caveat:** `walkforward.summarize()` flags that fold standard
+  deviation is descriptive only because label windows overlap inside each fold.
+
+---
+
+## 3. Findings against the requested checklist
 
 ### PASS — verified in code now
 
@@ -48,11 +88,11 @@ Validation blocks are contiguous and move strictly forward.
 - Model selection uses `_val_key` → validation PR-AUC then validation precision@3; `train.py` raises if
   validation is empty rather than silently falling back to test.
 - CV folds are cut from `masks["train"] | masks["val"]` only.
-- The calibrator is fitted on `parts["val"]`.
+- The calibrator is fitted on a dedicated chronological `calib` slice carved from validation.
 - Test is read exactly once per split loop for reporting, plus once for the calibrated report.
 
 **Isotonic calibration never sees test labels.** `ProbabilityCalibrator.fit` is called only with
-`(val_raw, y["val"])`. It no-ops below 100 rows or single-class, so it can't overfit a tiny fold.
+`(calib_raw, y["calib"])`. It no-ops below 100 rows or single-class, so it can't overfit a tiny fold.
 Isotonic is monotone, so ranking and precision@k are unchanged — it moves Brier/ECE only.
 
 **EV includes the 0.15% friction.** `metrics.expected_value(..., cost_pct=0.15)` subtracts 0.15 from
@@ -62,44 +102,42 @@ each top-k realised percentage return before averaging; the test asserts the exa
 by `decision_date` and rank only within that date's candidates — exactly how the engine picks. No
 cross-date or global ranking anywhere.
 
+**Deterministic ranking.** `metrics.top_k_indices` breaks ties by stable ticker symbol, so precision@k
+and EV are invariant to row shuffling and constant-score baselines.
+
 **Feature-time integrity (static contract).** `features.LEAKY_COLUMNS`, `BASELINE_COLUMNS` and
 `RULE_DECISION_COLUMNS` (incl. `gap_to_selected`, `near_miss`, `status_at_check`, `selection_blocker`)
 are asserted out of the matrix by `assert_no_leakage(cols)` before any fit. Preprocessing (median
 impute, scaler, one-hot) is fit inside the Pipeline on the training split only, so no scaler statistics
 bleed across the boundary.
 
+**Duplicate integrity.** `ml_training/integrity.enforce_uniqueness` runs before training and fails on
+conflicting `(ticker, decision_date, dataset_version)` keys.
+
 ### GAPS — real, currently unmitigated
 
-1. **Duplicate observations are not deduplicated.** Nothing in `train.py` enforces uniqueness on
-   `(ticker, decision_date, dataset_version)`. If the exporter or historical replay ever emitted a row
-   twice, the duplicate lands in the same split and inflates metrics. Needs a dedupe guard plus a
-   database-side uniqueness check once Cloud is back.
-2. **Survivorship bias is present by construction.** The replay universe was seeded from the *current*
+1. **Survivorship bias is present by construction.** The replay universe was seeded from the *current*
    Russell 1000 membership (`ml_universe_russell1000`, 503 tickers). Companies delisted or removed
    before today are absent, so historical backtests are biased upward. Cannot be fixed in Python — it
    needs point-in-time index membership, or an explicit caveat on every historical number.
-3. **Validation is used twice** — for model selection *and* for calibration fitting. Calibration is
-   monotone so it can't help selection, but the calibrated ECE reported for test is slightly optimistic.
-   Cleaner: an inner calibration slice, or nested CV.
-4. **Non-deterministic tie-breaks in ranking.** `np.argsort(-s)` breaks ties by array order. With
-   coarse probabilities (e.g. the `always_positive` baseline, all 1.0) precision@k depends on row order.
-   Affects baseline comparability, not the model's own ranking much.
-5. **`min_frequency=10` one-hot on categoricals** is fit per split; rare sectors collapse to
+2. **`min_frequency=10` one-hot on categoricals** is fit per split; rare sectors collapse to
    "infrequent" differently across folds. Not leakage, but a source of fold-to-fold variance.
-6. **Overlapping labels remain *inside* the training set.** Purging only protects the boundaries.
+3. **Overlapping labels remain *inside* the training set.** Purging only protects the boundaries.
    Rows within train still share overlapping 10-session windows, which understates true variance —
    standard for this design, worth noting when reading the ±std.
 
 ---
 
-## 3. What Phase B actually does, end to end
+## 4. What Phase B actually does, end to end
 
 ```text
 export-training-dataset (NDJSON, matured only)
   -> features.prepare_frame        dtype coercion; every contract column exists
   -> drop rows with null target; sort by decision_date
+  -> enforce_uniqueness            fail on conflicting (ticker, decision_date, dataset_version)
   -> chronological_split           60/20/20 by whole decision dates
        + purge 16d + embargo 5d at train|val and val|test boundaries
+       + carve chronological calib slice from validation when possible
   -> assert_no_leakage(cols)       57 inputs: 25 numeric, 25 boolean, 7 categorical
   -> baselines on TEST             always_positive, rule_engine (rule score/10), previous model
   -> for each estimator            LogisticRegression / BalancedRandomForest / LightGBM(or XGBoost)
@@ -108,8 +146,10 @@ export-training-dataset (NDJSON, matured only)
                                    return/drawdown of top-3, EV per trade net of 0.15%
   -> select best by VALIDATION PR-AUC (tie-break: validation precision@3)
   -> purged walk-forward CV        4 folds cut from train+val only -> mean ± std
-  -> ProbabilityCalibrator         isotonic, fit on VALIDATION only
-       -> apply to test scores     reported as metrics.test_calibrated
+       (std flagged as descriptive only because labels overlap inside folds)
+  -> ProbabilityCalibrator         isotonic, fit on dedicated CALIB slice only
+       -> no-op if calib slice is too small
+       -> apply to test scores      reported as metrics.test_calibrated
   -> register EVERY estimator as CANDIDATE (joblib+gzip+base64, ≤6MB)
        never auto-promoted; promotion stays a manual registry action
   -> shadow predictions            unmatured rows (last 15 decision dates)
@@ -123,11 +163,11 @@ recorded and compared later; it does not influence what a user sees.
 
 ---
 
-## 4. Verification status, honestly separated
+## 5. Verification status, honestly separated
 
 **Verifiable now (done above):** split chronology, purge/embargo arithmetic, leakage guard, feature
-contract, calibration fit source, EV cost arithmetic, per-date ranking, walk-forward fold construction,
-all 14 tests.
+contract, dedicated calibration split, deterministic ranking, duplicate integrity, EV cost arithmetic,
+per-date ranking, walk-forward fold construction, all 32 tests.
 
 **Requires the production database:** true row counts and matured/unmatured balance; duplicate check on
 `(ticker, decision_date)`; class balance drift over time; real PR-AUC / precision@3 / EV vs the rule
@@ -143,10 +183,25 @@ Until those run, no accuracy or profitability claim about this system is defensi
 
 ---
 
-## 5. Proposed Phase C — not implemented
+## 6. Proposed Phase C — not implemented
 
 Gate: **do not start Phase C until Phase B has produced a real historical walk-forward backtest with
-calibrated probabilities and EV after costs, beating the deterministic baseline.**
+calibrated probabilities and EV after costs, beating the deterministic baseline, and the tabular/ranking
+baseline has plateaued.**
+
+### Canonical progression
+
+```text
+Phase B hardening
+  -> real historical walk-forward backtest
+  -> calibration + EV-after-cost validation
+  -> GBDT / ranking model
+  -> volatility-normalised targets
+  -> sequence model
+  -> regime conditioning
+  -> live shadow evaluation
+  -> manual production promotion
+```
 
 ### C1 — Gradient-boosted ranker (LambdaRank / LGBMRanker)
 *Why:* the engine picks top-3 per day; a ranker optimises exactly that instead of pointwise probability.
