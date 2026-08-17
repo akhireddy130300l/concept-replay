@@ -24,6 +24,7 @@
 // Header: x-diag-key: <DIAG_KEY>
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { COST_LIMITS, capDays, capUniverse, canStartRun, clampReplayRequest, isHalted, nextDayIndex } from "../_shared/cost-guard.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -38,8 +39,8 @@ const EXA_API_KEY = Deno.env.get("EXA_API_KEY") ?? "";
 const PIPELINE_VERSION = "historical_replay_v2";
 const FEATURE_VERSION = "v1";
 const DATASET_VERSION = "dataset_v1";
-const MAX_CONSECUTIVE_ERRORS_DEFAULT = 3;
-const MAX_DAYS_PER_INVOCATION = 1;
+const MAX_CONSECUTIVE_ERRORS_DEFAULT = COST_LIMITS.maxConsecutiveErrors;
+const MAX_DAYS_PER_INVOCATION = COST_LIMITS.maxDaysPerInvocation;
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
@@ -663,10 +664,10 @@ Deno.serve(async (req) => {
   }
 
   if (dry_run) {
-    const days = tradingDaysInRange(start_date, end_date);
-    return new Response(JSON.stringify({ run_id: run.id, trading_days: days.length, first_day: days[0], last_day: days[days.length - 1] }), { headers: { ...CORS, "content-type": "application/json" } });
+    const days = capDays(tradingDaysInRange(start_date, end_date), config.max_trading_days).days;
+    return new Response(JSON.stringify({ run_id: run.id, cost_guard: { limits: COST_LIMITS, warnings }, trading_days: days.length, first_day: days[0], last_day: days[days.length - 1] }), { headers: { ...CORS, "content-type": "application/json" } });
   }
   // @ts-ignore EdgeRuntime is provided by Deno Deploy in Supabase Edge Functions.
   EdgeRuntime.waitUntil(runReplay(run.id, config));
-  return new Response(JSON.stringify({ run_id: run.id, status: "running" }), { headers: { ...CORS, "content-type": "application/json" } });
+  return new Response(JSON.stringify({ run_id: run.id, status: "running", cost_guard_warnings: warnings }), { headers: { ...CORS, "content-type": "application/json" } });
 });
