@@ -467,26 +467,38 @@ async function runReplay(runId: string, config: any) {
   try {
     logEvent("historical_run_started", { run_id: runId, config });
     const { data: universe } = await admin.from("ml_universe_russell1000").select("ticker");
-    const tickers = (universe ?? []).map((u: any) => u.ticker);
-    if (tickers.length === 0) {
+    const rawTickers = (universe ?? []).map((u: any) => u.ticker);
+    if (rawTickers.length === 0) {
       await touchRun(runId, { status: "failed", last_error: "empty_universe", completed_at: new Date().toISOString() });
       logEvent("historical_run_failed", { run_id: runId, reason: "empty_universe" });
       return;
     }
-    const days = tradingDaysInRange(config.start_date, config.end_date);
+    // COST GUARD: cap tickers scanned per invocation.
+    const { tickers, capped: universeCapped } = capUniverse(rawTickers);
+    if (universeCapped) {
+      logEvent("cost_guard_universe_capped", { run_id: runId, from: rawTickers.length, to: tickers.length });
+    }
+    // COST GUARD: cap the total trading days one run may cover.
+    const allDays = tradingDaysInRange(config.start_date, config.end_date);
+    const { days, capped: daysCapped } = capDays(allDays, Number(config.max_trading_days ?? COST_LIMITS.maxTradingDaysPerRun));
+    if (daysCapped) {
+      logEvent("cost_guard_days_capped", { run_id: runId, from: allDays.length, to: days.length });
+    }
     const { data: existing } = await admin
       .from("historical_training_runs")
       .select("current_replay_date,status,tickers_processed,examples_created,outcomes_created,failure_count,consecutive_error_count,processed_trading_days")
       .eq("id", runId)
       .maybeSingle();
-    if (!existing || ["cancelled", "completed", "failed"].includes(existing.status)) {
-      logEvent("historical_run_skipped", { run_id: runId, status: existing?.status ?? "missing" });
+    // COST GUARD: never resume work on a halted (paused/cancelled/completed/failed) run.
+    if (!existing || isHalted(existing.status)) {
+      logEvent("historical_run_skipped", { run_id: runId, status: existing?.status ?? "missing", reason: "halted_or_missing" });
       return;
     }
+    // Resumability: skip every day already committed — no recomputation.
     const resumeFrom = config.resume && existing?.current_replay_date ? existing.current_replay_date : null;
-    const startIdx = resumeFrom ? Math.max(0, days.findIndex((d) => d > resumeFrom)) : 0;
+    const startIdx = nextDayIndex(days, resumeFrom);
     const batchSize = Math.max(1, Math.min(MAX_DAYS_PER_INVOCATION, Number(config.batch_size ?? 1)));
-    const maxConsecutiveErrors = Math.max(1, Number(config.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT));
+    const maxConsecutiveErrors = Math.max(1, Math.min(COST_LIMITS.maxConsecutiveErrors, Number(config.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT)));
     const batchEndIdx = Math.min(days.length, startIdx + batchSize);
 
     let totalExamples = Number(existing.examples_created ?? 0);
