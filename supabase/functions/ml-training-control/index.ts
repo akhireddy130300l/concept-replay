@@ -1,6 +1,7 @@
 // Owner-only wrapper that lets the /ml-training UI start/monitor/cancel
 // historical-swing-trainer runs without exposing DIAG_KEY to the browser.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { COST_LIMITS, canStartRun, clampReplayRequest, isHalted } from "../_shared/cost-guard.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -14,7 +15,7 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const DIAG_KEY = Deno.env.get("DIAG_KEY") ?? "";
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
-const STALE_RUNNING_MINUTES = 30;
+const STALE_RUNNING_MINUTES = COST_LIMITS.staleRunMinutes;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "content-type": "application/json" } });
@@ -71,22 +72,27 @@ Deno.serve(async (req) => {
   if (action === "start" && req.method === "POST") {
     if (!DIAG_KEY) return json({ error: "DIAG_KEY not configured" }, 500);
     const body = await req.json().catch(() => ({}));
-    const start_date = body.start_date;
-    const end_date = body.end_date ?? new Date().toISOString().slice(0, 10);
-    const batch_size = Number(body.batch_size ?? 1);
-    const resume = body.resume ?? true;
-    const top_n = Number(body.top_n ?? 60);
-    if (!start_date) return json({ error: "start_date required" }, 400);
+    if (!body.start_date) return json({ error: "start_date required" }, 400);
 
-    // Prevent duplicate concurrent runs.
+    // COST GUARD: clamp workload knobs before anything is dispatched.
+    const { config, warnings } = clampReplayRequest({
+      start_date: body.start_date,
+      end_date: body.end_date ?? new Date().toISOString().slice(0, 10),
+      batch_size: body.batch_size,
+      top_n: body.top_n,
+      resume: body.resume,
+      max_consecutive_errors: body.max_consecutive_errors,
+      max_trading_days: body.max_trading_days,
+    });
+
+    // COST GUARD: one active (running OR paused) run at a time.
     const { data: active } = await admin
       .from("historical_training_runs")
-      .select("id")
-      .eq("status", "running")
+      .select("id,status")
+      .in("status", ["running", "paused"])
       .limit(1);
-    if (active && active.length > 0 && !body.force) {
-      return json({ error: "a run is already in progress", run_id: active[0].id }, 409);
-    }
+    const gate = canStartRun(active?.length ?? 0, body.force === true);
+    if (!gate.ok) return json({ error: gate.reason, run_id: active?.[0]?.id }, 409);
 
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/historical-swing-trainer`, {
       method: "POST",
@@ -95,11 +101,99 @@ Deno.serve(async (req) => {
         "x-diag-key": DIAG_KEY,
         Authorization: `Bearer ${SERVICE_KEY}`,
       },
-      body: JSON.stringify({ start_date, end_date, batch_size, resume, top_n }),
+      body: JSON.stringify({ ...config, force: body.force === true }),
     });
     const text = await resp.text();
     let data: any = null; try { data = JSON.parse(text); } catch { data = { raw: text }; }
-    return json({ ok: resp.ok, status: resp.status, ...data }, resp.ok ? 200 : 500);
+    return json({ ok: resp.ok, status: resp.status, cost_guard: { applied: config, warnings }, ...data }, resp.ok ? 200 : 500);
+  }
+
+  // COST GUARD: pause halts self-reinvocation without losing committed progress.
+  if (action === "pause" && req.method === "POST") {
+    const body = await req.json().catch(() => ({}));
+    if (!body.run_id) return json({ error: "run_id required" }, 400);
+    const { data: row } = await admin.from("historical_training_runs").select("id,status").eq("id", body.run_id).maybeSingle();
+    if (!row) return json({ error: "run not found" }, 404);
+    if (row.status !== "running") return json({ error: `only a running run can be paused (status: ${row.status})` }, 400);
+    await admin
+      .from("historical_training_runs")
+      .update({ status: "paused", last_error: null, heartbeat_at: new Date().toISOString() })
+      .eq("id", body.run_id)
+      .eq("status", "running");
+    console.log(`[ml-control] run ${body.run_id} paused by ${auth.userId}`);
+    return json({ ok: true, status: "paused" });
+  }
+
+  // Resume continues from the last committed day — no completed work is recomputed.
+  if (action === "resume" && req.method === "POST") {
+    if (!DIAG_KEY) return json({ error: "DIAG_KEY not configured" }, 500);
+    const body = await req.json().catch(() => ({}));
+    if (!body.run_id) return json({ error: "run_id required" }, 400);
+    const { data: row } = await admin
+      .from("historical_training_runs")
+      .select("id,status,start_date,end_date,config,current_replay_date")
+      .eq("id", body.run_id)
+      .maybeSingle();
+    if (!row) return json({ error: "run not found" }, 404);
+    if (row.status !== "paused") return json({ error: `only a paused run can be resumed (status: ${row.status})` }, 400);
+    const { data: otherActive } = await admin
+      .from("historical_training_runs")
+      .select("id")
+      .eq("status", "running")
+      .neq("id", body.run_id)
+      .limit(1);
+    if (otherActive && otherActive.length > 0) return json({ error: "another run is already running", run_id: otherActive[0].id }, 409);
+
+    const { config, warnings } = clampReplayRequest({
+      start_date: row.start_date,
+      end_date: row.end_date,
+      batch_size: (row.config as any)?.batch_size,
+      top_n: (row.config as any)?.top_n,
+      resume: true,
+      max_consecutive_errors: (row.config as any)?.max_consecutive_errors,
+      max_trading_days: (row.config as any)?.max_trading_days,
+    });
+    await admin
+      .from("historical_training_runs")
+      .update({ status: "running", consecutive_error_count: 0, heartbeat_at: new Date().toISOString() })
+      .eq("id", body.run_id);
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/historical-swing-trainer`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-diag-key": DIAG_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+      body: JSON.stringify({ ...config, run_id: body.run_id, resume: true }),
+    });
+    const text = await resp.text();
+    let data: any = null; try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    console.log(`[ml-control] run ${body.run_id} resumed from ${row.current_replay_date ?? "start"} by ${auth.userId}`);
+    return json({ ok: resp.ok, resumed_from: row.current_replay_date, cost_guard: { applied: config, warnings }, ...data }, resp.ok ? 200 : 500);
+  }
+
+  // Read-only view of the active safeguards + current workload state.
+  if (action === "cost_guard") {
+    const { data: activeRuns } = await admin
+      .from("historical_training_runs")
+      .select("id,status,current_replay_date,processed_trading_days,total_trading_days,consecutive_error_count,heartbeat_at")
+      .in("status", ["running", "paused"])
+      .order("started_at", { ascending: false });
+    const { count: runsLast24h } = await admin
+      .from("historical_training_runs")
+      .select("id", { count: "exact", head: true })
+      .gte("started_at", new Date(Date.now() - 86400000).toISOString());
+    return json({
+      limits: COST_LIMITS,
+      enforced: [
+        "single active replay run (running or paused)",
+        `max ${COST_LIMITS.maxTradingDaysPerRun} trading days per run`,
+        `${COST_LIMITS.maxDaysPerInvocation} trading day per invocation`,
+        `max ${COST_LIMITS.maxTickersPerInvocation} tickers scanned per invocation`,
+        `max top-N ${COST_LIMITS.maxTopN} deep analyses per day`,
+        `self-reinvocation stops when paused/cancelled or after ${COST_LIMITS.maxConsecutiveErrors} consecutive failures`,
+        `dashboard polling floor ${COST_LIMITS.minPollIntervalMs / 1000}s, suspended while tab hidden`,
+        `runs with no heartbeat for ${COST_LIMITS.staleRunMinutes}m are auto-failed`,
+      ],
+      active_runs: activeRuns ?? [],
+      runs_started_last_24h: runsLast24h ?? 0,
+    });
   }
 
   if (action === "cancel" && req.method === "POST") {
@@ -109,7 +203,7 @@ Deno.serve(async (req) => {
       .from("historical_training_runs")
       .update({ status: "cancelled", completed_at: new Date().toISOString() })
       .eq("id", body.run_id)
-      .eq("status", "running");
+      .in("status", ["running", "paused"]);
     return json({ ok: true });
   }
 

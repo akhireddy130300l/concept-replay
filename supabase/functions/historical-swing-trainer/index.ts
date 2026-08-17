@@ -24,6 +24,7 @@
 // Header: x-diag-key: <DIAG_KEY>
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { COST_LIMITS, capDays, capUniverse, canStartRun, clampReplayRequest, isHalted, nextDayIndex } from "../_shared/cost-guard.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -38,8 +39,8 @@ const EXA_API_KEY = Deno.env.get("EXA_API_KEY") ?? "";
 const PIPELINE_VERSION = "historical_replay_v2";
 const FEATURE_VERSION = "v1";
 const DATASET_VERSION = "dataset_v1";
-const MAX_CONSECUTIVE_ERRORS_DEFAULT = 3;
-const MAX_DAYS_PER_INVOCATION = 1;
+const MAX_CONSECUTIVE_ERRORS_DEFAULT = COST_LIMITS.maxConsecutiveErrors;
+const MAX_DAYS_PER_INVOCATION = COST_LIMITS.maxDaysPerInvocation;
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
@@ -467,26 +468,38 @@ async function runReplay(runId: string, config: any) {
   try {
     logEvent("historical_run_started", { run_id: runId, config });
     const { data: universe } = await admin.from("ml_universe_russell1000").select("ticker");
-    const tickers = (universe ?? []).map((u: any) => u.ticker);
-    if (tickers.length === 0) {
+    const rawTickers = (universe ?? []).map((u: any) => u.ticker);
+    if (rawTickers.length === 0) {
       await touchRun(runId, { status: "failed", last_error: "empty_universe", completed_at: new Date().toISOString() });
       logEvent("historical_run_failed", { run_id: runId, reason: "empty_universe" });
       return;
     }
-    const days = tradingDaysInRange(config.start_date, config.end_date);
+    // COST GUARD: cap tickers scanned per invocation.
+    const { tickers, capped: universeCapped } = capUniverse(rawTickers);
+    if (universeCapped) {
+      logEvent("cost_guard_universe_capped", { run_id: runId, from: rawTickers.length, to: tickers.length });
+    }
+    // COST GUARD: cap the total trading days one run may cover.
+    const allDays = tradingDaysInRange(config.start_date, config.end_date);
+    const { days, capped: daysCapped } = capDays(allDays, Number(config.max_trading_days ?? COST_LIMITS.maxTradingDaysPerRun));
+    if (daysCapped) {
+      logEvent("cost_guard_days_capped", { run_id: runId, from: allDays.length, to: days.length });
+    }
     const { data: existing } = await admin
       .from("historical_training_runs")
       .select("current_replay_date,status,tickers_processed,examples_created,outcomes_created,failure_count,consecutive_error_count,processed_trading_days")
       .eq("id", runId)
       .maybeSingle();
-    if (!existing || ["cancelled", "completed", "failed"].includes(existing.status)) {
-      logEvent("historical_run_skipped", { run_id: runId, status: existing?.status ?? "missing" });
+    // COST GUARD: never resume work on a halted (paused/cancelled/completed/failed) run.
+    if (!existing || isHalted(existing.status)) {
+      logEvent("historical_run_skipped", { run_id: runId, status: existing?.status ?? "missing", reason: "halted_or_missing" });
       return;
     }
+    // Resumability: skip every day already committed — no recomputation.
     const resumeFrom = config.resume && existing?.current_replay_date ? existing.current_replay_date : null;
-    const startIdx = resumeFrom ? Math.max(0, days.findIndex((d) => d > resumeFrom)) : 0;
+    const startIdx = nextDayIndex(days, resumeFrom);
     const batchSize = Math.max(1, Math.min(MAX_DAYS_PER_INVOCATION, Number(config.batch_size ?? 1)));
-    const maxConsecutiveErrors = Math.max(1, Number(config.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT));
+    const maxConsecutiveErrors = Math.max(1, Math.min(COST_LIMITS.maxConsecutiveErrors, Number(config.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT)));
     const batchEndIdx = Math.min(days.length, startIdx + batchSize);
 
     let totalExamples = Number(existing.examples_created ?? 0);
@@ -568,6 +581,23 @@ async function runReplay(runId: string, config: any) {
       return;
     }
 
+    // COST GUARD: re-read status right before self-reinvocation. If the run was
+    // paused/cancelled meanwhile, or the failure threshold was reached, stop the chain.
+    const { data: latest } = await admin
+      .from("historical_training_runs")
+      .select("status,consecutive_error_count")
+      .eq("id", runId)
+      .maybeSingle();
+    if (!latest || isHalted(latest.status)) {
+      logEvent("cost_guard_reinvoke_suppressed", { run_id: runId, status: latest?.status ?? "missing", reason: "run_halted" });
+      return;
+    }
+    if (Number(latest.consecutive_error_count ?? 0) >= maxConsecutiveErrors) {
+      await touchRun(runId, { status: "failed", last_error: "halted_by_cost_guard_consecutive_errors", completed_at: new Date().toISOString() });
+      logEvent("cost_guard_reinvoke_suppressed", { run_id: runId, reason: "consecutive_error_threshold" });
+      return;
+    }
+
     await touchRun(runId, {
       status: "running",
       last_processed_batch: { start_idx: startIdx, end_idx_exclusive: batchEndIdx, queued_next_at: new Date().toISOString(), next_replay_date: days[batchEndIdx] },
@@ -591,13 +621,34 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...CORS, "content-type": "application/json" } });
   }
   const body = await req.json().catch(() => ({}));
-  const { start_date, end_date, batch_size = 5, resume = true, universe = "russell1000", dry_run = false, top_n = 60, run_id = null } = body;
+  const { start_date, end_date, universe = "russell1000", dry_run = false, run_id = null } = body;
   if (!start_date || !end_date) {
     return new Response(JSON.stringify({ error: "start_date and end_date required" }), { status: 400, headers: { ...CORS, "content-type": "application/json" } });
   }
-  const config = { start_date, end_date, batch_size, resume, universe, top_n, max_consecutive_errors: body.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT };
+  // COST GUARD: clamp every caller-supplied workload knob.
+  const { config: clamped, warnings } = clampReplayRequest({
+    start_date, end_date,
+    batch_size: body.batch_size,
+    top_n: body.top_n,
+    resume: body.resume,
+    max_consecutive_errors: body.max_consecutive_errors,
+    max_trading_days: body.max_trading_days,
+  });
+  if (warnings.length) logEvent("cost_guard_request_clamped", { warnings, run_id });
+  const config = { ...clamped, universe };
   let run = run_id ? { id: run_id } : null;
   if (!run) {
+    // COST GUARD: single active replay run at a time (running or paused).
+    const { data: active } = await admin
+      .from("historical_training_runs")
+      .select("id,status")
+      .in("status", ["running", "paused"])
+      .limit(1);
+    const gate = canStartRun(active?.length ?? 0, body.force === true);
+    if (!gate.ok) {
+      logEvent("cost_guard_start_blocked", { reason: gate.reason, active_run_id: active?.[0]?.id });
+      return new Response(JSON.stringify({ error: gate.reason, run_id: active?.[0]?.id }), { status: 409, headers: { ...CORS, "content-type": "application/json" } });
+    }
     const inserted = await admin.from("historical_training_runs").insert({
       start_date,
       end_date,
@@ -613,10 +664,10 @@ Deno.serve(async (req) => {
   }
 
   if (dry_run) {
-    const days = tradingDaysInRange(start_date, end_date);
-    return new Response(JSON.stringify({ run_id: run.id, trading_days: days.length, first_day: days[0], last_day: days[days.length - 1] }), { headers: { ...CORS, "content-type": "application/json" } });
+    const days = capDays(tradingDaysInRange(start_date, end_date), config.max_trading_days).days;
+    return new Response(JSON.stringify({ run_id: run.id, cost_guard: { limits: COST_LIMITS, warnings }, trading_days: days.length, first_day: days[0], last_day: days[days.length - 1] }), { headers: { ...CORS, "content-type": "application/json" } });
   }
   // @ts-ignore EdgeRuntime is provided by Deno Deploy in Supabase Edge Functions.
   EdgeRuntime.waitUntil(runReplay(run.id, config));
-  return new Response(JSON.stringify({ run_id: run.id, status: "running" }), { headers: { ...CORS, "content-type": "application/json" } });
+  return new Response(JSON.stringify({ run_id: run.id, status: "running", cost_guard_warnings: warnings }), { headers: { ...CORS, "content-type": "application/json" } });
 });
