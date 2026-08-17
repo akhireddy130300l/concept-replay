@@ -580,6 +580,23 @@ async function runReplay(runId: string, config: any) {
       return;
     }
 
+    // COST GUARD: re-read status right before self-reinvocation. If the run was
+    // paused/cancelled meanwhile, or the failure threshold was reached, stop the chain.
+    const { data: latest } = await admin
+      .from("historical_training_runs")
+      .select("status,consecutive_error_count")
+      .eq("id", runId)
+      .maybeSingle();
+    if (!latest || isHalted(latest.status)) {
+      logEvent("cost_guard_reinvoke_suppressed", { run_id: runId, status: latest?.status ?? "missing", reason: "run_halted" });
+      return;
+    }
+    if (Number(latest.consecutive_error_count ?? 0) >= maxConsecutiveErrors) {
+      await touchRun(runId, { status: "failed", last_error: "halted_by_cost_guard_consecutive_errors", completed_at: new Date().toISOString() });
+      logEvent("cost_guard_reinvoke_suppressed", { run_id: runId, reason: "consecutive_error_threshold" });
+      return;
+    }
+
     await touchRun(runId, {
       status: "running",
       last_processed_batch: { start_idx: startIdx, end_idx_exclusive: batchEndIdx, queued_next_at: new Date().toISOString(), next_replay_date: days[batchEndIdx] },
