@@ -69,7 +69,7 @@ export function clampReplayRequest(req: ReplayRequest): ClampResult {
 }
 
 /** Trim the universe to the per-invocation ticker ceiling (deterministic). */
-export function capUniverse(tickers: string[], max = COST_LIMITS.maxTickersPerInvocation): { tickers: string[]; capped: boolean } {
+export function capUniverse(tickers: string[], max: number = COST_LIMITS.maxTickersPerInvocation): { tickers: string[]; capped: boolean } {
   const sorted = [...tickers].sort();
   if (sorted.length <= max) return { tickers: sorted, capped: false };
   return { tickers: sorted.slice(0, max), capped: true };
@@ -99,4 +99,10 @@ export const HALTED_STATUSES = ["paused", ...TERMINAL_STATUSES] as const;
 
 export function isHalted(status: string | null | undefined): boolean {
   return !!status && (HALTED_STATUSES as readonly string[]).includes(status);
+}
+
+/** Dashboard polling policy: never faster than the guard floor, never while hidden. */
+export function pollIntervalFor(visible: boolean, requestedMs: number = COST_LIMITS.minPollIntervalMs): number | null {
+  if (!visible) return null;
+  return Math.max(COST_LIMITS.minPollIntervalMs, Math.floor(requestedMs));
 }

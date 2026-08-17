@@ -64,7 +64,7 @@ export function clampReplayRequest(req: ReplayRequest): { config: ClampedReplayC
   };
 }
 
-export function capUniverse(tickers: string[], max = COST_LIMITS.maxTickersPerInvocation) {
+export function capUniverse(tickers: string[], max: number = COST_LIMITS.maxTickersPerInvocation) {
   const sorted = [...tickers].sort();
   if (sorted.length <= max) return { tickers: sorted, capped: false };
   return { tickers: sorted.slice(0, max), capped: true };
@@ -94,7 +94,7 @@ export function isHalted(status: string | null | undefined): boolean {
 }
 
 /** Dashboard polling policy: never faster than the guard floor, never while hidden. */
-export function pollIntervalFor(visible: boolean, requestedMs = COST_LIMITS.minPollIntervalMs): number | null {
+export function pollIntervalFor(visible: boolean, requestedMs: number = COST_LIMITS.minPollIntervalMs): number | null {
   if (!visible) return null;
   return Math.max(COST_LIMITS.minPollIntervalMs, Math.floor(requestedMs));
 }
