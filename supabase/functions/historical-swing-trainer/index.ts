@@ -620,13 +620,34 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...CORS, "content-type": "application/json" } });
   }
   const body = await req.json().catch(() => ({}));
-  const { start_date, end_date, batch_size = 5, resume = true, universe = "russell1000", dry_run = false, top_n = 60, run_id = null } = body;
+  const { start_date, end_date, universe = "russell1000", dry_run = false, run_id = null } = body;
   if (!start_date || !end_date) {
     return new Response(JSON.stringify({ error: "start_date and end_date required" }), { status: 400, headers: { ...CORS, "content-type": "application/json" } });
   }
-  const config = { start_date, end_date, batch_size, resume, universe, top_n, max_consecutive_errors: body.max_consecutive_errors ?? MAX_CONSECUTIVE_ERRORS_DEFAULT };
+  // COST GUARD: clamp every caller-supplied workload knob.
+  const { config: clamped, warnings } = clampReplayRequest({
+    start_date, end_date,
+    batch_size: body.batch_size,
+    top_n: body.top_n,
+    resume: body.resume,
+    max_consecutive_errors: body.max_consecutive_errors,
+    max_trading_days: body.max_trading_days,
+  });
+  if (warnings.length) logEvent("cost_guard_request_clamped", { warnings, run_id });
+  const config = { ...clamped, universe };
   let run = run_id ? { id: run_id } : null;
   if (!run) {
+    // COST GUARD: single active replay run at a time (running or paused).
+    const { data: active } = await admin
+      .from("historical_training_runs")
+      .select("id,status")
+      .in("status", ["running", "paused"])
+      .limit(1);
+    const gate = canStartRun(active?.length ?? 0, body.force === true);
+    if (!gate.ok) {
+      logEvent("cost_guard_start_blocked", { reason: gate.reason, active_run_id: active?.[0]?.id });
+      return new Response(JSON.stringify({ error: gate.reason, run_id: active?.[0]?.id }), { status: 409, headers: { ...CORS, "content-type": "application/json" } });
+    }
     const inserted = await admin.from("historical_training_runs").insert({
       start_date,
       end_date,
