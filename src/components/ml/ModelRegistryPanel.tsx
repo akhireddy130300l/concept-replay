@@ -30,7 +30,14 @@ function num(v: unknown, digits = 3) {
   return Number.isFinite(n) ? n.toFixed(digits) : "—";
 }
 
-export default function ModelRegistryPanel() {
+type Props = {
+  /** Bumped by the parent dashboard on each shared refresh cycle. */
+  refreshToken?: number;
+  /** Ask the parent to refresh everything (single shared backend cycle). */
+  onRefresh?: () => void;
+};
+
+export default function ModelRegistryPanel({ refreshToken = 0, onRefresh }: Props) {
   const [versions, setVersions] = useState<Row[]>([]);
   const [jobs, setJobs] = useState<Row[]>([]);
   const [promotions, setPromotions] = useState<Row[]>([]);
@@ -49,11 +56,11 @@ export default function ModelRegistryPanel() {
     setShadowCount(Number(data?.shadow_prediction_count ?? 0));
   }, []);
 
+  // COST GUARD: no independent timer here. The parent dashboard owns one
+  // visibility-aware 60s cycle and bumps refreshToken; this panel just follows.
   useEffect(() => {
     load();
-    const t = setInterval(load, 15000);
-    return () => clearInterval(t);
-  }, [load]);
+  }, [load, refreshToken]);
 
   async function act(path: string, body: Row, okMsg: string) {
     setBusy(JSON.stringify(body));
@@ -66,6 +73,7 @@ export default function ModelRegistryPanel() {
       if (data?.error) throw new Error(data.error);
       toast({ title: okMsg });
       load();
+      onRefresh?.();
     } catch (e: any) {
       toast({ title: "Action failed", description: e?.message ?? String(e), variant: "destructive" });
     } finally {
@@ -80,6 +88,8 @@ export default function ModelRegistryPanel() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <CardTitle>Automated Training Runs</CardTitle>
+          <div className="flex gap-2">
+          <Button size="sm" variant="ghost" onClick={() => (onRefresh ? onRefresh() : load())}>Refresh</Button>
           <Button
             size="sm"
             variant="outline"
@@ -88,6 +98,7 @@ export default function ModelRegistryPanel() {
           >
             Trigger training run
           </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           {jobs.length === 0 ? (
