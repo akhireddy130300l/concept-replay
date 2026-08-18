@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import ModelRegistryPanel from "@/components/ml/ModelRegistryPanel";
+import { useVisibilityPoll } from "@/hooks/use-visibility-poll";
+import { COST_LIMITS } from "@/lib/cloudCostGuard";
 
 type Row = Record<string, any>;
 
@@ -27,16 +29,21 @@ export default function MLTraining() {
   const [batchSize, setBatchSize] = useState(1);
   const [topN, setTopN] = useState(60);
   const [starting, setStarting] = useState(false);
+  const [busyRun, setBusyRun] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  // Bumped on every poll/refresh so child panels reuse this cycle instead of
+  // running their own independent timers against the same backend.
+  const [refreshToken, setRefreshToken] = useState(0);
 
-  async function loadAll() {
+  const loadAll = useCallback(async function loadAll() {
     const [{ data: dr }] = await Promise.all([
       supabase.from("ml_data_drift").select("*").order("measured_at", { ascending: false }).limit(10),
     ]);
     setExamples([]);
     setDrift(dr ?? []);
-  }
+  }, []);
 
-  async function loadRuns() {
+  const loadRuns = useCallback(async function loadRuns() {
     try {
       const { data, error } = await supabase.functions.invoke("ml-training-control?action=status", { method: "GET" as any });
       if (error) throw error;
@@ -60,16 +67,20 @@ export default function MLTraining() {
       setLoadError(null);
     } catch (e: any) {
       setLoadError(e?.message ?? String(e));
+    } finally {
+      setLastLoadedAt(new Date());
     }
-  }
-
-
-  useEffect(() => {
-    loadAll();
-    loadRuns();
-    const t = setInterval(() => { loadRuns(); loadAll(); }, 5000);
-    return () => clearInterval(t);
   }, []);
+
+  // COST GUARD: one shared refresh cycle for this page and its child panels.
+  const refreshAll = useCallback(() => {
+    loadRuns();
+    loadAll();
+    setRefreshToken((n) => n + 1);
+  }, [loadRuns, loadAll]);
+
+  // 60s floor, and no polling at all while the tab is hidden.
+  const tabVisible = useVisibilityPoll(refreshAll, COST_LIMITS.minPollIntervalMs);
 
   async function startReplay() {
     setStarting(true);
@@ -81,7 +92,7 @@ export default function MLTraining() {
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       toast({ title: "Historical replay started", description: `${startDate} → ${endDate}` });
-      loadRuns();
+      refreshAll();
     } catch (e: any) {
       toast({ title: "Failed to start replay", description: e.message ?? String(e), variant: "destructive" });
     } finally {
@@ -89,14 +100,33 @@ export default function MLTraining() {
     }
   }
 
-  async function cancelRun(runId: string) {
-    await supabase.functions.invoke("ml-training-control?action=cancel", { method: "POST" as any, body: { run_id: runId } });
-    loadRuns();
+  async function runAction(action: "pause" | "resume" | "cancel", runId: string, okMsg: string) {
+    setBusyRun(true);
+    try {
+      const { data, error } = await supabase.functions.invoke(`ml-training-control?action=${action}`, {
+        method: "POST" as any,
+        body: { run_id: runId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+      toast({ title: okMsg, description: data?.resumed_from ? `Continuing after ${data.resumed_from}` : undefined });
+    } catch (e: any) {
+      toast({ title: `Failed to ${action} run`, description: e?.message ?? String(e), variant: "destructive" });
+    } finally {
+      setBusyRun(false);
+      refreshAll();
+    }
+  }
+
+  function cancelRun(runId: string) {
+    if (!window.confirm("Cancel this replay run? Committed days are kept, but the run cannot be resumed afterwards.")) return;
+    runAction("cancel", runId, "Run cancelled");
   }
 
   const readinessPct = Math.min(100, Math.round((stats.completed10 / 1000) * 100));
   const readinessLabel = readinessPct < 20 ? "Collecting data" : readinessPct < 60 ? "Good" : readinessPct < 90 ? "Excellent" : "Ready for first ML model";
-  const activeRun = runs.find((r) => r.status === "running");
+  const activeRun = runs.find((r) => r.status === "running" || r.status === "paused");
+  const isPaused = activeRun?.status === "paused";
   const statsUnavailable = !!loadError && stats.total === 0;
 
 
@@ -107,6 +137,15 @@ export default function MLTraining() {
       <header>
         <h1 className="text-2xl font-semibold">ML Training Data</h1>
         <p className="text-sm text-muted-foreground">Foundation dashboard — collecting labeled examples. No model deployed yet.</p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Button size="sm" variant="outline" onClick={refreshAll}>Refresh</Button>
+          <span className="text-xs text-muted-foreground">
+            {lastLoadedAt ? `Updated ${lastLoadedAt.toLocaleTimeString()}` : "Not loaded yet"} ·{" "}
+            {tabVisible
+              ? `auto-refresh every ${Math.round(COST_LIMITS.minPollIntervalMs / 1000)}s`
+              : "auto-refresh paused (tab hidden)"}
+          </span>
+        </div>
       </header>
 
       {loadError && (
@@ -115,7 +154,7 @@ export default function MLTraining() {
             <div className="text-sm font-medium text-destructive">Unable to load ML training data</div>
             <div className="text-xs text-muted-foreground mt-1 break-words">{loadError}</div>
             <div className="text-xs text-muted-foreground mt-1">Counts below may be stale or unavailable — they are not real zeros.</div>
-            <Button className="mt-3" size="sm" variant="outline" onClick={() => { loadRuns(); loadAll(); }}>Retry</Button>
+            <Button className="mt-3" size="sm" variant="outline" onClick={refreshAll}>Retry</Button>
           </CardContent>
         </Card>
       )}
@@ -135,10 +174,29 @@ export default function MLTraining() {
             <Button onClick={startReplay} disabled={starting || !!activeRun}>
               {activeRun ? "Run in progress…" : starting ? "Starting…" : "Start Historical Replay"}
             </Button>
-            {activeRun && <Button variant="destructive" onClick={() => cancelRun(activeRun.id)}>Cancel</Button>}
+            {activeRun && (
+              <Button
+                variant="outline"
+                disabled={busyRun || isPaused}
+                onClick={() => runAction("pause", activeRun.id, "Run paused")}
+              >
+                Pause
+              </Button>
+            )}
+            {activeRun && (
+              <Button
+                variant="outline"
+                disabled={busyRun || !isPaused}
+                onClick={() => runAction("resume", activeRun.id, "Run resumed")}
+              >
+                Resume
+              </Button>
+            )}
+            {activeRun && <Button variant="destructive" disabled={busyRun} onClick={() => cancelRun(activeRun.id)}>Cancel</Button>}
           </div>
           {activeRun && (
             <div className="text-sm border rounded p-3 bg-muted/30 space-y-1">
+              <div><b>Status:</b> {activeRun.status}{isPaused ? " — resume continues from the last committed day" : ""}</div>
               <div><b>Current day:</b> {activeRun.current_replay_date ?? "—"}</div>
               <div><b>Examples created:</b> {activeRun.examples_created ?? 0}</div>
               <div><b>Outcomes created:</b> {activeRun.outcomes_created ?? 0}</div>
@@ -227,7 +285,7 @@ export default function MLTraining() {
         </CardContent>
       </Card>
 
-      <ModelRegistryPanel />
+      <ModelRegistryPanel refreshToken={refreshToken} onRefresh={refreshAll} />
 
       <Card>
         <CardHeader><CardTitle>Drift Alerts</CardTitle></CardHeader>
