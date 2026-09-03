@@ -23,7 +23,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from . import data, features, integrity, registry
+from . import data, features, incremental, integrity, registry
 from .calibration import ProbabilityCalibrator
 from .config import Settings
 from .metrics import evaluate
@@ -128,6 +128,27 @@ def main() -> int:
             f"exact_duplicate_rows={dup_report['exact_duplicate_rows']} "
             f"conflicting_keys={dup_report['conflicting_keys']} "
             f"rows_after_dedup={dup_report.get('rows_after_dedup', dup_report['rows'])}")
+        # ---- incremental gate: skip runs with too few new matured labels ---
+        prev = None if settings.dry_run else registry.previous_model(settings)
+        snapshot = incremental.snapshot_from_frame(df, settings.dataset_version, settings.label_horizon)
+        decision = incremental.decide(
+            snapshot,
+            incremental.extract_previous_snapshot(prev),
+            min_new_matured_rows=settings.min_new_matured_rows,
+            force=settings.force_train,
+        )
+        log(f"[train] incremental gate: {decision.reason}")
+        if not decision.should_train:
+            if job_id and not settings.dry_run:
+                registry.complete_job(
+                    settings, job_id, status="skipped",
+                    total_rows=int(len(df)), matured_rows=int(len(df)),
+                    notes=decision.reason, logs="\n".join(logs)[-20000:],
+                    github_run_url=settings.github_run_url,
+                )
+            print(json.dumps({"status": "skipped", "incremental": decision.to_dict()}, indent=2))
+            return 0
+
         df = features.prepare_frame(df)
         df = df[df[features.TARGET].notna()].copy()
         df[features.TARGET] = df[features.TARGET].astype(int)
@@ -165,7 +186,6 @@ def main() -> int:
                 pd.to_numeric(parts["test"]["baseline_rule_score"], errors="coerce").fillna(0).clip(0, 10).to_numpy() / 10.0,
                 groups["test"], rets["test"], dds["test"], tie_break=ties["test"]),
         }
-        prev = None if settings.dry_run else registry.previous_model(settings)
         if prev:
             baselines["previous_model"] = (prev.get("metrics") or {}).get("test", {})
         log(f"[train] baseline rule_engine precision@3={baselines['rule_engine']['precision_at_3']:.3f}")
@@ -295,6 +315,7 @@ def main() -> int:
                 },
                 "artifact": encode_artifact(r["pipeline"]),
                 "metrics": r["metrics"],
+                "data_snapshot": snapshot.to_dict(),
                 "baseline_comparison": baselines,
                 "feature_importance": feature_importance(r["name"], r["pipeline"]),
                 "train_window": f"[{min(windows['train'])},{max(windows['train'])}]" if windows["train"] else None,
