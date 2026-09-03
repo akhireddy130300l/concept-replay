@@ -22,6 +22,8 @@ class Settings:
     calib_frac: float = 0.35
     min_matured_rows: int = 400
     min_test_rows: int = 50
+    min_new_matured_rows: int = 250
+    force_train: bool = False
     trigger_source: str = "github_actions"
     github_run_url: str | None = None
     dry_run: bool = False
@@ -44,6 +46,8 @@ class Settings:
             calib_frac=float(os.environ.get("CALIB_FRAC", 0.35)),
             purge_days=int(os.environ.get("PURGE_DAYS", 16)),
             embargo_days=int(os.environ.get("EMBARGO_DAYS", 5)),
+            min_new_matured_rows=int(os.environ.get("MIN_NEW_MATURED_ROWS", 250)),
+            force_train=os.environ.get("FORCE_TRAIN", "").lower() == "true",
             trigger_source=os.environ.get("TRIGGER_SOURCE", "github_actions"),
             github_run_url=run_url,
             dry_run=os.environ.get("DRY_RUN", "").lower() == "true",
