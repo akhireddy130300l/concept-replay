@@ -171,6 +171,39 @@ export type Database = {
         }
         Relationships: []
       }
+      historical_replay_chunk_scores: {
+        Row: {
+          chunk_index: number
+          created_at: string
+          id: string
+          metrics: Json
+          replay_date: string
+          run_id: string
+          score: number
+          ticker: string
+        }
+        Insert: {
+          chunk_index: number
+          created_at?: string
+          id?: string
+          metrics?: Json
+          replay_date: string
+          run_id: string
+          score: number
+          ticker: string
+        }
+        Update: {
+          chunk_index?: number
+          created_at?: string
+          id?: string
+          metrics?: Json
+          replay_date?: string
+          run_id?: string
+          score?: number
+          ticker?: string
+        }
+        Relationships: []
+      }
       historical_replay_day_logs: {
         Row: {
           created_at: string
