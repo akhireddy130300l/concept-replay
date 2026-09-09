@@ -564,7 +564,7 @@ async function finalizeDay(runId: string, day: string, universeCount: number, to
   const durationMs = Date.now() - dayStarted;
   await upsertDayLog(runId, day, {
     status: "completed",
-    universe_count: universe.length,
+    universe_count: universeCount,
     scored_count: scored.length,
     selected_count: selected.length,
     examples_created: examplesCreated,
@@ -574,10 +574,27 @@ async function finalizeDay(runId: string, day: string, universeCount: number, to
     data_quality_events: dataQualityEvents,
     finished_at: finishedAt,
     duration_ms: durationMs,
-    metadata: { market_regime_label: marketRegimeLabel, pipeline_version: PIPELINE_VERSION },
+    metadata: { market_regime_label: marketRegimeLabel, pipeline_version: PIPELINE_VERSION, phase: "completed", universe_count: universeCount },
   });
+  // Intermediate chunk scores are scratch state; drop them once the day is done.
+  await admin.from("historical_replay_chunk_scores").delete().eq("run_id", runId).eq("replay_date", day);
   logEvent("historical_day_completed", { run_id: runId, replay_date: day, examples_created: examplesCreated, outcomes_created: outcomesCreated, tickers_processed: selected.length, duration_ms: durationMs, data_quality_events: dataQualityEvents });
   return { examplesCreated, outcomesCreated, tickersProcessed: selected.length, scoredCount: scored.length, selectedCount: selected.length, yahooFailures, dataQualityEvents };
+}
+
+/**
+ * Perform ONE unit of work for `day`: the next unfinished scan chunk, or the
+ * finalization once every chunk is persisted. Returns whether the day is done.
+ */
+async function processDayStep(runId: string, day: string, universe: string[], topN: number) {
+  const chunks = chunkUniverse(universe);
+  const done = await completedChunkCount(runId, day);
+  if (done < chunks.length) {
+    const r = await scanChunk(runId, day, chunks[done], done, chunks.length, universe.length, topN);
+    return { dayComplete: false, chunkIndex: done, chunksTotal: chunks.length, ...r };
+  }
+  const result = await finalizeDay(runId, day, universe.length, topN);
+  return { dayComplete: true, chunksTotal: chunks.length, ...result };
 }
 
 async function runReplay(runId: string, config: any) {
