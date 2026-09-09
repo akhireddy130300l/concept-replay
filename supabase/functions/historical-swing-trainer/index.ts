@@ -190,86 +190,177 @@ function marketRegimeFor(day: string, scored: { twentyDayPct: number; volumeRati
   };
 }
 
-async function processDay(runId: string, day: string, universe: string[], topN: number) {
-  const dayStarted = Date.now();
-  logEvent("historical_day_started", { run_id: runId, replay_date: day, universe_count: universe.length, top_n: topN });
-  await touchRun(runId, { current_replay_date: day });
-  await upsertDayLog(runId, day, {
-    status: "started",
-    universe_count: universe.length,
-    started_at: new Date().toISOString(),
-    metadata: { top_n: topN, pipeline_version: PIPELINE_VERSION },
-  });
-  // Fetch bars [day-60, day+45] for every universe ticker with concurrency 3.
-  const from = iso(addDays(new Date(day + "T00:00:00Z"), -70));
-  const to = iso(addDays(new Date(day + "T00:00:00Z"), 55));
+// ---------------------------------------------------------------------------
+// Chunked day processing.
+//
+// COST GUARD (hard rule): ONE Edge Function invocation performs exactly ONE
+// unit of work — either a single scan chunk of at most
+// COST_LIMITS.maxTickersPerInvocation tickers, or the day's finalization
+// (which touches at most top_n <= 60 tickers). Intermediate per-ticker scores
+// are persisted in historical_replay_chunk_scores, so a crash after chunk 2 of
+// 3 resumes at chunk 3 instead of recomputing the trading day.
+// ---------------------------------------------------------------------------
+
+type Metrics = { price: number; oneDayPct: number; sevenDayPct: number; twentyDayPct: number; volumeRatio: number; asOfIdx: number };
+
+function windowFor(day: string) {
+  return {
+    from: iso(addDays(new Date(day + "T00:00:00Z"), -70)),
+    to: iso(addDays(new Date(day + "T00:00:00Z"), 55)),
+    dayTs: Math.floor(new Date(day + "T00:00:00Z").getTime() / 1000),
+  };
+}
+
+function computeMetrics(bars: any[], dayTs: number): Metrics | null {
+  const asOfIdx = bars.reduce((acc: number, b: any, i: number) => (b.ts <= dayTs + 43200 ? i : acc), -1);
+  if (asOfIdx < 21) return null; // need 20+ prior sessions
+  const price = bars[asOfIdx].close;
+  const p1 = bars[asOfIdx - 1].close;
+  const p7 = bars[Math.max(0, asOfIdx - 7)].close;
+  const p20 = bars[Math.max(0, asOfIdx - 20)].close;
+  const avgVol20 = bars.slice(Math.max(0, asOfIdx - 20), asOfIdx).reduce((a: number, b: any) => a + b.volume, 0) / 20;
+  const volumeRatio = avgVol20 > 0 ? bars[asOfIdx].volume / avgVol20 : 1;
+  return {
+    price,
+    oneDayPct: pctChange(p1, price),
+    sevenDayPct: pctChange(p7, price),
+    twentyDayPct: pctChange(p20, price),
+    volumeRatio,
+    asOfIdx,
+  };
+}
+
+/** Point-in-time gainer/momentum score used to rank the FULL daily universe. */
+function chunkScoreOf(m: { oneDayPct: number; sevenDayPct: number; volumeRatio: number }): number {
+  return m.oneDayPct + m.sevenDayPct * 0.3 + (m.volumeRatio - 1) * 5;
+}
+
+async function fetchBarsConcurrent(
+  symbols: string[],
+  from: string,
+  to: string,
+  onFail: (sym: string, r: any) => Promise<void>,
+) {
   const barsByTicker = new Map<string, any[]>();
   const yahooMetaByTicker = new Map<string, any>();
-  let yahooFailures = 0;
-  // Chunked scan: every chunk of the day's universe is fetched before the day
-  // is ranked. Chunking bounds work between heartbeats; it never truncates the
-  // universe.
-  const chunks = chunkUniverse(universe);
-  for (let c = 0; c < chunks.length; c++) {
-    const chunk = chunks[c];
-    let idx = 0;
-    async function worker() {
-      while (idx < chunk.length) {
-        const i = idx++; const sym = chunk[i];
-        const r = await fetchYahooHistorical(sym, from, to);
-        if (r.ok) {
-          barsByTicker.set(sym, r.bars);
-          yahooMetaByTicker.set(sym, { status: r.status, latency_ms: r.latency_ms, provider_timestamp: r.provider_timestamp });
-        } else {
-          yahooFailures++;
-          yahooMetaByTicker.set(sym, { status: r.status ?? "error", latency_ms: r.latency_ms, provider_timestamp: r.provider_timestamp, reason: r.reason });
-          await admin.from("ml_data_quality_log").insert({ run_id: runId, ticker: sym, historical_date: day, reason: "yahoo_fetch_failed", details: { reason: r.reason, status: r.status, latency_ms: r.latency_ms } });
-        }
+  let failures = 0;
+  let idx = 0;
+  async function worker() {
+    while (idx < symbols.length) {
+      const sym = symbols[idx++];
+      const r = await fetchYahooHistorical(sym, from, to);
+      if (r.ok) {
+        barsByTicker.set(sym, r.bars);
+        yahooMetaByTicker.set(sym, { status: r.status, latency_ms: r.latency_ms, provider_timestamp: r.provider_timestamp });
+      } else {
+        failures++;
+        yahooMetaByTicker.set(sym, { status: r.status ?? "error", latency_ms: r.latency_ms, provider_timestamp: r.provider_timestamp, reason: r.reason });
+        await onFail(sym, r);
       }
     }
-    await Promise.all([worker(), worker(), worker()]);
-    await touchRun(runId);
-    await upsertDayLog(runId, day, {
-      status: "scanning",
-      universe_count: universe.length,
-      metadata: {
-        top_n: topN,
-        pipeline_version: PIPELINE_VERSION,
-        chunk_size: COST_LIMITS.maxTickersPerInvocation,
-        chunks_total: chunks.length,
-        chunks_completed: c + 1,
-      },
-    });
-    logEvent("historical_chunk_complete", { run_id: runId, replay_date: day, chunk: c + 1, chunks: chunks.length, fetched: barsByTicker.size });
   }
-  logEvent("historical_yahoo_scan_complete", { run_id: runId, replay_date: day, fetched: barsByTicker.size, yahoo_failures: yahooFailures });
+  await Promise.all([worker(), worker(), worker()]);
+  return { barsByTicker, yahooMetaByTicker, failures };
+}
+
+/** Chunks already persisted for this run/day (resume granularity). */
+async function completedChunkCount(runId: string, day: string): Promise<number> {
+  const { data } = await admin
+    .from("historical_replay_day_logs")
+    .select("metadata")
+    .eq("run_id", runId)
+    .eq("replay_date", day)
+    .maybeSingle();
+  return Number((data?.metadata as any)?.chunks_completed ?? 0);
+}
+
+/** Scan exactly ONE chunk (<= 250 tickers) and persist its scores. */
+async function scanChunk(runId: string, day: string, chunk: string[], chunkIndex: number, chunksTotal: number, universeCount: number, topN: number) {
+  const started = Date.now();
+  const { from, to, dayTs } = windowFor(day);
+  logEvent("historical_chunk_started", { run_id: runId, replay_date: day, chunk: chunkIndex + 1, chunks: chunksTotal, tickers: chunk.length });
+  if (chunkIndex === 0) {
+    await upsertDayLog(runId, day, {
+      status: "started",
+      universe_count: universeCount,
+      started_at: new Date().toISOString(),
+      metadata: { top_n: topN, pipeline_version: PIPELINE_VERSION, chunks_total: chunksTotal, chunks_completed: 0, phase: "scan", chunk_size: COST_LIMITS.maxTickersPerInvocation },
+    });
+  }
+  const { barsByTicker, failures } = await fetchBarsConcurrent(chunk, from, to, async (sym, r) => {
+    await admin.from("ml_data_quality_log").insert({ run_id: runId, ticker: sym, historical_date: day, reason: "yahoo_fetch_failed", details: { reason: r.reason, status: r.status, latency_ms: r.latency_ms } });
+  });
+
+  const rows: any[] = [];
+  for (const [ticker, bars] of barsByTicker.entries()) {
+    const m = computeMetrics(bars, dayTs);
+    if (!m) continue;
+    rows.push({ run_id: runId, replay_date: day, chunk_index: chunkIndex, ticker, score: chunkScoreOf(m), metrics: m });
+  }
+  if (rows.length) {
+    await admin.from("historical_replay_chunk_scores").upsert(rows, { onConflict: "run_id,replay_date,ticker" });
+  }
+  await touchRun(runId);
+  await upsertDayLog(runId, day, {
+    status: "scanning",
+    universe_count: universeCount,
+    metadata: {
+      top_n: topN,
+      pipeline_version: PIPELINE_VERSION,
+      chunk_size: COST_LIMITS.maxTickersPerInvocation,
+      chunks_total: chunksTotal,
+      chunks_completed: chunkIndex + 1,
+      phase: chunkIndex + 1 >= chunksTotal ? "finalize_pending" : "scan",
+    },
+  });
+  logEvent("historical_chunk_complete", {
+    run_id: runId, replay_date: day, chunk: chunkIndex + 1, chunks: chunksTotal,
+    tickers_evaluated: chunk.length, scored: rows.length, yahoo_failures: failures, duration_ms: Date.now() - started,
+  });
+  return { scored: rows.length, failures };
+}
+
+/**
+ * Finalize a day: rank the COMBINED scores of every chunk (the complete daily
+ * universe), keep the final Top N, then deep-analyse only those tickers.
+ */
+async function finalizeDay(runId: string, day: string, universeCount: number, topN: number) {
+  const dayStarted = Date.now();
+  const { from, to, dayTs } = windowFor(day);
+  const { data: scoreRows } = await admin
+    .from("historical_replay_chunk_scores")
+    .select("ticker,score,metrics")
+    .eq("run_id", runId)
+    .eq("replay_date", day);
+  const scored = (scoreRows ?? []).map((r: any) => ({
+    ticker: r.ticker as string,
+    score: Number(r.score),
+    twentyDayPct: Number(r.metrics?.twentyDayPct ?? 0),
+    volumeRatio: Number(r.metrics?.volumeRatio ?? 1),
+  }));
+  const ranked = rankFullDay(scored, topN, (r) => r.score, (r) => r.ticker);
+  logEvent("historical_day_ranked", { run_id: runId, replay_date: day, scored_count: scored.length, selected_count: ranked.length, universe_count: universeCount });
+
+  // Re-fetch bars for the selected Top N only (<= 60 tickers, well under the
+  // per-invocation ceiling). Deep analysis needs full bar history.
+  const { barsByTicker, yahooMetaByTicker, failures: yahooFailures } = await fetchBarsConcurrent(
+    ranked.map((r) => r.ticker), from, to,
+    async (sym, r) => {
+      await admin.from("ml_data_quality_log").insert({ run_id: runId, ticker: sym, historical_date: day, reason: "yahoo_refetch_failed", details: { reason: r.reason, status: r.status } });
+    },
+  );
   await touchRun(runId);
 
-  // Compute point-in-time metrics per ticker as of `day`.
-  const dayTs = Math.floor(new Date(day + "T00:00:00Z").getTime() / 1000);
   type Scored = { ticker: string; asOfIdx: number; bars: any[]; price: number; oneDayPct: number; sevenDayPct: number; twentyDayPct: number; volumeRatio: number };
-  const scored: Scored[] = [];
-  for (const [ticker, bars] of barsByTicker.entries()) {
-    // Find the last bar with ts <= dayTs + 12h (end of that trading day).
-    const asOfIdx = bars.reduce((acc, b, i) => (b.ts <= dayTs + 43200 ? i : acc), -1);
-    if (asOfIdx < 21) continue; // need 20+ prior sessions
-    const price = bars[asOfIdx].close;
-    const p1 = bars[asOfIdx - 1].close;
-    const p7 = bars[Math.max(0, asOfIdx - 7)].close;
-    const p20 = bars[Math.max(0, asOfIdx - 20)].close;
-    const avgVol20 = bars.slice(Math.max(0, asOfIdx - 20), asOfIdx).reduce((a, b) => a + b.volume, 0) / 20;
-    const volumeRatio = avgVol20 > 0 ? bars[asOfIdx].volume / avgVol20 : 1;
-    scored.push({ ticker, asOfIdx, bars, price, oneDayPct: pctChange(p1, price), sevenDayPct: pctChange(p7, price), twentyDayPct: pctChange(p20, price), volumeRatio });
+  const selected: Scored[] = [];
+  for (const r of ranked) {
+    const bars = barsByTicker.get(r.ticker);
+    if (!bars) continue;
+    const m = computeMetrics(bars, dayTs);
+    if (!m) continue;
+    selected.push({ ticker: r.ticker, asOfIdx: m.asOfIdx, bars, price: m.price, oneDayPct: m.oneDayPct, sevenDayPct: m.sevenDayPct, twentyDayPct: m.twentyDayPct, volumeRatio: m.volumeRatio });
   }
-  // Point-in-time "top gainers" universe: sort by composite gainer/momentum then take topN.
-  // Rank the COMBINED scores of every chunk (the full daily universe), then
-  // keep the final top N. Scoring math is unchanged.
-  const selected = rankFullDay(
-    scored, topN,
-    (r) => r.oneDayPct + r.sevenDayPct * 0.3 + (r.volumeRatio - 1) * 5,
-    (r) => r.ticker,
-  );
-  logEvent("historical_gainers_scan_complete", { run_id: runId, replay_date: day, scored_count: scored.length, selected_count: selected.length });
+
   await upsertDayLog(runId, day, {
     status: "scored",
     scored_count: scored.length,
