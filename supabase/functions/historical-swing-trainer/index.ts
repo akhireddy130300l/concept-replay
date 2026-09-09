@@ -661,62 +661,73 @@ async function runReplay(runId: string, config: any) {
       return;
     }
 
-    for (let i = startIdx; i < batchEndIdx; i++) {
-      const day = days[i];
-      try {
-        const r = await processDay(runId, day, tickers, config.top_n ?? 60);
-        totalExamples += r.examplesCreated; totalOutcomes += r.outcomesCreated; totalTickers += r.tickersProcessed;
-        processedTradingDays = i + 1;
-        consecutiveErrors = 0;
-      } catch (e) {
-        const msg = (e as Error).message.slice(0, 500);
-        logEvent("historical_day_failed", { run_id: runId, replay_date: day, reason: msg });
-        failureCount += 1;
-        consecutiveErrors += 1;
-        await upsertDayLog(runId, day, {
-          status: "failed",
-          error_message: msg,
-          finished_at: new Date().toISOString(),
-          metadata: { pipeline_version: PIPELINE_VERSION, consecutive_errors: consecutiveErrors },
-        });
-        await admin.from("ml_data_quality_log").insert({ run_id: runId, historical_date: day, reason: "day_failed", details: { error: (e as Error).message } });
-        if (consecutiveErrors >= maxConsecutiveErrors) {
-          await touchRun(runId, {
-            status: "failed",
-            last_error: `failed_after_${consecutiveErrors}_consecutive_day_errors: ${msg}`,
-            completed_at: new Date().toISOString(),
-            failure_count: failureCount,
-            consecutive_error_count: consecutiveErrors,
-            current_replay_date: day,
-            tickers_processed: totalTickers,
-            examples_created: totalExamples,
-            outcomes_created: totalOutcomes,
-            processed_trading_days: processedTradingDays,
-          });
-          logEvent("historical_run_failed", { run_id: runId, reason: "max_consecutive_errors", consecutive_errors: consecutiveErrors, last_error: msg });
-          return;
-        }
+    // ONE unit of work per invocation: the next unfinished chunk of the current
+    // trading day, or that day's finalization.
+    const day = days[startIdx];
+    let dayComplete = false;
+    let stepInfo: Record<string, unknown> = {};
+    try {
+      const r: any = await processDayStep(runId, day, tickers, config.top_n ?? 60);
+      dayComplete = !!r.dayComplete;
+      stepInfo = r.dayComplete
+        ? { phase: "finalize", chunks_total: r.chunksTotal, tickers_processed: r.tickersProcessed }
+        : { phase: "scan", chunk: (r.chunkIndex ?? 0) + 1, chunks_total: r.chunksTotal };
+      if (dayComplete) {
+        totalExamples += Number(r.examplesCreated ?? 0);
+        totalOutcomes += Number(r.outcomesCreated ?? 0);
+        totalTickers += Number(r.tickersProcessed ?? 0);
+        processedTradingDays = startIdx + 1;
       }
-      const nextStatus = i === days.length - 1 ? "completed" : "running";
-      await touchRun(runId, {
-        current_replay_date: day,
-        tickers_processed: totalTickers,
-        examples_created: totalExamples,
-        outcomes_created: totalOutcomes,
-        processed_trading_days: processedTradingDays,
-        failure_count: failureCount,
-        consecutive_error_count: consecutiveErrors,
-        last_progress_at: new Date().toISOString(),
-        last_error: consecutiveErrors ? `last day error: ${day}` : null,
-        status: nextStatus,
-        completed_at: nextStatus === "completed" ? new Date().toISOString() : null,
-        last_processed_batch: { start_idx: startIdx, end_idx_exclusive: batchEndIdx, last_day: day, committed_at: new Date().toISOString() },
+      consecutiveErrors = 0;
+    } catch (e) {
+      const msg = (e as Error).message.slice(0, 500);
+      logEvent("historical_day_failed", { run_id: runId, replay_date: day, reason: msg });
+      failureCount += 1;
+      consecutiveErrors += 1;
+      await upsertDayLog(runId, day, {
+        status: "failed",
+        error_message: msg,
+        finished_at: new Date().toISOString(),
+        metadata: { pipeline_version: PIPELINE_VERSION, consecutive_errors: consecutiveErrors },
       });
-      logEvent("historical_progress_committed", { run_id: runId, replay_date: day, examples_created: totalExamples, outcomes_created: totalOutcomes, processed_trading_days: processedTradingDays, total_trading_days: days.length });
+      await admin.from("ml_data_quality_log").insert({ run_id: runId, historical_date: day, reason: "day_failed", details: { error: (e as Error).message } });
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        await touchRun(runId, {
+          status: "failed",
+          last_error: `failed_after_${consecutiveErrors}_consecutive_day_errors: ${msg}`,
+          completed_at: new Date().toISOString(),
+          failure_count: failureCount,
+          consecutive_error_count: consecutiveErrors,
+          tickers_processed: totalTickers,
+          examples_created: totalExamples,
+          outcomes_created: totalOutcomes,
+          processed_trading_days: processedTradingDays,
+        });
+        logEvent("historical_run_failed", { run_id: runId, reason: "max_consecutive_errors", consecutive_errors: consecutiveErrors, last_error: msg });
+        return;
+      }
     }
 
-    if (batchEndIdx >= days.length) {
-      await touchRun(runId, { status: "completed", completed_at: new Date().toISOString(), last_error: null });
+    const runFinished = dayComplete && startIdx === days.length - 1;
+    await touchRun(runId, {
+      // Only advance the day cursor once the whole day is finalized, so a
+      // resume re-enters the same day at its next unfinished chunk.
+      ...(dayComplete ? { current_replay_date: day } : {}),
+      tickers_processed: totalTickers,
+      examples_created: totalExamples,
+      outcomes_created: totalOutcomes,
+      processed_trading_days: processedTradingDays,
+      failure_count: failureCount,
+      consecutive_error_count: consecutiveErrors,
+      last_progress_at: new Date().toISOString(),
+      last_error: consecutiveErrors ? `last day error: ${day}` : null,
+      status: runFinished ? "completed" : "running",
+      completed_at: runFinished ? new Date().toISOString() : null,
+      last_processed_batch: { start_idx: startIdx, replay_date: day, day_complete: dayComplete, ...stepInfo, committed_at: new Date().toISOString() },
+    });
+    logEvent("historical_progress_committed", { run_id: runId, replay_date: day, day_complete: dayComplete, ...stepInfo, processed_trading_days: processedTradingDays, total_trading_days: days.length });
+
+    if (runFinished) {
       logEvent("historical_run_completed", { run_id: runId, examples_created: totalExamples, outcomes_created: totalOutcomes, processed_trading_days: processedTradingDays });
       return;
     }
@@ -738,11 +749,12 @@ async function runReplay(runId: string, config: any) {
       return;
     }
 
+    const nextDay = dayComplete ? days[startIdx + 1] : day;
     await touchRun(runId, {
       status: "running",
-      last_processed_batch: { start_idx: startIdx, end_idx_exclusive: batchEndIdx, queued_next_at: new Date().toISOString(), next_replay_date: days[batchEndIdx] },
+      last_processed_batch: { start_idx: startIdx, queued_next_at: new Date().toISOString(), next_replay_date: nextDay, resuming_same_day: !dayComplete },
     });
-    logEvent("historical_next_batch_queued", { run_id: runId, next_replay_date: days[batchEndIdx], processed_trading_days: processedTradingDays, total_trading_days: days.length });
+    logEvent("historical_next_batch_queued", { run_id: runId, next_replay_date: nextDay, resuming_same_day: !dayComplete, processed_trading_days: processedTradingDays, total_trading_days: days.length });
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/historical-swing-trainer`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-diag-key": DIAG_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
