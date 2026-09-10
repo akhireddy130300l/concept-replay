@@ -24,7 +24,8 @@
 // Header: x-diag-key: <DIAG_KEY>
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { COST_LIMITS, capDays, chunkUniverse, rankFullDay, canStartRun, clampReplayRequest, isHalted, nextDayIndex } from "../_shared/cost-guard.ts";
+import { COST_LIMITS, capDays, rankFullDay, canStartRun, clampReplayRequest, isHalted, nextDayIndex } from "../_shared/cost-guard.ts";
+import { planDayStep, shouldContinue, nextStepTarget } from "../_shared/replay-scheduler.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -587,14 +588,14 @@ async function finalizeDay(runId: string, day: string, universeCount: number, to
  * finalization once every chunk is persisted. Returns whether the day is done.
  */
 async function processDayStep(runId: string, day: string, universe: string[], topN: number) {
-  const chunks = chunkUniverse(universe);
   const done = await completedChunkCount(runId, day);
-  if (done < chunks.length) {
-    const r = await scanChunk(runId, day, chunks[done], done, chunks.length, universe.length, topN);
-    return { dayComplete: false, chunkIndex: done, chunksTotal: chunks.length, ...r };
+  const plan = planDayStep(universe, done);
+  if (plan.action === "scan") {
+    const r = await scanChunk(runId, day, plan.tickers, plan.chunkIndex, plan.chunksTotal, universe.length, topN);
+    return { dayComplete: false, chunkIndex: plan.chunkIndex, chunksTotal: plan.chunksTotal, ...r };
   }
   const result = await finalizeDay(runId, day, universe.length, topN);
-  return { dayComplete: true, chunksTotal: chunks.length, ...result };
+  return { dayComplete: true, chunksTotal: plan.chunksTotal, ...result };
 }
 
 async function runReplay(runId: string, config: any) {
@@ -739,17 +740,20 @@ async function runReplay(runId: string, config: any) {
       .select("status,consecutive_error_count")
       .eq("id", runId)
       .maybeSingle();
-    if (!latest || isHalted(latest.status)) {
-      logEvent("cost_guard_reinvoke_suppressed", { run_id: runId, status: latest?.status ?? "missing", reason: "run_halted" });
-      return;
-    }
-    if (Number(latest.consecutive_error_count ?? 0) >= maxConsecutiveErrors) {
-      await touchRun(runId, { status: "failed", last_error: "halted_by_cost_guard_consecutive_errors", completed_at: new Date().toISOString() });
-      logEvent("cost_guard_reinvoke_suppressed", { run_id: runId, reason: "consecutive_error_threshold" });
+    const gate = shouldContinue({
+      status: latest?.status ?? null,
+      consecutiveErrors: Number(latest?.consecutive_error_count ?? 0),
+      maxConsecutiveErrors,
+    });
+    if (!gate.ok) {
+      if (gate.reason === "consecutive_error_threshold") {
+        await touchRun(runId, { status: "failed", last_error: "halted_by_cost_guard_consecutive_errors", completed_at: new Date().toISOString() });
+      }
+      logEvent("cost_guard_reinvoke_suppressed", { run_id: runId, status: latest?.status ?? "missing", reason: gate.reason });
       return;
     }
 
-    const nextDay = dayComplete ? days[startIdx + 1] : day;
+    const nextDay = nextStepTarget(days, startIdx, dayComplete).nextDay ?? day;
     await touchRun(runId, {
       status: "running",
       last_processed_batch: { start_idx: startIdx, queued_next_at: new Date().toISOString(), next_replay_date: nextDay, resuming_same_day: !dayComplete },
