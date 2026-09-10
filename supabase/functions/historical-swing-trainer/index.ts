@@ -24,7 +24,8 @@
 // Header: x-diag-key: <DIAG_KEY>
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { COST_LIMITS, capDays, chunkUniverse, rankFullDay, canStartRun, clampReplayRequest, isHalted, nextDayIndex } from "../_shared/cost-guard.ts";
+import { COST_LIMITS, capDays, rankFullDay, canStartRun, clampReplayRequest, isHalted, nextDayIndex } from "../_shared/cost-guard.ts";
+import { planDayStep, shouldContinue, nextStepTarget } from "../_shared/replay-scheduler.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
