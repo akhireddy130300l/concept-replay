@@ -588,14 +588,14 @@ async function finalizeDay(runId: string, day: string, universeCount: number, to
  * finalization once every chunk is persisted. Returns whether the day is done.
  */
 async function processDayStep(runId: string, day: string, universe: string[], topN: number) {
-  const chunks = chunkUniverse(universe);
   const done = await completedChunkCount(runId, day);
-  if (done < chunks.length) {
-    const r = await scanChunk(runId, day, chunks[done], done, chunks.length, universe.length, topN);
-    return { dayComplete: false, chunkIndex: done, chunksTotal: chunks.length, ...r };
+  const plan = planDayStep(universe, done);
+  if (plan.action === "scan") {
+    const r = await scanChunk(runId, day, plan.tickers, plan.chunkIndex, plan.chunksTotal, universe.length, topN);
+    return { dayComplete: false, chunkIndex: plan.chunkIndex, chunksTotal: plan.chunksTotal, ...r };
   }
   const result = await finalizeDay(runId, day, universe.length, topN);
-  return { dayComplete: true, chunksTotal: chunks.length, ...result };
+  return { dayComplete: true, chunksTotal: plan.chunksTotal, ...result };
 }
 
 async function runReplay(runId: string, config: any) {
