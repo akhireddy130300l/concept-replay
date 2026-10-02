@@ -45,3 +45,6 @@ verify_jwt = false
 [functions.ml-model-registry]
 verify_jwt = false
 
+
+[functions.american-shadow]
+verify_jwt = false
