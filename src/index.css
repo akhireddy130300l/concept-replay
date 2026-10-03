@@ -243,3 +243,25 @@
     box-shadow: var(--shadow-glow);
   }
 }
+
+/* American Shadow — scoped premium navy/amber theme */
+.shadow-theme {
+  --background: 222 47% 7%;
+  --foreground: 40 30% 96%;
+  --card: 222 40% 11%;
+  --card-foreground: 40 30% 96%;
+  --popover: 222 40% 11%;
+  --popover-foreground: 40 30% 96%;
+  --primary: 38 92% 55%;
+  --primary-foreground: 222 47% 8%;
+  --secondary: 28 85% 50%;
+  --secondary-foreground: 222 47% 8%;
+  --muted: 222 30% 17%;
+  --muted-foreground: 220 15% 68%;
+  --accent: 38 92% 55%;
+  --accent-foreground: 222 47% 8%;
+  --border: 222 25% 22%;
+  --input: 222 25% 22%;
+  --ring: 38 92% 55%;
+  --shadow-gradient: radial-gradient(ellipse at top, hsl(38 92% 55% / 0.12), transparent 60%), linear-gradient(180deg, hsl(222 47% 9%), hsl(222 47% 5%));
+}

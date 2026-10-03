@@ -1317,6 +1317,122 @@ export type Database = {
           },
         ]
       }
+      shadow_session_sections: {
+        Row: {
+          audio_path: string | null
+          created_at: string
+          duration_seconds: number | null
+          error_message: string | null
+          generation_status: string
+          id: string
+          retry_count: number
+          section_index: number
+          session_id: string
+          text: string | null
+        }
+        Insert: {
+          audio_path?: string | null
+          created_at?: string
+          duration_seconds?: number | null
+          error_message?: string | null
+          generation_status?: string
+          id?: string
+          retry_count?: number
+          section_index: number
+          session_id: string
+          text?: string | null
+        }
+        Update: {
+          audio_path?: string | null
+          created_at?: string
+          duration_seconds?: number | null
+          error_message?: string | null
+          generation_status?: string
+          id?: string
+          retry_count?: number
+          section_index?: number
+          session_id?: string
+          text?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shadow_session_sections_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "shadow_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shadow_sessions: {
+        Row: {
+          audio_path: string | null
+          completed_at: string | null
+          created_at: string
+          deleted_at: string | null
+          duration_seconds: number | null
+          error_message: string | null
+          generation_version: number
+          id: string
+          idempotency_key: string
+          last_step_at: string | null
+          progress_label: string | null
+          source_type: string
+          status: string
+          step_count: number
+          text_model: string | null
+          topic: string
+          transcript: string | null
+          user_id: string
+          voice_id: string | null
+          voice_provider: string | null
+        }
+        Insert: {
+          audio_path?: string | null
+          completed_at?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          duration_seconds?: number | null
+          error_message?: string | null
+          generation_version?: number
+          id?: string
+          idempotency_key: string
+          last_step_at?: string | null
+          progress_label?: string | null
+          source_type?: string
+          status?: string
+          step_count?: number
+          text_model?: string | null
+          topic: string
+          transcript?: string | null
+          user_id: string
+          voice_id?: string | null
+          voice_provider?: string | null
+        }
+        Update: {
+          audio_path?: string | null
+          completed_at?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          duration_seconds?: number | null
+          error_message?: string | null
+          generation_version?: number
+          id?: string
+          idempotency_key?: string
+          last_step_at?: string | null
+          progress_label?: string | null
+          source_type?: string
+          status?: string
+          step_count?: number
+          text_model?: string | null
+          topic?: string
+          transcript?: string | null
+          user_id?: string
+          voice_id?: string | null
+          voice_provider?: string | null
+        }
+        Relationships: []
+      }
       speaking_sessions: {
         Row: {
           completed_at: string

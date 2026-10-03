@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive, Pencil, RefreshCw, Clock, Info, Trophy, Flame, Target, Star, ChevronDown, ChevronUp, XCircle, CheckCircle2, History, Sparkles } from "lucide-react";
+import { Brain, LogOut, Plus, Calendar, BookOpen, Trash2, Archive, Pencil, RefreshCw, Clock, Info, Trophy, Flame, Target, Star, ChevronDown, ChevronUp, XCircle, CheckCircle2, History, Sparkles, Headphones } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -430,6 +430,10 @@ const Dashboard = () => {
             <Button onClick={() => navigate("/speaking-gym")} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
               <Sparkles className="w-4 h-4 mr-2" />
               Speaking Gym
+            </Button>
+            <Button onClick={() => navigate("/american-shadow")} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
+              <Headphones className="w-4 h-4 mr-2" />
+              American Shadow
             </Button>
             <Button onClick={handleSignOut} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
               <LogOut className="w-4 h-4 mr-2" />

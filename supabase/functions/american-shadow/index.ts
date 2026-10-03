@@ -265,11 +265,29 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action ?? "");
 
+    const internal = !!env("INTERNAL_DISPATCH_SECRET") && req.headers.get("x-internal-dispatch") === env("INTERNAL_DISPATCH_SECRET");
     if (action === "step") {
-      if (!env("INTERNAL_DISPATCH_SECRET") || req.headers.get("x-internal-dispatch") !== env("INTERNAL_DISPATCH_SECRET")) return json({ error: "Forbidden" }, 403);
+      if (!internal) return json({ error: "Forbidden" }, 403);
       if (typeof body.session_id !== "string") return json({ error: "Invalid" }, 400);
       await step(admin, body.session_id);
       return json({ ok: true });
+    }
+    // Operator-only verification hook (secret-protected): start or inspect a session for a given user.
+    if (action === "internal_create" || action === "internal_status") {
+      if (!internal) return json({ error: "Forbidden" }, 403);
+      if (action === "internal_status") {
+        const { data: s } = await admin.from("shadow_sessions").select("id,status,progress_label,duration_seconds,error_message,step_count").eq("id", body.session_id).maybeSingle();
+        const { data: secs } = await admin.from("shadow_session_sections").select("section_index,generation_status,duration_seconds,text").eq("session_id", body.session_id).order("section_index");
+        return json({ session: s, sections: secs });
+      }
+      const { data: created, error } = await admin.from("shadow_sessions").insert({
+        user_id: body.user_id, topic: String(body.topic).slice(0, 300), source_type: "generated", idempotency_key: `internal-${crypto.randomUUID()}`,
+        status: "queued", progress_label: "Preparing your session…", voice_provider: `lovable-ai/${TTS_MODEL}`, voice_id: VOICE, text_model: TEXT_MODEL,
+      }).select("id").single();
+      if (error) return json({ error: error.message }, 400);
+      await admin.from("shadow_session_sections").insert(Array.from({ length: PLANNED_SECTIONS }, (_, i) => ({ session_id: created.id, section_index: i })));
+      dispatch(created.id);
+      return json({ session_id: created.id });
     }
 
     const userClient = createClient(env("SUPABASE_URL"), env("SUPABASE_ANON_KEY"), { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } });
