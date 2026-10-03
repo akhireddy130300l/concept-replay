@@ -20,8 +20,9 @@ const TTS_MODEL = "openai/gpt-4o-mini-tts";
 const VOICE = "onyx";
 const VOICE_STYLE =
   "Adult American man with a General American accent. Natural, relaxed, conversational, calm but energetic. Steady everyday speaking pace, not dramatic, no long pauses.";
-const PLANNED_SECTIONS = 7;
-const WORDS_PER_SECTION = 230;
+const PLANNED_SECTIONS = 8; // 7 body sections + 1 closing sized from measured audio
+const WORDS_PER_SECTION = 245;
+const TARGET_SECONDS = 615;
 const MIN_SECONDS = 600;
 const MAX_SECTIONS = 11; // hard stop against runaway generation
 const MAX_RETRIES = 3;
@@ -73,9 +74,9 @@ function parseMp3(buf: Uint8Array): { frames: Uint8Array[]; seconds: number } {
 // ---------- AI calls ----------
 class GatewayError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 
-async function generateText(topic: string, index: number, total: number, previous: string, extension: boolean): Promise<string> {
+async function generateText(topic: string, index: number, total: number, previous: string, extension: boolean, words = WORDS_PER_SECTION, openings: string[] = []): Promise<string> {
   const beat = extension
-    ? "This is an extra continuation near the end: add a fresh new development, then move toward a natural close."
+    ? "This is a short final add-on after the goodbye: one last natural exchange as he heads out (e.g. a parting remark or quick text), ending cleanly. Do not restart the scene."
     : index === 0
       ? "This is the opening: jump straight into the situation (e.g. arriving, starting the conversation). No meta-introduction."
       : index === total - 1
@@ -84,15 +85,17 @@ async function generateText(topic: string, index: number, total: number, previou
   const instructions = [
     "You write spoken monologue scripts for American English shadowing practice. A learner listens on earphones and speaks along about one second behind the narrator.",
     "Write ONLY the words the narrator says, in first person, as if he is actually living the situation (talking to friends, teammates, coworkers, etc.). It is a one-voice performance: he speaks his own lines and naturally reacts to what others say (\"Wait, you went to Denver? No way.\").",
+    "The scene keeps moving forward in time. Never restart the scene, never re-arrive, never greet the same people again, never reintroduce people already introduced.",
     "Never lecture or explain (do NOT write 'Here are ways to...'). No stage directions, no brackets, no speaker labels, no headings, no 'pause now', no lists.",
     "Natural contemporary American English: contractions, natural transitions, follow-up questions, occasional idioms, realistic sentence lengths. Light, not excessive, slang. Avoid 'um'/'uh' and repeated greetings.",
     "For story topics, invent a complete believable everyday story (setup, people, event, reactions, details, outcome, reflection). For opinion topics, move through connected subjects: give opinions, reasons, examples, agree, partly agree, disagree politely, qualify views.",
-    `Length: about ${WORDS_PER_SECTION} words for this part. Plain text only, short paragraphs.`,
+    `Length: about ${words} words for this part. Plain text only, short paragraphs.`,
   ].join("\n");
   const input = [
     `Topic / situation: ${topic}`,
     beat,
-    previous ? `The script so far ends with:\n"""${previous.slice(-1500)}"""\nContinue seamlessly from there.` : "",
+    previous ? `The script so far ends with:\n"""${previous.slice(-3000)}"""\nContinue seamlessly from there.` : "",
+    openings.length ? `Earlier parts began with these lines — do not repeat or echo them:\n${openings.map((o) => `- ${o}`).join("\n")}` : "",
   ].filter(Boolean).join("\n\n");
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
@@ -167,13 +170,24 @@ async function step(admin: SupabaseClient, sessionId: string): Promise<void> {
   const plannedTotal = Math.max(PLANNED_SECTIONS, secs.length);
 
   // 1) text
-  const needText = secs.find((x) => x.generation_status === "pending" || (x.generation_status === "failed" && !x.text));
+  let needText = secs.find((x) => x.generation_status === "pending" || (x.generation_status === "failed" && !x.text));
+  // The closing section is sized from the real measured audio, so voice all earlier sections first.
+  if (needText && needText.section_index >= PLANNED_SECTIONS - 1 && secs.some((x) => x.section_index < needText!.section_index && !x.audio_path)) needText = undefined;
   if (needText) {
     const idx = needText.section_index;
     await setS({ status: "generating_text", progress_label: `Writing section ${idx + 1} of ${plannedTotal}` });
     const prev = secs.filter((x) => x.section_index < idx && x.text).map((x) => x.text).join("\n\n");
     try {
-      const text = await generateText(s.topic, idx, PLANNED_SECTIONS, prev, idx >= PLANNED_SECTIONS);
+      let words = WORDS_PER_SECTION;
+      if (idx >= PLANNED_SECTIONS - 1) {
+        const voiced = secs.filter((x) => x.section_index < idx && x.audio_path);
+        const secsSoFar = voiced.reduce((a, x) => a + Number(x.duration_seconds ?? 0), 0);
+        const wordsSoFar = voiced.reduce((a, x) => a + String(x.text ?? "").split(/\s+/).length, 0);
+        const wps = secsSoFar > 0 ? wordsSoFar / secsSoFar : 3.1;
+        words = Math.max(90, Math.min(450, Math.round((TARGET_SECONDS - secsSoFar) * wps)));
+      }
+      const openings = secs.filter((x) => x.section_index < idx && x.text).map((x) => String(x.text).split(/(?<=[.!?])\s/)[0].slice(0, 120));
+      const text = await generateText(s.topic, idx, PLANNED_SECTIONS, prev, idx >= PLANNED_SECTIONS, words, openings);
       await admin.from("shadow_session_sections").update({ text, generation_status: "text_done", error_message: null }).eq("id", needText.id);
     } catch (e) {
       const st = e instanceof GatewayError ? e.status : 0;
