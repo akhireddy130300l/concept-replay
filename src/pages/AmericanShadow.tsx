@@ -180,6 +180,23 @@ export default function AmericanShadow() {
               </Button>
             </section>
 
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="text-xs uppercase tracking-wider text-primary font-semibold">How 10 minutes of shadowing helps you</div>
+              <ul className="mt-3 space-y-2 text-sm">
+                {[
+                  ["Natural American accent", "Copying a native speaker in real time trains your mouth to make American sounds, like the soft \"t\" in \"water\" and linked words like \"gonna\"."],
+                  ["Rhythm and stress", "You absorb where Americans put emphasis and how their voice rises and falls, so you sound less flat and more confident."],
+                  ["Speaking without translating", "Keeping up one second behind leaves no time to translate in your head, so English starts coming out directly."],
+                  ["Faster, smoother speech", "Ten minutes of nonstop speaking builds fluency and stamina — fewer pauses and fillers in real conversations."],
+                  ["Better listening", "Following fast, connected speech makes Americans easier to understand in meetings, calls and films."],
+                  ["Everyday phrases that stick", "You say real expressions out loud dozens of times, so they're ready when you need them."],
+                  ["Confidence through habit", "One short session a day adds up — about 70 minutes of real speaking practice each week."],
+                ].map(([t, d]) => (
+                  <li key={t}><span className="font-medium">{t}:</span> <span className="text-muted-foreground">{d}</span></li>
+                ))}
+              </ul>
+            </section>
+
             {current && (
               <section className="space-y-3">
                 <div>
