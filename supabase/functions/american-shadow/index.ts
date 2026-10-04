@@ -169,7 +169,7 @@ function dispatch(sessionId: string) {
 }
 
 function friendlyFailure(status: number, what: string, idx: number): string {
-  if (status === 402) return "Gemini quota is used up. Your completed sections are safe — tap Retry later.";
+  if (status === 402 || status === 429) return "Your Gemini usage limit was reached for now. Your completed sections are safe — tap Retry in a few minutes.";
   if (status === 403) return "The AI service declined this request. Your completed sections are safe.";
   if (status === 401) return "Voice generation isn't configured yet. Add the required backend secret GEMINI_API_KEY.";
   return `Section ${idx + 1} ${what} couldn't be created. Your completed sections are safe. Retry from Section ${idx + 1}.`;
