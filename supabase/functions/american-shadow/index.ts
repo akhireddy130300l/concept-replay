@@ -1,6 +1,6 @@
 // American Shadow — 10-minute continuous shadowing sessions.
-// Independent module. Text: Lovable AI Gateway (openai/gpt-6-astra, Responses API).
-// Voice: Lovable AI Gateway TTS (openai/gpt-4o-mini-tts, voice "onyx", mp3).
+// Independent module. Text: Google Gemini direct (GEMINI_API_KEY, gemini-2.5-flash).
+// Voice: Google Gemini TTS direct (gemini-2.5-flash-preview-tts, male voice), 24kHz PCM -> WAV.
 // Work runs one unit per invocation, chained via INTERNAL_DISPATCH_SECRET, so a
 // failure only affects the current section and completed sections are never redone.
 
@@ -15,9 +15,24 @@ const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
 const BUCKET = "shadow-audio";
-const TEXT_MODEL = "openai/gpt-6-astra";
-const TTS_MODEL = "openai/gpt-4o-mini-tts";
-const VOICE = "onyx";
+const TEXT_MODEL = "gemini-2.5-flash";
+const TTS_MODEL = "gemini-2.5-flash-preview-tts";
+const VOICE = "Orus";
+const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
+const PCM_RATE = 24000; // 16-bit mono
+
+function wavHeader(dataLen: number): Uint8Array {
+  const h = new DataView(new ArrayBuffer(44));
+  const w = (o: number, t: string) => { for (let i = 0; i < 4; i++) h.setUint8(o + i, t.charCodeAt(i)); };
+  w(0, "RIFF"); h.setUint32(4, 36 + dataLen, true); w(8, "WAVE"); w(12, "fmt ");
+  h.setUint32(16, 16, true); h.setUint16(20, 1, true); h.setUint16(22, 1, true);
+  h.setUint32(24, PCM_RATE, true); h.setUint32(28, PCM_RATE * 2, true); h.setUint16(32, 2, true); h.setUint16(34, 16, true);
+  w(36, "data"); h.setUint32(40, dataLen, true);
+  return new Uint8Array(h.buffer);
+}
+function toWav(pcm: Uint8Array): Uint8Array { const o = new Uint8Array(44 + pcm.length); o.set(wavHeader(pcm.length)); o.set(pcm, 44); return o; }
+function pcmOf(wav: Uint8Array): Uint8Array { return wav.subarray(44); }
+const pcmSeconds = (pcm: Uint8Array) => pcm.length / (PCM_RATE * 2);
 const VOICE_STYLE =
   "Adult American man with a General American accent. Natural, relaxed, conversational, calm but energetic. Steady everyday speaking pace, not dramatic, no long pauses.";
 const PLANNED_SECTIONS = 8; // 7 body sections + 1 closing sized from measured audio
@@ -98,30 +113,40 @@ async function generateText(topic: string, index: number, total: number, previou
     openings.length ? `Earlier parts began with these lines — do not repeat or echo them:\n${openings.map((o) => `- ${o}`).join("\n")}` : "",
   ].filter(Boolean).join("\n\n");
 
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
+  const res = await fetch(`${GEMINI}/${TEXT_MODEL}:generateContent?key=${encodeURIComponent(env("GEMINI_API_KEY"))}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${env("LOVABLE_API_KEY")}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: TEXT_MODEL, instructions, input }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: instructions }] },
+      contents: [{ role: "user", parts: [{ text: input }] }],
+      generationConfig: { temperature: 0.9 },
+    }),
   });
   if (!res.ok) throw new GatewayError(res.status, (await res.text()).slice(0, 300));
   const data = await res.json();
-  let text = typeof data.output_text === "string" ? data.output_text : "";
-  if (!text && Array.isArray(data.output)) {
-    text = data.output.flatMap((o: any) => (o.content ?? []).map((c: any) => c.text ?? "")).join("");
-  }
+  let text = (data?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p?.text ?? "").join("");
   text = text.replace(/\[[^\]]*\]|\([^)]*(pause|laugh|sigh)[^)]*\)/gi, "").replace(/\*+/g, "").trim();
   if (text.split(/\s+/).length < 60) throw new GatewayError(200, "empty_or_refused");
   return text;
 }
 
 async function synthesize(text: string): Promise<Uint8Array> {
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/speech", {
+  const res = await fetch(`${GEMINI}/${TTS_MODEL}:generateContent?key=${encodeURIComponent(env("GEMINI_API_KEY"))}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${env("LOVABLE_API_KEY")}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: TTS_MODEL, input: text, voice: VOICE, instructions: VOICE_STYLE, response_format: "mp3" }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: `${VOICE_STYLE} Read this aloud:\n\n${text}` }] }],
+      generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } } } },
+    }),
   });
   if (!res.ok) throw new GatewayError(res.status, (await res.text()).slice(0, 300));
-  return new Uint8Array(await res.arrayBuffer());
+  const data = await res.json();
+  const b64 = data?.candidates?.[0]?.content?.parts?.find((p: any) => p?.inlineData?.data)?.inlineData?.data;
+  if (!b64) throw new GatewayError(200, "empty_audio");
+  const bin = atob(b64);
+  const pcm = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i);
+  return pcm;
 }
 
 // ---------- helpers ----------
@@ -146,7 +171,7 @@ function dispatch(sessionId: string) {
 function friendlyFailure(status: number, what: string, idx: number): string {
   if (status === 402) return "AI credits are used up. Your completed sections are safe — add credits, then tap Retry.";
   if (status === 403) return "The AI service declined this request. Your completed sections are safe.";
-  if (status === 401) return "Voice generation isn't configured yet. Add the required backend secret LOVABLE_API_KEY.";
+  if (status === 401) return "Voice generation isn't configured yet. Add the required backend secret GEMINI_API_KEY.";
   return `Section ${idx + 1} ${what} couldn't be created. Your completed sections are safe. Retry from Section ${idx + 1}.`;
 }
 
@@ -208,10 +233,10 @@ async function step(admin: SupabaseClient, sessionId: string): Promise<void> {
     await setS({ status: "generating_audio", progress_label: `Creating voice audio ${idx + 1} of ${secs.length}` });
     try {
       await ensureBucket(admin);
-      const mp3 = await synthesize(needAudio.text);
-      const { seconds } = parseMp3(mp3);
-      const path = `${s.user_id}/${sessionId}/section-${idx}.mp3`;
-      const up = await admin.storage.from(BUCKET).upload(path, mp3, { contentType: "audio/mpeg", upsert: true });
+      const pcm = await synthesize(needAudio.text);
+      const seconds = pcmSeconds(pcm);
+      const path = `${s.user_id}/${sessionId}/section-${idx}.wav`;
+      const up = await admin.storage.from(BUCKET).upload(path, toWav(pcm), { contentType: "audio/wav", upsert: true });
       if (up.error) throw new Error(`storage: ${up.error.message}`);
       await admin.from("shadow_session_sections").update({ audio_path: path, duration_seconds: seconds, generation_status: "audio_done", error_message: null }).eq("id", needAudio.id);
     } catch (e) {
@@ -246,18 +271,19 @@ async function step(admin: SupabaseClient, sessionId: string): Promise<void> {
     for (const x of secs) {
       const { data, error } = await admin.storage.from(BUCKET).download(x.audio_path);
       if (error || !data) throw new Error(`download section ${x.section_index + 1}`);
-      const parsed = parseMp3(new Uint8Array(await data.arrayBuffer()));
-      parts.push(...parsed.frames);
-      seconds += parsed.seconds;
+      const pcm = pcmOf(new Uint8Array(await data.arrayBuffer()));
+      parts.push(pcm);
+      seconds += pcmSeconds(pcm);
     }
     const size = parts.reduce((a, p) => a + p.length, 0);
-    const out = new Uint8Array(size);
-    let o = 0;
+    const out = new Uint8Array(44 + size);
+    out.set(wavHeader(size));
+    let o = 44;
     for (const p of parts) { out.set(p, o); o += p.length; }
-    const path = `${s.user_id}/${sessionId}/session.mp3`;
-    const up = await admin.storage.from(BUCKET).upload(path, out, { contentType: "audio/mpeg", upsert: true });
+    const path = `${s.user_id}/${sessionId}/session.wav`;
+    const up = await admin.storage.from(BUCKET).upload(path, out, { contentType: "audio/wav", upsert: true });
     if (up.error) throw new Error(up.error.message);
-    const verified = parseMp3(out).seconds;
+    const verified = pcmSeconds(out.subarray(44));
     await setS({
       status: "completed", progress_label: null, audio_path: path, duration_seconds: Math.round(verified * 10) / 10,
       transcript: secs.map((x) => x.text).join("\n\n"), completed_at: new Date().toISOString(), error_message: null,
@@ -310,7 +336,7 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: "Please sign in again." }, 401);
 
     if (action === "create") {
-      if (!env("LOVABLE_API_KEY")) return json({ error: "Voice generation isn't configured yet. Add the required backend secret LOVABLE_API_KEY." }, 500);
+      if (!env("GEMINI_API_KEY")) return json({ error: "Voice generation isn't configured yet. Add the required backend secret GEMINI_API_KEY." }, 500);
       const topic = String(body.topic ?? "").trim().slice(0, 300);
       const key = String(body.idempotency_key ?? "").slice(0, 100);
       const source = body.source_type === "daily" ? "daily" : "generated";
@@ -359,7 +385,7 @@ Deno.serve(async (req) => {
 
     if (action === "audio_url") {
       if (!sess.audio_path) return json({ error: "No audio yet" }, 400);
-      const { data, error } = await admin.storage.from(BUCKET).createSignedUrl(sess.audio_path, 3600, body.download ? { download: `american-shadow-${sess.id.slice(0, 8)}.mp3` } : undefined);
+      const { data, error } = await admin.storage.from(BUCKET).createSignedUrl(sess.audio_path, 3600, body.download ? { download: `american-shadow-${sess.id.slice(0, 8)}.${sess.audio_path.endsWith(".wav") ? "wav" : "mp3"}` } : undefined);
       if (error) return json({ error: "Couldn't load the recording." }, 500);
       return json({ url: data.signedUrl });
     }
