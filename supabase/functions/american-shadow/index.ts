@@ -220,7 +220,7 @@ async function step(admin: SupabaseClient, sessionId: string): Promise<void> {
         if (!m || m[0].trim().length < 8 || !prev.slice(-400).includes(m[0].trim())) break;
         cleaned = cleaned.slice(m[0].length);
       }
-      await admin.from("shadow_session_sections").update({ text, generation_status: "text_done", error_message: null }).eq("id", needText.id);
+      await admin.from("shadow_session_sections").update({ text: cleaned.trim() || text, generation_status: "text_done", error_message: null }).eq("id", needText.id);
     } catch (e) {
       const st = e instanceof GatewayError ? e.status : 0;
       const retries = needText.retry_count + 1;
