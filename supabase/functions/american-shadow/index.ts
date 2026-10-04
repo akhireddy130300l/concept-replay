@@ -109,7 +109,7 @@ async function generateText(topic: string, index: number, total: number, previou
   const input = [
     `Topic / situation: ${topic}`,
     beat,
-    previous ? `The script so far ends with:\n"""${previous.slice(-3000)}"""\nContinue seamlessly from there.` : "",
+    previous ? `The script so far ends with:\n"""${previous.slice(-3000)}"""\nContinue seamlessly from there. Do NOT repeat that last sentence — start with the very next new line.` : "",
     openings.length ? `Earlier parts began with these lines — do not repeat or echo them:\n${openings.map((o) => `- ${o}`).join("\n")}` : "",
   ].filter(Boolean).join("\n\n");
 
@@ -213,6 +213,13 @@ async function step(admin: SupabaseClient, sessionId: string): Promise<void> {
       }
       const openings = secs.filter((x) => x.section_index < idx && x.text).map((x) => String(x.text).split(/(?<=[.!?])\s/)[0].slice(0, 120));
       const text = await generateText(s.topic, idx, PLANNED_SECTIONS, prev, idx >= PLANNED_SECTIONS, words, openings);
+      // drop any leading sentences the model echoed from the end of the previous part
+      let cleaned = text;
+      for (let k = 0; k < 3; k++) {
+        const m = cleaned.match(/^[^.!?]*[.!?]+["'”’]?\s*/);
+        if (!m || m[0].trim().length < 8 || !prev.slice(-400).includes(m[0].trim())) break;
+        cleaned = cleaned.slice(m[0].length);
+      }
       await admin.from("shadow_session_sections").update({ text, generation_status: "text_done", error_message: null }).eq("id", needText.id);
     } catch (e) {
       const st = e instanceof GatewayError ? e.status : 0;
