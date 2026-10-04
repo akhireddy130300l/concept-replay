@@ -40,7 +40,7 @@ const WORDS_PER_SECTION = 245;
 const TARGET_SECONDS = 615;
 const MIN_SECONDS = 600;
 const MAX_SECTIONS = 11; // hard stop against runaway generation
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 5;
 const MAX_STEPS = 60;
 const DAILY_LIMIT = 6;
 const ACTIVE = ["queued", "generating_text", "generating_audio", "assembling", "verifying_duration"];
@@ -228,7 +228,7 @@ async function step(admin: SupabaseClient, sessionId: string): Promise<void> {
       await admin.from("shadow_session_sections").update({ generation_status: "failed", retry_count: retries, error_message: String((e as Error).message).slice(0, 300) }).eq("id", needText.id);
       const terminal = [401, 402, 403, 400].includes(st) || retries >= MAX_RETRIES;
       if (terminal) { await setS({ status: "partial_failure", error_message: friendlyFailure(st, "text", idx) }); return; }
-      await new Promise((r) => setTimeout(r, 2000 * retries));
+      await new Promise((r) => setTimeout(r, (st === 429 || st >= 500 ? 15000 : 2000) * retries));
     }
     return dispatch(sessionId);
   }
@@ -253,7 +253,7 @@ async function step(admin: SupabaseClient, sessionId: string): Promise<void> {
       await admin.from("shadow_session_sections").update({ generation_status: "failed", retry_count: retries, error_message: String((e as Error).message).slice(0, 300) }).eq("id", needAudio.id);
       const terminal = [401, 402, 403, 400].includes(st) || retries >= MAX_RETRIES;
       if (terminal) { await setS({ status: "partial_failure", error_message: friendlyFailure(st, "voice audio", idx) }); return; }
-      await new Promise((r) => setTimeout(r, 2000 * retries));
+      await new Promise((r) => setTimeout(r, (st === 429 || st >= 500 ? 15000 : 2000) * retries));
     }
     return dispatch(sessionId);
   }
