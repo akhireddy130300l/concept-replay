@@ -169,7 +169,7 @@ function dispatch(sessionId: string) {
 }
 
 function friendlyFailure(status: number, what: string, idx: number): string {
-  if (status === 402) return "AI credits are used up. Your completed sections are safe — add credits, then tap Retry.";
+  if (status === 402) return "Gemini quota is used up. Your completed sections are safe — tap Retry later.";
   if (status === 403) return "The AI service declined this request. Your completed sections are safe.";
   if (status === 401) return "Voice generation isn't configured yet. Add the required backend secret GEMINI_API_KEY.";
   return `Section ${idx + 1} ${what} couldn't be created. Your completed sections are safe. Retry from Section ${idx + 1}.`;
@@ -322,7 +322,7 @@ Deno.serve(async (req) => {
       }
       const { data: created, error } = await admin.from("shadow_sessions").insert({
         user_id: body.user_id, topic: String(body.topic).slice(0, 300), source_type: "generated", idempotency_key: `internal-${crypto.randomUUID()}`,
-        status: "queued", progress_label: "Preparing your session…", voice_provider: `lovable-ai/${TTS_MODEL}`, voice_id: VOICE, text_model: TEXT_MODEL,
+        status: "queued", progress_label: "Preparing your session…", voice_provider: `google-gemini/${TTS_MODEL}`, voice_id: VOICE, text_model: TEXT_MODEL,
       }).select("id").single();
       if (error) return json({ error: error.message }, 400);
       await admin.from("shadow_session_sections").insert(Array.from({ length: PLANNED_SECTIONS }, (_, i) => ({ session_id: created.id, section_index: i })));
@@ -353,7 +353,7 @@ Deno.serve(async (req) => {
       const { count: prior } = await admin.from("shadow_sessions").select("id", { count: "exact", head: true }).eq("user_id", user.id).ilike("topic", topic);
       const { data: created, error } = await admin.from("shadow_sessions").insert({
         user_id: user.id, topic, source_type: source, idempotency_key: key, status: "queued",
-        progress_label: "Preparing your session…", voice_provider: `lovable-ai/${TTS_MODEL}`, voice_id: VOICE, text_model: TEXT_MODEL,
+        progress_label: "Preparing your session…", voice_provider: `google-gemini/${TTS_MODEL}`, voice_id: VOICE, text_model: TEXT_MODEL,
         generation_version: (prior ?? 0) + 1,
       }).select("*").single();
       if (error) {
