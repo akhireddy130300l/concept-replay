@@ -1,6 +1,6 @@
 // American Shadow — 10-minute continuous shadowing sessions.
 // Independent module. Text: Google Gemini direct (GEMINI_API_KEY, gemini-2.5-flash).
-// Voice: Google Gemini TTS direct (gemini-2.5-flash-preview-tts, male voice), 24kHz PCM -> WAV.
+// Voice: same TTS as Speaking Gym (Lovable AI, openai/gpt-4o-mini-tts, onyx), mp3 chunks joined.
 // Work runs one unit per invocation, chained via INTERNAL_DISPATCH_SECRET, so a
 // failure only affects the current section and completed sections are never redone.
 
@@ -16,8 +16,10 @@ const json = (b: unknown, status = 200) =>
 
 const BUCKET = "shadow-audio";
 const TEXT_MODEL = "gemini-2.5-flash";
-const TTS_MODEL = "gemini-2.5-flash-preview-tts";
-const VOICE = "Orus";
+const TTS_MODEL = "openai/gpt-4o-mini-tts"; // same as Speaking Gym
+const VOICE = "onyx"; // adult male
+const TRANSCRIPT_WORDS = 1750;
+const TTS_MAX_CHARS = 1900; // speaking-tts limit is 2000
 const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
 const PCM_RATE = 24000; // 16-bit mono
 
@@ -35,11 +37,7 @@ function pcmOf(wav: Uint8Array): Uint8Array { return wav.subarray(44); }
 const pcmSeconds = (pcm: Uint8Array) => pcm.length / (PCM_RATE * 2);
 const VOICE_STYLE =
   "Adult American man with a General American accent. Natural, relaxed, conversational, calm but energetic. Steady everyday speaking pace, not dramatic, no long pauses.";
-const PLANNED_SECTIONS = 8; // 7 body sections + 1 closing sized from measured audio
-const WORDS_PER_SECTION = 245;
-const TARGET_SECONDS = 615;
 const MIN_SECONDS = 600;
-const MAX_SECTIONS = 11; // hard stop against runaway generation
 const MAX_RETRIES = 5;
 const MAX_STEPS = 60;
 const DAILY_LIMIT = 6;
@@ -89,64 +87,58 @@ function parseMp3(buf: Uint8Array): { frames: Uint8Array[]; seconds: number } {
 // ---------- AI calls ----------
 class GatewayError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 
-async function generateText(topic: string, index: number, total: number, previous: string, extension: boolean, words = WORDS_PER_SECTION, openings: string[] = []): Promise<string> {
-  const beat = extension
-    ? "This is a short final add-on after the goodbye: one last natural exchange as he heads out (e.g. a parting remark or quick text), ending cleanly. Do not restart the scene."
-    : index === 0
-      ? "This is the opening: jump straight into the situation (e.g. arriving, starting the conversation). No meta-introduction."
-      : index === total - 1
-        ? "This is the final part: naturally wrap things up and end with a real goodbye or closing line."
-        : `This is part ${index + 1} of ${total}: move the situation forward with new details, new people or new subtopics. Never repeat earlier lines.`;
+// EXACTLY ONE Gemini text call per session: the complete ~10-minute transcript.
+async function generateTranscript(topic: string): Promise<string> {
   const instructions = [
     "You write spoken monologue scripts for American English shadowing practice. A learner listens on earphones and speaks along about one second behind the narrator.",
-    "Write ONLY the words the narrator says, in first person, as if he is actually living the situation (talking to friends, teammates, coworkers, etc.). It is a one-voice performance: he speaks his own lines and naturally reacts to what others say (\"Wait, you went to Denver? No way.\").",
-    "The scene keeps moving forward in time. Never restart the scene, never re-arrive, never greet the same people again, never reintroduce people already introduced.",
-    "Never lecture or explain (do NOT write 'Here are ways to...'). No stage directions, no brackets, no speaker labels, no headings, no 'pause now', no lists.",
-    "Natural contemporary American English: contractions, natural transitions, follow-up questions, occasional idioms, realistic sentence lengths. Light, not excessive, slang. Avoid 'um'/'uh' and repeated greetings.",
-    "For story topics, invent a complete believable everyday story (setup, people, event, reactions, details, outcome, reflection). For opinion topics, move through connected subjects: give opinions, reasons, examples, agree, partly agree, disagree politely, qualify views.",
-    `Length: about ${words} words for this part. Plain text only, short paragraphs.`,
+    "Write ONLY the words the narrator says, in first person, as if he is actually living the situation. One-voice performance: he speaks his own lines and naturally reacts to what others say (\"Wait, you went to Denver? No way.\").",
+    "The scene moves forward in time from start to finish, ending with one natural goodbye or closing line. Never restart the scene, never re-greet the same people, never repeat earlier lines or paragraphs.",
+    "Never lecture or explain. No stage directions, no brackets, no speaker labels, no headings, no lists.",
+    "Natural contemporary American English: contractions, natural transitions, follow-up questions, occasional idioms, realistic sentence lengths. Avoid 'um'/'uh'.",
+    "For story topics, invent a complete believable everyday story. For opinion topics, move through connected subjects with opinions, reasons, examples, polite disagreement.",
+    `Length: this must fill 10+ minutes of continuous speech — write ${TRANSCRIPT_WORDS} to ${TRANSCRIPT_WORDS + 150} words. Plain text only, short paragraphs.`,
   ].join("\n");
-  const input = [
-    `Topic / situation: ${topic}`,
-    beat,
-    previous ? `The script so far ends with:\n"""${previous.slice(-3000)}"""\nContinue seamlessly from there. Do NOT repeat that last sentence — start with the very next new line.` : "",
-    openings.length ? `Earlier parts began with these lines — do not repeat or echo them:\n${openings.map((o) => `- ${o}`).join("\n")}` : "",
-  ].filter(Boolean).join("\n\n");
-
   const res = await fetch(`${GEMINI}/${TEXT_MODEL}:generateContent?key=${encodeURIComponent(env("GEMINI_API_KEY"))}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: instructions }] },
-      contents: [{ role: "user", parts: [{ text: input }] }],
-      generationConfig: { temperature: 0.9 },
+      contents: [{ role: "user", parts: [{ text: `Topic / situation: ${topic}` }] }],
+      generationConfig: { temperature: 0.9, maxOutputTokens: 8192, thinkingConfig: { thinkingBudget: 0 } },
     }),
   });
   if (!res.ok) throw new GatewayError(res.status, (await res.text()).slice(0, 300));
   const data = await res.json();
   let text = (data?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p?.text ?? "").join("");
   text = text.replace(/\[[^\]]*\]|\([^)]*(pause|laugh|sigh)[^)]*\)/gi, "").replace(/\*+/g, "").trim();
-  if (text.split(/\s+/).length < 60) throw new GatewayError(200, "empty_or_refused");
+  if (text.split(/\s+/).length < 300) throw new GatewayError(200, "empty_or_refused");
   return text;
 }
 
+// Split the SAVED transcript locally (zero AI calls) into the minimum number of TTS-safe chunks.
+function splitTranscript(text: string, max = TTS_MAX_CHARS): string[] {
+  const sentences = text.replace(/\s+/g, " ").match(/[^.!?]+[.!?]+["'”’]?\s*|[^.!?]+$/g) ?? [text];
+  const out: string[] = [];
+  let cur = "";
+  for (const s of sentences) {
+    if ((cur + s).length > max && cur) { out.push(cur.trim()); cur = ""; }
+    cur += s;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+// Same TTS as Speaking Gym (speaking-tts): Lovable AI Gateway, openai/gpt-4o-mini-tts, mp3.
 async function synthesize(text: string): Promise<Uint8Array> {
-  const res = await fetch(`${GEMINI}/${TTS_MODEL}:generateContent?key=${encodeURIComponent(env("GEMINI_API_KEY"))}`, {
+  const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/speech", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: `${VOICE_STYLE} Read this aloud:\n\n${text}` }] }],
-      generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } } } },
-    }),
+    headers: { Authorization: `Bearer ${env("LOVABLE_API_KEY")}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: TTS_MODEL, input: text, voice: VOICE, instructions: VOICE_STYLE, response_format: "mp3" }),
   });
   if (!res.ok) throw new GatewayError(res.status, (await res.text()).slice(0, 300));
-  const data = await res.json();
-  const b64 = data?.candidates?.[0]?.content?.parts?.find((p: any) => p?.inlineData?.data)?.inlineData?.data;
-  if (!b64) throw new GatewayError(200, "empty_audio");
-  const bin = atob(b64);
-  const pcm = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i);
-  return pcm;
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf.length < 1000) throw new GatewayError(200, "empty_audio");
+  return buf;
 }
 
 // ---------- helpers ----------
@@ -169,9 +161,13 @@ function dispatch(sessionId: string) {
 }
 
 function friendlyFailure(status: number, what: string, idx: number): string {
-  if (status === 402 || status === 429) return "Your Gemini usage limit was reached for now. Your completed sections are safe — tap Retry in a few minutes.";
+  if (idx < 0 && status === 429) return "Gemini's usage limit was reached, so the script wasn't written yet. Nothing was lost — tap Retry later (daily quota resets at midnight Pacific).";
+  if (idx < 0 && status === 402) return "Gemini billing/credits are exhausted. Tap Retry once the Gemini key has quota again.";
+  if (idx < 0) return "The script couldn't be written. Tap Retry.";
+  if (status === 402) return "AI credits for voice audio are exhausted. Your script and finished audio parts are saved — tap Retry after adding credits.";
+  if (status === 429) return "Voice service is busy. Your script and finished audio parts are saved — tap Retry in a few minutes.";
   if (status === 403) return "The AI service declined this request. Your completed sections are safe.";
-  if (status === 401) return "Voice generation isn't configured yet. Add the required backend secret GEMINI_API_KEY.";
+  if (status === 401) return "Voice generation isn't configured yet. Check backend secrets.";
   return `Section ${idx + 1} ${what} couldn't be created. Your completed sections are safe. Retry from Section ${idx + 1}.`;
 }
 
@@ -189,61 +185,42 @@ async function step(admin: SupabaseClient, sessionId: string): Promise<void> {
     .eq("id", sessionId).eq("step_count", s.step_count).select("id");
   if (!claimed?.length) return;
 
-  const { data: sections } = await admin.from("shadow_session_sections").select("*").eq("session_id", sessionId).order("section_index");
-  const secs = sections ?? [];
   const setS = (patch: Record<string, unknown>) => admin.from("shadow_sessions").update(patch).eq("id", sessionId);
-  const plannedTotal = Math.max(PLANNED_SECTIONS, secs.length);
 
-  // 1) text
-  let needText = secs.find((x) => x.generation_status === "pending" || (x.generation_status === "failed" && !x.text));
-  // The closing section is sized from the real measured audio, so voice all earlier sections first.
-  if (needText && needText.section_index >= PLANNED_SECTIONS - 1 && secs.some((x) => x.section_index < needText!.section_index && !x.audio_path)) needText = undefined;
-  if (needText) {
-    const idx = needText.section_index;
-    await setS({ status: "generating_text", progress_label: `Writing section ${idx + 1} of ${plannedTotal}` });
-    const prev = secs.filter((x) => x.section_index < idx && x.text).map((x) => x.text).join("\n\n");
+  // 1) transcript: one Gemini call, saved immediately, then split locally into TTS chunks.
+  if (!s.transcript) {
+    await setS({ status: "generating_text", progress_label: "Writing your 10-minute script" });
     try {
-      let words = WORDS_PER_SECTION;
-      if (idx >= PLANNED_SECTIONS - 1) {
-        const voiced = secs.filter((x) => x.section_index < idx && x.audio_path);
-        const secsSoFar = voiced.reduce((a, x) => a + Number(x.duration_seconds ?? 0), 0);
-        const wordsSoFar = voiced.reduce((a, x) => a + String(x.text ?? "").split(/\s+/).length, 0);
-        const wps = secsSoFar > 0 ? wordsSoFar / secsSoFar : 3.1;
-        words = Math.max(90, Math.min(450, Math.round((TARGET_SECONDS - secsSoFar) * wps)));
-      }
-      const openings = secs.filter((x) => x.section_index < idx && x.text).map((x) => String(x.text).split(/(?<=[.!?])\s/)[0].slice(0, 120));
-      const text = await generateText(s.topic, idx, PLANNED_SECTIONS, prev, idx >= PLANNED_SECTIONS, words, openings);
-      // drop any leading sentences the model echoed from the end of the previous part
-      let cleaned = text;
-      for (let k = 0; k < 3; k++) {
-        const m = cleaned.match(/^[^.!?]*[.!?]+["'”’]?\s*/);
-        if (!m || m[0].trim().length < 8 || !prev.slice(-400).includes(m[0].trim())) break;
-        cleaned = cleaned.slice(m[0].length);
-      }
-      await admin.from("shadow_session_sections").update({ text: cleaned.trim() || text, generation_status: "text_done", error_message: null }).eq("id", needText.id);
+      const text = await generateTranscript(s.topic);
+      const chunks = splitTranscript(text);
+      await admin.from("shadow_session_sections").delete().eq("session_id", sessionId); // scratch rows only
+      await admin.from("shadow_session_sections").insert(chunks.map((t, i) => ({ session_id: sessionId, section_index: i, text: t, generation_status: "text_done" })));
+      await setS({ transcript: text, error_message: null });
+      console.log(JSON.stringify({ phase: "shadow_text", session: sessionId, gemini_text_calls: 1, words: text.split(/\s+/).length, chunks: chunks.length }));
     } catch (e) {
       const st = e instanceof GatewayError ? e.status : 0;
-      const retries = needText.retry_count + 1;
-      console.log(JSON.stringify({ phase: "shadow_text", session: sessionId, idx, status: st, msg: String((e as Error).message).slice(0, 200) }));
-      await admin.from("shadow_session_sections").update({ generation_status: "failed", retry_count: retries, error_message: String((e as Error).message).slice(0, 300) }).eq("id", needText.id);
-      const terminal = [401, 402, 403, 400].includes(st) || retries >= MAX_RETRIES;
-      if (terminal) { await setS({ status: "partial_failure", error_message: friendlyFailure(st, "text", idx) }); return; }
-      await new Promise((r) => setTimeout(r, Math.min(45000, (st === 429 || st >= 500 ? 15000 : 2000) * retries)));
+      console.log(JSON.stringify({ phase: "shadow_text_fail", session: sessionId, status: st, msg: String((e as Error).message).slice(0, 200) }));
+      // No automatic Gemini retries — user taps Retry.
+      await setS({ status: "partial_failure", error_message: friendlyFailure(st, "script", -1) });
+      return;
     }
     return dispatch(sessionId);
   }
 
-  // 2) audio
-  const needAudio = secs.find((x) => x.text && (x.generation_status === "text_done" || (x.generation_status === "failed" && !x.audio_path)));
+  const { data: sections } = await admin.from("shadow_session_sections").select("*").eq("session_id", sessionId).order("section_index");
+  const secs = sections ?? [];
+
+  // 2) audio: one TTS call per chunk; a failed chunk is retried alone.
+  const needAudio = secs.find((x) => x.text && !x.audio_path);
   if (needAudio) {
     const idx = needAudio.section_index;
     await setS({ status: "generating_audio", progress_label: `Creating voice audio ${idx + 1} of ${secs.length}` });
     try {
       await ensureBucket(admin);
-      const pcm = await synthesize(needAudio.text);
-      const seconds = pcmSeconds(pcm);
-      const path = `${s.user_id}/${sessionId}/section-${idx}.wav`;
-      const up = await admin.storage.from(BUCKET).upload(path, toWav(pcm), { contentType: "audio/wav", upsert: true });
+      const mp3 = await synthesize(needAudio.text);
+      const seconds = parseMp3(mp3).seconds;
+      const path = `${s.user_id}/${sessionId}/chunk-${idx}.mp3`;
+      const up = await admin.storage.from(BUCKET).upload(path, mp3, { contentType: "audio/mpeg", upsert: true });
       if (up.error) throw new Error(`storage: ${up.error.message}`);
       await admin.from("shadow_session_sections").update({ audio_path: path, duration_seconds: seconds, generation_status: "audio_done", error_message: null }).eq("id", needAudio.id);
     } catch (e) {
@@ -251,54 +228,41 @@ async function step(admin: SupabaseClient, sessionId: string): Promise<void> {
       const retries = needAudio.retry_count + 1;
       console.log(JSON.stringify({ phase: "shadow_tts", session: sessionId, idx, status: st, msg: String((e as Error).message).slice(0, 200) }));
       await admin.from("shadow_session_sections").update({ generation_status: "failed", retry_count: retries, error_message: String((e as Error).message).slice(0, 300) }).eq("id", needAudio.id);
-      const terminal = [401, 402, 403, 400].includes(st) || retries >= MAX_RETRIES;
+      const terminal = [400, 401, 402, 403].includes(st) || retries >= MAX_RETRIES;
       if (terminal) { await setS({ status: "partial_failure", error_message: friendlyFailure(st, "voice audio", idx) }); return; }
       await new Promise((r) => setTimeout(r, Math.min(45000, (st === 429 || st >= 500 ? 15000 : 2000) * retries)));
     }
     return dispatch(sessionId);
   }
 
-  // 3) duration check (sum of measured section durations) -> extend if short
-  const total = secs.reduce((a, x) => a + Number(x.duration_seconds ?? 0), 0);
-  await setS({ status: "verifying_duration", progress_label: "Checking audio duration" });
-  if (total < MIN_SECONDS) {
-    if (secs.length >= MAX_SECTIONS) {
-      await setS({ status: "partial_failure", error_message: `Measured duration is ${fmt(total)}, below 10:00, and the safety limit on extra sections was reached.` });
-      return;
-    }
-    await admin.from("shadow_session_sections").insert({ session_id: sessionId, section_index: secs.length });
-    return dispatch(sessionId);
-  }
-
-  // 4) assemble into one continuous mp3
+  // 3) combine all chunks into one continuous mp3 and verify real duration
   await setS({ status: "assembling", progress_label: "Combining your recording" });
   try {
-    const parts: Uint8Array[] = [];
+    const frames: Uint8Array[] = [];
     let seconds = 0;
     for (const x of secs) {
       const { data, error } = await admin.storage.from(BUCKET).download(x.audio_path);
-      if (error || !data) throw new Error(`download section ${x.section_index + 1}`);
-      const pcm = pcmOf(new Uint8Array(await data.arrayBuffer()));
-      parts.push(pcm);
-      seconds += pcmSeconds(pcm);
+      if (error || !data) throw new Error(`download chunk ${x.section_index + 1}`);
+      const p = parseMp3(new Uint8Array(await data.arrayBuffer()));
+      frames.push(...p.frames); seconds += p.seconds;
     }
-    const size = parts.reduce((a, p) => a + p.length, 0);
-    const out = new Uint8Array(44 + size);
-    out.set(wavHeader(size));
-    let o = 44;
-    for (const p of parts) { out.set(p, o); o += p.length; }
-    const path = `${s.user_id}/${sessionId}/session.wav`;
-    const up = await admin.storage.from(BUCKET).upload(path, out, { contentType: "audio/wav", upsert: true });
+    const size = frames.reduce((a, f) => a + f.length, 0);
+    const out = new Uint8Array(size);
+    let o = 0;
+    for (const f of frames) { out.set(f, o); o += f.length; }
+    const path = `${s.user_id}/${sessionId}/session.mp3`;
+    const up = await admin.storage.from(BUCKET).upload(path, out, { contentType: "audio/mpeg", upsert: true });
     if (up.error) throw new Error(up.error.message);
-    const verified = pcmSeconds(out.subarray(44));
-    await setS({
-      status: "completed", progress_label: null, audio_path: path, duration_seconds: Math.round(verified * 10) / 10,
-      transcript: secs.map((x) => x.text).join("\n\n"), completed_at: new Date().toISOString(), error_message: null,
-    });
-    console.log(JSON.stringify({ phase: "shadow_done", session: sessionId, sections: secs.length, seconds: verified, bytes: size, words: secs.map((x) => x.text).join(" ").split(/\s+/).length }));
+    const verified = Math.round(seconds * 10) / 10;
+    console.log(JSON.stringify({ phase: "shadow_done", session: sessionId, chunks: secs.length, tts_calls: secs.length, seconds: verified, bytes: size }));
+    if (verified < MIN_SECONDS) {
+      await setS({ status: "failed", audio_path: path, duration_seconds: verified, error_message: `The script came out short (${fmt(verified)}, under 10:00). Generate a new version.` });
+      return;
+    }
+    await setS({ status: "completed", progress_label: null, audio_path: path, duration_seconds: verified, completed_at: new Date().toISOString(), error_message: null });
   } catch (e) {
     console.log(JSON.stringify({ phase: "shadow_assemble", session: sessionId, msg: String((e as Error).message) }));
-    await setS({ status: "partial_failure", error_message: "Your generated sections are safe. Retry audio assembly." });
+    await setS({ status: "partial_failure", error_message: "Your audio chunks are safe. Tap Retry to combine them." });
   }
 }
 
@@ -329,10 +293,9 @@ Deno.serve(async (req) => {
       }
       const { data: created, error } = await admin.from("shadow_sessions").insert({
         user_id: body.user_id, topic: String(body.topic).slice(0, 300), source_type: "generated", idempotency_key: `internal-${crypto.randomUUID()}`,
-        status: "queued", progress_label: "Preparing your session…", voice_provider: `google-gemini/${TTS_MODEL}`, voice_id: VOICE, text_model: TEXT_MODEL,
+        status: "queued", progress_label: "Preparing your session…", voice_provider: `lovable-ai/${TTS_MODEL}`, voice_id: VOICE, text_model: TEXT_MODEL,
       }).select("id").single();
       if (error) return json({ error: error.message }, 400);
-      await admin.from("shadow_session_sections").insert(Array.from({ length: PLANNED_SECTIONS }, (_, i) => ({ session_id: created.id, section_index: i })));
       dispatch(created.id);
       return json({ session_id: created.id });
     }
@@ -360,7 +323,7 @@ Deno.serve(async (req) => {
       const { count: prior } = await admin.from("shadow_sessions").select("id", { count: "exact", head: true }).eq("user_id", user.id).ilike("topic", topic);
       const { data: created, error } = await admin.from("shadow_sessions").insert({
         user_id: user.id, topic, source_type: source, idempotency_key: key, status: "queued",
-        progress_label: "Preparing your session…", voice_provider: `google-gemini/${TTS_MODEL}`, voice_id: VOICE, text_model: TEXT_MODEL,
+        progress_label: "Preparing your session…", voice_provider: `lovable-ai/${TTS_MODEL}`, voice_id: VOICE, text_model: TEXT_MODEL,
         generation_version: (prior ?? 0) + 1,
       }).select("*").single();
       if (error) {
@@ -368,7 +331,6 @@ Deno.serve(async (req) => {
         if (dup) return json({ session: dup, reused: true });
         return json({ error: "Couldn't start the session." }, 500);
       }
-      await admin.from("shadow_session_sections").insert(Array.from({ length: PLANNED_SECTIONS }, (_, i) => ({ session_id: created.id, section_index: i })));
       dispatch(created.id);
       return json({ session: created });
     }
