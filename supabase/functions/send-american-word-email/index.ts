@@ -57,13 +57,14 @@ function render(it: Item, hourLabel: string) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
-  const secret = Deno.env.get("CRON_SECRET");
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  let secret = "";
+  try { const { data } = await admin.rpc("get_cron_secret"); if (typeof data === "string") secret = data; } catch { /* ignore */ }
+  if (!secret) secret = Deno.env.get("CRON_SECRET") ?? "";
   if (!secret || req.headers.get("x-cron-secret") !== secret) return json({ error: "Forbidden" }, 403);
   const body = await req.json().catch(() => ({}));
   const { date, hour } = easternNow();
   if (!body?.force && (hour < 9 || hour > 17)) return json({ skipped: "outside_9_to_5_eastern", hour });
-
-  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const { data: existing } = await admin.from("american_word_emails").select("id,sent_ok").eq("sent_for", date).eq("et_hour", hour).maybeSingle();
   if (existing?.sent_ok) return json({ skipped: "already_sent", date, hour });
 
