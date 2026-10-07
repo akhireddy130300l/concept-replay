@@ -48,3 +48,6 @@ verify_jwt = false
 
 [functions.american-shadow]
 verify_jwt = false
+
+[functions.send-american-word-email]
+verify_jwt = false
