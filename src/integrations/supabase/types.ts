@@ -70,6 +70,48 @@ export type Database = {
           },
         ]
       }
+      american_word_emails: {
+        Row: {
+          created_at: string
+          et_hour: number
+          id: string
+          meaning: string | null
+          pronunciation: string
+          sent_for: string
+          sent_ok: boolean
+          sentence: string
+          sentence_key: string | null
+          word: string
+          word_key: string | null
+        }
+        Insert: {
+          created_at?: string
+          et_hour: number
+          id?: string
+          meaning?: string | null
+          pronunciation: string
+          sent_for: string
+          sent_ok?: boolean
+          sentence: string
+          sentence_key?: string | null
+          word: string
+          word_key?: string | null
+        }
+        Update: {
+          created_at?: string
+          et_hour?: number
+          id?: string
+          meaning?: string | null
+          pronunciation?: string
+          sent_for?: string
+          sent_ok?: boolean
+          sentence?: string
+          sentence_key?: string | null
+          word?: string
+          word_key?: string | null
+        }
+        Relationships: []
+      }
       backtest_equity_curve: {
         Row: {
           backtest_run_id: string | null
