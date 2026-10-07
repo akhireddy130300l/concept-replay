@@ -41,7 +41,26 @@ Every sentence must be fresh and different. Do NOT use any of these already-used
   return JSON.parse(text) as Item[];
 }
 
-function render(it: Item, hourLabel: string) {
+// Gemini TTS: one call per email, casual movie-style American speech, saved as a public WAV.
+async function speak(it: Item): Promise<Uint8Array> {
+  const script = `Say this like a relaxed young American guy chatting with a friend in a movie scene — fast, casual, natural reductions and linking, real emotion. Not a dictionary, not a teacher, not slow.\n\nFirst just the word, said the way it'd pop up in conversation: "${it.word}". Then a short beat. Then the line: "${it.sentence}"`;
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(Deno.env.get("GEMINI_API_KEY") ?? "")}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ parts: [{ text: script }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } } } }),
+  });
+  if (!res.ok) throw new Error(`tts ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  const b64 = data?.candidates?.[0]?.content?.parts?.find((p: any) => p?.inlineData?.data)?.inlineData?.data;
+  if (!b64) throw new Error("empty_audio");
+  const bin = atob(b64); const pcm = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) pcm[i] = bin.charCodeAt(i);
+  const h = new DataView(new ArrayBuffer(44)); const w = (o: number, t: string) => { for (let i = 0; i < 4; i++) h.setUint8(o + i, t.charCodeAt(i)); };
+  w(0, "RIFF"); h.setUint32(4, 36 + pcm.length, true); w(8, "WAVE"); w(12, "fmt "); h.setUint32(16, 16, true); h.setUint16(20, 1, true); h.setUint16(22, 1, true);
+  h.setUint32(24, 24000, true); h.setUint32(28, 48000, true); h.setUint16(32, 2, true); h.setUint16(34, 16, true); w(36, "data"); h.setUint32(40, pcm.length, true);
+  const out = new Uint8Array(44 + pcm.length); out.set(new Uint8Array(h.buffer)); out.set(pcm, 44); return out;
+}
+
+function render(it: Item, hourLabel: string, audioUrl: string | null) {
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;padding:24px 0;"><tr><td align="center">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;padding:28px;"><tr><td>
@@ -49,6 +68,7 @@ function render(it: Item, hourLabel: string) {
 <div style="font-size:30px;font-weight:700;color:#111827;margin:10px 0 4px 0;">${esc(it.word)}</div>
 <div style="font-size:18px;color:#1d4ed8;font-weight:700;margin-bottom:6px;">Say it: ${esc(it.pronunciation)}</div>
 <div style="font-size:14px;color:#4b5563;margin-bottom:18px;">${esc(it.meaning)}</div>
+${audioUrl ? `<div style="margin:0 0 18px 0;"><a href="${esc(audioUrl)}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px;font-size:15px;">&#9654; Hear it like a real American</a></div>` : ""}
 <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px;">
 <div style="font-size:12px;color:#92400e;font-weight:700;text-transform:uppercase;">Say this out loud 3 times</div>
 <div style="font-size:17px;color:#111827;margin-top:6px;">&ldquo;${esc(it.sentence)}&rdquo;</div></div>
@@ -91,11 +111,23 @@ Deno.serve(async (req) => {
     if (!item || !row) return json({ error: "all_candidates_were_repeats" }, 409);
   }
 
+  let audioUrl: string | null = null;
+  try {
+    const path = `${row.id}.wav`;
+    const { data: ex } = await admin.storage.from("word-audio").list("", { search: path });
+    if (!ex?.length) {
+      const wav = await speak(item);
+      const up = await admin.storage.from("word-audio").upload(path, wav, { contentType: "audio/wav", upsert: true });
+      if (up.error) throw new Error(up.error.message);
+    }
+    audioUrl = admin.storage.from("word-audio").getPublicUrl(path).data.publicUrl;
+  } catch (e) { console.log(JSON.stringify({ phase: "word_audio", error: String(e).slice(0, 200) })); }
+
   const hourLabel = `${((hour + 11) % 12) + 1} ${hour < 12 ? "AM" : "PM"} ET`;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}` },
-    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `${item.word} — say it like an American (${hourLabel})`, html: render(item, hourLabel) }),
+    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `${item.word} — say it like an American (${hourLabel})`, html: render(item, hourLabel, audioUrl) }),
   });
   if (res.ok) await admin.from("american_word_emails").update({ sent_ok: true }).eq("id", row.id);
   else console.log(JSON.stringify({ phase: "word_send", status: res.status, detail: (await res.text()).slice(0, 200) }));
