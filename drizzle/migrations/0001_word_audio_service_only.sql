@@ -1,0 +1,3 @@
+CREATE POLICY "Word audio service read" ON storage.objects FOR SELECT TO service_role USING (bucket_id = 'word-audio');
+CREATE POLICY "Word audio service insert" ON storage.objects FOR INSERT TO service_role WITH CHECK (bucket_id = 'word-audio');
+CREATE POLICY "Word audio service update" ON storage.objects FOR UPDATE TO service_role USING (bucket_id = 'word-audio') WITH CHECK (bucket_id = 'word-audio');
