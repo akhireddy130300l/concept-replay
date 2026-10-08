@@ -3,8 +3,11 @@
 // Auth: x-cron-secret. Cron fires hourly 13–22 UTC; this function gates on Eastern hour (DST-safe).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
+import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { AUDIO_LINK_SECONDS, sentenceSpeechRequest } from "./sentence-audio.ts";
 
 const cors = {
+  ...corsHeaders,
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -41,12 +44,11 @@ Every sentence must be fresh and different. Do NOT use any of these already-used
   return JSON.parse(text) as Item[];
 }
 
-// Gemini TTS: one call per email, casual movie-style American speech, saved as a public WAV.
+// Gemini TTS: one call per email, complete sentence only, saved as a private WAV.
 async function speak(it: Item): Promise<Uint8Array> {
-  const script = `Say this like a relaxed young American guy chatting with a friend in a movie scene — fast, casual, natural reductions and linking, real emotion. Not a dictionary, not a teacher, not slow.\n\nFirst just the word, said the way it'd pop up in conversation: "${it.word}". Then a short beat. Then the line: "${it.sentence}"`;
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(Deno.env.get("GEMINI_API_KEY") ?? "")}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: script }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } } } }),
+    body: JSON.stringify(sentenceSpeechRequest(it.sentence)),
   });
   if (!res.ok) throw new Error(`tts ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
@@ -114,13 +116,16 @@ Deno.serve(async (req) => {
   let audioUrl: string | null = null;
   try {
     const path = `${row.id}.wav`;
-    const { data: ex } = await admin.storage.from("word-audio").list("", { search: path });
-    if (!ex?.length) {
+    const { data: ex, error: listError } = await admin.storage.from("word-audio").list("", { search: path });
+    if (listError) throw new Error(listError.message);
+    if (!ex?.some((file) => file.name === path)) {
       const wav = await speak(item);
       const up = await admin.storage.from("word-audio").upload(path, wav, { contentType: "audio/wav", upsert: true });
       if (up.error) throw new Error(up.error.message);
     }
-    audioUrl = admin.storage.from("word-audio").getPublicUrl(path).data.publicUrl;
+    const signed = await admin.storage.from("word-audio").createSignedUrl(path, AUDIO_LINK_SECONDS);
+    if (signed.error) throw new Error(signed.error.message);
+    audioUrl = signed.data.signedUrl;
   } catch (e) { console.log(JSON.stringify({ phase: "word_audio", error: String(e).slice(0, 200) })); }
 
   const hourLabel = `${((hour + 11) % 12) + 1} ${hour < 12 ? "AM" : "PM"} ET`;
@@ -131,5 +136,5 @@ Deno.serve(async (req) => {
   });
   if (res.ok) await admin.from("american_word_emails").update({ sent_ok: true }).eq("id", row.id);
   else console.log(JSON.stringify({ phase: "word_send", status: res.status, detail: (await res.text()).slice(0, 200) }));
-  return json({ ok: res.ok, word: item.word, date, hour });
+  return json({ ok: res.ok, word: item.word, date, hour, audio_available: Boolean(audioUrl) });
 });
