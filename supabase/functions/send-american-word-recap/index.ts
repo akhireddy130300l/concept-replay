@@ -2,6 +2,7 @@
 // One Gemini call per day. Auth: x-cron-secret. Cron fires at :30 of 21 and 22 UTC; gated to 17:xx Eastern (DST-safe).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { conversationSpeechRequest, pcmToWav } from "./recap-audio.ts";
 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -42,7 +43,7 @@ function highlight(text: string, words: W[]) {
   return out;
 }
 
-function render(s: { title: string; lines: Line[] }, words: W[]) {
+function render(s: { title: string; lines: Line[] }, words: W[], audioUrl: string | null) {
   const lines = s.lines.map((l) => `<tr><td style="padding:6px 0;vertical-align:top;font-weight:700;color:#b45309;width:60px;font-size:15px;">${esc(l.speaker)}:</td><td style="padding:6px 0;font-size:16px;color:#111827;line-height:1.5;">${highlight(l.line, words)}</td></tr>`).join("");
   const list = words.map((w) => `<tr><td style="padding:6px 0;border-bottom:1px solid #e5e7eb;font-size:14px;"><b>${esc(w.word)}</b> <span style="color:#1d4ed8;">(${esc(w.pronunciation)})</span><br><span style="color:#4b5563;">${esc(w.meaning)}</span></td></tr>`).join("");
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
@@ -50,6 +51,7 @@ function render(s: { title: string; lines: Line[] }, words: W[]) {
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;padding:28px;"><tr><td>
 <div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#b45309;font-weight:700;">Today's words · Story recap</div>
 <div style="font-size:26px;font-weight:700;color:#111827;margin:10px 0 16px 0;">${esc(s.title)}</div>
+${audioUrl ? `<div style="margin:0 0 18px 0;"><a href="${esc(audioUrl)}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px;font-size:15px;">&#9654; Hear the conversation</a></div>` : ""}
 <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px;margin-bottom:20px;">
 <div style="font-size:12px;color:#92400e;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Read it out loud — play both parts</div>
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0">${lines}</table></div>
@@ -83,10 +85,28 @@ Deno.serve(async (req) => {
   let s: { title: string; lines: Line[] };
   try { s = await story(words as W[]); } catch (e) { console.log(JSON.stringify({ phase: "recap_gen", error: String(e) })); return json({ error: "generation_failed" }, 502); }
 
+  // One TTS call per day; email still goes out if audio fails.
+  let audioUrl: string | null = null;
+  try {
+    const path = `recap-${date}-${Date.now()}.wav`;
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(Deno.env.get("GEMINI_API_KEY") ?? "")}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(conversationSpeechRequest(s.lines)),
+    });
+    if (!r.ok) throw new Error(`tts ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const d = await r.json();
+    const b64 = d?.candidates?.[0]?.content?.parts?.find((p: any) => p?.inlineData?.data)?.inlineData?.data;
+    if (!b64) throw new Error("empty_audio");
+    const up = await admin.storage.from("word-audio").upload(path, pcmToWav(b64), { contentType: "audio/wav", upsert: true });
+    if (up.error) throw new Error(up.error.message);
+    const signed = await admin.storage.from("word-audio").createSignedUrl(path, 365 * 24 * 60 * 60);
+    if (signed.error) throw new Error(signed.error.message);
+    audioUrl = signed.data.signedUrl;
+  } catch (e) { console.log(JSON.stringify({ phase: "recap_audio", error: String(e).slice(0, 200) })); }
+
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}` },
-    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `Today's ${words.length} words in one story: ${s.title}`, html: render(s, words as W[]) }),
+    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `Today's ${words.length} words in one story: ${s.title}`, html: render(s, words as W[], audioUrl) }),
   });
   if (res.ok) await admin.from("american_word_recaps").upsert({ sent_for: date, story: JSON.stringify(s), sent_ok: true }, { onConflict: "sent_for" });
   else console.log(JSON.stringify({ phase: "recap_send", status: res.status, detail: (await res.text()).slice(0, 200) }));
