@@ -112,6 +112,30 @@ export type Database = {
         }
         Relationships: []
       }
+      american_word_recaps: {
+        Row: {
+          created_at: string
+          id: string
+          sent_for: string
+          sent_ok: boolean
+          story: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          sent_for: string
+          sent_ok?: boolean
+          story?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          sent_for?: string
+          sent_ok?: boolean
+          story?: string | null
+        }
+        Relationships: []
+      }
       backtest_equity_curve: {
         Row: {
           backtest_run_id: string | null

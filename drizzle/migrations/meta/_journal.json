@@ -15,6 +15,13 @@
       "when": 1791497860174,
       "tag": "0001_word_audio_service_only",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791561868050,
+      "tag": "0002_american_word_recaps",
+      "breakpoints": true
     }
   ]
 }
