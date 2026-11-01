@@ -2838,6 +2838,18 @@ serve(async (req) => {
     });
   }
 
+  // ── In-progress run lock: an overlapping cron trigger exits immediately ──
+  let runLockHeld = false;
+  {
+    const { data: got, error: lockErr } = await createClient(supabaseUrl, supabaseServiceKey)
+      .rpc("try_acquire_run_lock", { _name: "send-revision-reminders", _seconds: 600 });
+    if (lockErr) console.error("[run-lock] acquire failed, continuing:", lockErr.message);
+    else if (got !== true) {
+      console.log("[run-lock] previous run still in progress — skipping this trigger");
+      return new Response(JSON.stringify({ skipped: "run_in_progress" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    } else runLockHeld = true;
+  }
+
   try {
     console.log("Initializing Supabase client...");
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -3150,6 +3162,10 @@ serve(async (req) => {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  } finally {
+    if (runLockHeld) {
+      try { await createClient(supabaseUrl, supabaseServiceKey).rpc("release_run_lock", { _name: "send-revision-reminders" }); } catch (_) { /* lease expires on its own */ }
+    }
   }
 });
 
