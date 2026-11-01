@@ -23,8 +23,21 @@ function easternNow() {
   return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
 }
 
-async function generate(used: string[]): Promise<Item[]> {
-  const prompt = `Give 5 different everyday American English words or short phrases that people use constantly in casual daily conversation.
+const THEMES = [
+  "workplace banter, watercooler chat, and office culture",
+  "street idioms, casual reactions, and natural daily slang",
+  "sports, gym, fitness, and weekend downtime",
+  "ordering coffee, casual dining, drinks, and foodie expressions",
+  "hanging out with friends, road trips, and social banter",
+  "running errands, shopping, neighbors, and casual small talk",
+  "entertainment, tech habits, and streaming/pop culture talk",
+];
+
+async function generate(used: string[], hour: number): Promise<Item[]> {
+  const dayIdx = Math.floor(Date.now() / 86400000);
+  const theme = THEMES[(hour + dayIdx) % THEMES.length];
+  const prompt = `Give 20 different everyday American English words or short phrases specifically used in: "${theme}".
+Focus on natural conversational phrasing native speakers actually say daily, not textbook words or overused slang (avoid "cool", "dude", "awesome", "gonna", "totally", "like", "basically").
 For each: the word, how Americans actually pronounce it in relaxed casual speech (simple respelling with stressed syllable in CAPS, e.g. "water" -> "WAH-der", "going to" -> "GUN-nuh"), a short plain meaning, and one natural everyday sentence an American would say using it.
 Every sentence must be fresh and different. Do NOT use any of these already-used words: ${used.slice(-1500).join(", ") || "(none)"}.`;
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(Deno.env.get("GEMINI_API_KEY") ?? "")}`, {
