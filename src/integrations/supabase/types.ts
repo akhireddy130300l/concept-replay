@@ -237,6 +237,24 @@ export type Database = {
         }
         Relationships: []
       }
+      cron_run_locks: {
+        Row: {
+          locked_until: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          locked_until: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          locked_until?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       historical_replay_chunk_scores: {
         Row: {
           chunk_index: number
@@ -3013,6 +3031,11 @@ export type Database = {
     }
     Functions: {
       get_cron_secret: { Args: never; Returns: string }
+      release_run_lock: { Args: { _name: string }; Returns: undefined }
+      try_acquire_run_lock: {
+        Args: { _name: string; _seconds: number }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never
