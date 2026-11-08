@@ -147,7 +147,7 @@ Deno.serve(async (req) => {
   if (!secret) secret = Deno.env.get("CRON_SECRET") ?? "";
   if (!secret || req.headers.get("x-cron-secret") !== secret) return json({ error: "Forbidden" }, 403);
   const body = await req.json().catch(() => null);
-  if (!body || typeof body !== "object" || Array.isArray(body) || (body.force !== undefined && typeof body.force !== "boolean")) return json({ error: "Invalid request" }, 400);
+  if (!body || typeof body !== "object" || Array.isArray(body) || (body.force !== undefined && typeof body.force !== "boolean") || (body.dry_run !== undefined && typeof body.dry_run !== "boolean")) return json({ error: "Invalid request" }, 400);
   const { date, hour, minute } = easternNow();
   if (!eligibleHour(hour, minute)) return json({ skipped: "outside_learning_schedule", hour, minute });
   // Serialize the entire day: concurrent slots cannot exceed three new phrases.
@@ -158,13 +158,13 @@ Deno.serve(async (req) => {
   try {
   const { data: existing, error: existingError } = await admin.from("american_word_emails").select("id,sent_ok").eq("sent_for", date).eq("et_hour", hour).maybeSingle();
   if (existingError) throw new Error("Cannot read hourly delivery");
-  if (existing?.sent_ok) return json({ skipped: "already_sent", date, hour });
+  if (existing?.sent_ok && !body.dry_run) return json({ skipped: "already_sent", date, hour });
 
   const { data: recips } = await admin.from("portfolio_feature_access").select("report_email");
   const to = (recips ?? []).map((r) => r.report_email).filter(Boolean);
   if (!to.length) return json({ skipped: "no_recipients" });
 
-  let row = existing;
+  let row = body.dry_run ? null : existing;
   let item: Item | null = null;
   let kind = "new";
   if (row) {
@@ -207,6 +207,7 @@ Deno.serve(async (req) => {
         if (!c?.word || !c?.sentence || !c?.pronunciation || !c?.meaning || !c?.situation || (introduce && usedKeys.has(c.word.trim().toLowerCase()))) continue;
         if (c.situation.toLowerCase().includes(c.word.toLowerCase())) continue;
         if (!introduce && !c.sentence.toLowerCase().includes(c.word.toLowerCase())) continue;
+        if (body.dry_run) return json({ ok: true, dry_run: true, date, hour, kind, review_of: parent?.id ?? null, word: c.word, situation: c.situation, sentence: c.sentence, html: render(c, `${((hour + 11) % 12) + 1}${hour === 9 ? ":10" : ":00"} ${hour < 12 ? "AM" : "PM"} ET`, null, kind, hour), delivered: false });
         const { data, error } = await admin.from("american_word_emails").insert({ word: c.word.trim(), pronunciation: c.pronunciation, meaning: c.meaning, sentence: c.sentence.trim(), situation: c.situation.trim(), kind, review_of: introduce ? null : parent?.id, sent_for: date, et_hour: hour }).select("id").single();
         if (!error) { row = { id: data.id, sent_ok: false }; item = c; break outer; }
         if (error.code === "23505" && error.message.includes("sent_for")) return json({ skipped: "concurrent_run" });
