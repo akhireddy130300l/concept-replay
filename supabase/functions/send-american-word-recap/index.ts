@@ -3,6 +3,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { conversationSpeechRequest, pcmToWav } from "./recap-audio.ts";
+import { distinctPhrases } from "../_shared/english-practice.ts";
 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -62,7 +63,10 @@ ${audioUrl ? `<div style="margin:0 0 18px 0;"><a href="${esc(audioUrl)}" style="
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) return json({ error: "Service unavailable" }, 503);
+  const admin = createClient(url, key);
   let secret = "";
   try { const { data } = await admin.rpc("get_cron_secret"); if (typeof data === "string") secret = data; } catch { /* ignore */ }
   if (!secret) secret = Deno.env.get("CRON_SECRET") ?? "";
@@ -74,9 +78,11 @@ Deno.serve(async (req) => {
   const { data: ex } = await admin.from("american_word_recaps").select("id,sent_ok").eq("sent_for", date).maybeSingle();
   if (ex?.sent_ok) return json({ skipped: "already_sent", date });
 
-  const { data: words } = await admin.from("american_word_emails").select("word,pronunciation,meaning,sentence,et_hour")
+  const { data: practiced, error: practiceError } = await admin.from("american_word_emails").select("word,pronunciation,meaning,sentence,et_hour")
     .eq("sent_for", date).eq("sent_ok", true).gte("et_hour", 9).lte("et_hour", 17).order("et_hour");
-  if (!words?.length) return json({ skipped: "no_words_today", date });
+  if (practiceError) return json({ error: "practice_history_unavailable" }, 503);
+  const words = distinctPhrases(practiced ?? []);
+  if (!words.length) return json({ skipped: "no_words_today", date });
 
   const { data: recips } = await admin.from("portfolio_feature_access").select("report_email");
   const to = (recips ?? []).map((r) => r.report_email).filter(Boolean);
@@ -105,7 +111,7 @@ Deno.serve(async (req) => {
 
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}`, "Idempotency-Key": `american-recap-${date}` },
     body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `Today's ${words.length} words in one story: ${s.title}`, html: render(s, words as W[], audioUrl) }),
   });
   if (res.ok) await admin.from("american_word_recaps").upsert({ sent_for: date, story: JSON.stringify(s), sent_ok: true }, { onConflict: "sent_for" });
