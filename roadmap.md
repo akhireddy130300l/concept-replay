@@ -6,3 +6,4 @@
 - [ ] Cut new items to 2–3 chunks/day; other hours review/transfer them
 - [ ] No penalty for missed emails (each email self-contained)
 - [ ] 9:10 AM Morning Recall Challenge using yesterday's key phrase
+- [ ] Finish, test, and deploy the hourly learning plan and distinct-phrase recap
