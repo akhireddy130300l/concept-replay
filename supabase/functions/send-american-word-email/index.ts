@@ -15,7 +15,7 @@ const cors = {
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...cors, "Content-Type": "application/json" } });
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-type Item = { word: string; pronunciation: string; meaning: string; sentence: string };
+type Item = { word: string; pronunciation: string; meaning: string; sentence: string; situation?: string };
 
 function easternNow() {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" })
@@ -55,7 +55,7 @@ async function generate(used: string[], themeIdx: number): Promise<Item[]> {
   const theme = THEMES[((themeIdx % THEMES.length) + THEMES.length) % THEMES.length];
   const prompt = `Give 12 different everyday American English words or short phrases a native speaker would really say while ${theme}.
 Focus on natural conversational phrasing native speakers actually say daily, not textbook words or overused slang (avoid "cool", "dude", "awesome", "gonna", "totally", "like", "basically").
-For each: the word, how Americans actually pronounce it in relaxed casual speech (simple respelling with stressed syllable in CAPS, e.g. "water" -> "WAH-der", "going to" -> "GUN-nuh"), a short plain meaning, and one natural everyday sentence an American would say using it.
+For each: a one-sentence "situation" written to the learner in second person describing the moment and what they want to express WITHOUT revealing the phrase (e.g. "You're leaving work early and want to tell your coworker you're done for the day."), the word, how Americans actually pronounce it in relaxed casual speech (simple respelling with stressed syllable in CAPS, e.g. "water" -> "WAH-der", "going to" -> "GUN-nuh"), a short plain meaning, and one natural everyday sentence an American would say using it.
 Every sentence must be fresh and different. Do NOT use any of these already-used words: ${used.slice(-1500).join(", ") || "(none)"}.`;
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(Deno.env.get("GEMINI_API_KEY") ?? "")}`, {
     method: "POST",
@@ -64,7 +64,7 @@ Every sentence must be fresh and different. Do NOT use any of these already-used
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 1.0, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 },
-        responseSchema: { type: "ARRAY", items: { type: "OBJECT", properties: { word: { type: "STRING" }, pronunciation: { type: "STRING" }, meaning: { type: "STRING" }, sentence: { type: "STRING" } }, required: ["word", "pronunciation", "meaning", "sentence"] } },
+        responseSchema: { type: "ARRAY", items: { type: "OBJECT", properties: { situation: { type: "STRING" }, word: { type: "STRING" }, pronunciation: { type: "STRING" }, meaning: { type: "STRING" }, sentence: { type: "STRING" } }, required: ["situation", "word", "pronunciation", "meaning", "sentence"] } },
       },
     }),
   });
@@ -72,6 +72,26 @@ Every sentence must be fresh and different. Do NOT use any of these already-used
   const data = await res.json();
   const text = (data?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p?.text ?? "").join("");
   return JSON.parse(text) as Item[];
+}
+
+// Review: same phrase, brand-new situation and sentence (one Gemini call).
+async function reviewGen(p: Item, themeIdx: number): Promise<{ situation: string; sentence: string }[]> {
+  const theme = THEMES[((themeIdx % THEMES.length) + THEMES.length) % THEMES.length];
+  const prompt = `The learner already studied the American English phrase "${p.word}" (${p.meaning}). Old example: "${p.sentence}".
+Write 4 options. Each has a "situation": one second-person sentence describing a NEW real moment while ${theme} where an American would naturally say "${p.word}", WITHOUT revealing the phrase. And a "sentence": a fresh natural thing an American would say there using "${p.word}" exactly. Never reuse the old example.`;
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(Deno.env.get("GEMINI_API_KEY") ?? "")}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 1.0, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 },
+        responseSchema: { type: "ARRAY", items: { type: "OBJECT", properties: { situation: { type: "STRING" }, sentence: { type: "STRING" } }, required: ["situation", "sentence"] } },
+      },
+    }),
+  });
+  if (!res.ok) throw new Error(`gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  return JSON.parse((data?.candidates?.[0]?.content?.parts ?? []).map((x: any) => x?.text ?? "").join(""));
 }
 
 // Gemini TTS: one call per email, complete sentence only, saved as a private WAV.
