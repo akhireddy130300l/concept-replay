@@ -1,10 +1,13 @@
 // Hourly American word email: 9 AM–5 PM Eastern. One Gemini call per email.
-// Words and sentences are never repeated (unique keys in american_word_emails).
+// New phrases never repeat; labelled reviews use fresh situations and sentences.
 // Auth: x-cron-secret. Cron fires hourly 13–22 UTC; this function gates on Eastern hour (DST-safe).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { AUDIO_LINK_SECONDS, sentenceSpeechRequest } from "./sentence-audio.ts";
+import { PLAN, eligibleHour, pickReview, shouldIntroduce } from "./learning-plan.ts";
+
+type SavedItem = Item & { id: string; sent_for: string; et_hour: number; kind: string; review_of: string | null };
 
 const cors = {
   ...corsHeaders,
@@ -112,34 +115,49 @@ async function speak(it: Item): Promise<Uint8Array> {
   const out = new Uint8Array(44 + pcm.length); out.set(new Uint8Array(h.buffer)); out.set(pcm, 44); return out;
 }
 
-function render(it: Item, hourLabel: string, audioUrl: string | null) {
+function render(it: Item, hourLabel: string, audioUrl: string | null, kind: string, hour: number) {
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;padding:24px 0;"><tr><td align="center">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;padding:28px;"><tr><td>
-<div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#b45309;font-weight:700;">American Word · ${esc(hourLabel)}</div>
-<div style="font-size:30px;font-weight:700;color:#111827;margin:10px 0 4px 0;">${esc(it.word)}</div>
-<div style="font-size:18px;color:#1d4ed8;font-weight:700;margin-bottom:6px;">Say it: ${esc(it.pronunciation)}</div>
-<div style="font-size:14px;color:#4b5563;margin-bottom:18px;">${esc(it.meaning)}</div>
-${audioUrl ? `<div style="margin:0 0 18px 0;"><a href="${esc(audioUrl)}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px;font-size:15px;">&#9654; Hear it like a real American</a></div>` : ""}
-<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:14px;">
-<div style="font-size:12px;color:#92400e;font-weight:700;text-transform:uppercase;">Say this out loud 3 times</div>
-<div style="font-size:17px;color:#111827;margin-top:6px;">&ldquo;${esc(it.sentence)}&rdquo;</div></div>
+<div style="font-size:12px;text-transform:uppercase;color:#0891b2;font-weight:700;">${kind === "new" ? "New American expression" : hour === 9 ? "Morning recall challenge" : hour >= 15 ? "Try it in a new situation" : "Spaced recall"} · ${esc(hourLabel)}</div>
+<div style="font-size:22px;font-weight:700;color:#0f172a;margin:18px 0 12px;">What would you say?</div>
+<div style="font-size:18px;line-height:1.6;color:#334155;">${esc(it.situation || "Think of a natural American way to express this idea: " + it.meaning)}</div>
+<p style="color:#0891b2;font-weight:700;">Say your answer out loud before scrolling down.</p>
+<p style="font-size:13px;color:#64748b;margin-bottom:64px;">Missed an earlier email? No catch-up needed. Start here.</p>
+<div style="border-top:1px solid #cbd5e1;padding-top:24px;">
+<div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;">One natural way to say it</div>
+<div style="font-size:30px;font-weight:700;color:#0f172a;margin:10px 0 4px;">${esc(it.word)}</div>
+<div style="font-size:18px;color:#0891b2;font-weight:700;margin-bottom:6px;">Say it: ${esc(it.pronunciation)}</div>
+<div style="font-size:14px;color:#475569;margin-bottom:18px;">${esc(it.meaning)}</div>
+<div style="font-size:18px;line-height:1.5;color:#0f172a;margin-bottom:18px;">&ldquo;${esc(it.sentence)}&rdquo;</div>
+${audioUrl ? `<a href="${esc(audioUrl)}" style="display:inline-block;background:#0891b2;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:8px;font-size:15px;">&#9654; Hear it like a real American</a>` : ""}
+<p style="font-size:14px;color:#334155;">Now say your own sentence using this expression, without reading the example.</p></div>
 </td></tr></table></td></tr></table></body></html>`;
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
-  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) return json({ error: "Service unavailable" }, 503);
+  const admin = createClient(url, key);
   let secret = "";
   try { const { data } = await admin.rpc("get_cron_secret"); if (typeof data === "string") secret = data; } catch { /* ignore */ }
   if (!secret) secret = Deno.env.get("CRON_SECRET") ?? "";
   if (!secret || req.headers.get("x-cron-secret") !== secret) return json({ error: "Forbidden" }, 403);
-  const body = await req.json().catch(() => ({}));
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body) || (body.force !== undefined && typeof body.force !== "boolean")) return json({ error: "Invalid request" }, 400);
   const { date, hour, minute } = easternNow();
-  if (!body?.force && (hour < 9 || hour > 17)) return json({ skipped: "outside_9_to_5_eastern", hour });
-  // First email of the day goes out at 9:10 AM Eastern, not 9:00.
-  if (!body?.force && hour === 9 && minute < 10) return json({ skipped: "waits_for_9_10_am", hour, minute });
-  const { data: existing } = await admin.from("american_word_emails").select("id,sent_ok").eq("sent_for", date).eq("et_hour", hour).maybeSingle();
+  if (!eligibleHour(hour, minute)) return json({ skipped: "outside_learning_schedule", hour, minute });
+  // Serialize the entire day: concurrent slots cannot exceed three new phrases.
+  const lockName = `american-word-learning-${date}`;
+  const lock = await admin.rpc("try_acquire_run_lock", { _name: lockName, _seconds: 300 });
+  if (lock.error) return json({ error: "delivery_lock_unavailable" }, 503);
+  if (!lock.data) return json({ skipped: "concurrent_run" });
+  try {
+  const { data: existing, error: existingError } = await admin.from("american_word_emails").select("id,sent_ok").eq("sent_for", date).eq("et_hour", hour).maybeSingle();
+  if (existingError) throw new Error("Cannot read hourly delivery");
   if (existing?.sent_ok) return json({ skipped: "already_sent", date, hour });
 
   const { data: recips } = await admin.from("portfolio_feature_access").select("report_email");
@@ -148,36 +166,59 @@ Deno.serve(async (req) => {
 
   let row = existing;
   let item: Item | null = null;
+  let kind = "new";
   if (row) {
     const { data } = await admin.from("american_word_emails").select("*").eq("id", row.id).single();
+    if (!data) throw new Error("Saved phrase unavailable");
     item = data as Item;
+    kind = data.kind;
   } else {
-    const { data: usedRows } = await admin.from("american_word_emails").select("word");
-    const used = (usedRows ?? []).map((r) => r.word);
+    const { data: usedRows, error: historyError } = await admin.from("american_word_emails").select("id,word,pronunciation,meaning,sentence,sent_for,et_hour,kind,review_of").order("sent_for").order("et_hour");
+    if (historyError) throw new Error("Cannot load practice history");
+    const history = (usedRows ?? []) as SavedItem[];
+    const roots = history.filter((p) => p.kind === "new");
+    const todayRows = history.filter((p) => p.sent_for === date);
+    const slot = PLAN[hour];
+    if (!slot) return json({ skipped: "no_slot" });
+    const selected = pickReview(slot.kind === "new" ? { kind: "review", source: "yesterday" } : slot, date, roots, new Set(todayRows.flatMap((p) => p.review_of ? [p.review_of] : [])));
+    const parent = roots.find((p) => p.id === selected?.id);
+    const introduce = shouldIntroduce(slot, todayRows.filter((p) => p.kind === "new").length, Boolean(parent));
+    const used = roots.map((r) => r.word);
     const usedKeys = new Set(used.map((w) => w.trim().toLowerCase()));
-    const dayIdx = Math.floor(Date.now() / 86400000);
+    const dayIdx = Math.floor(Date.parse(date) / 86400000);
+    if (!introduce) {
+      if (!parent) return json({ error: "no_review_material" }, 503);
+      kind = "review";
+    }
     // Up to 3 tries, each with a different real-life situation, so repeats never skip an hour.
     outer: for (let attempt = 0; attempt < 3 && !item; attempt++) {
       const themeIdx = dayIdx * 9 + hour + attempt * 7;
       let cands: Item[];
-      try { cands = await generate(used, themeIdx); } catch (e) {
+      try {
+        cands = introduce ? await generate(used, themeIdx) : (await reviewGen(parent as SavedItem, themeIdx)).map((c) => ({ ...(parent as SavedItem), situation: c.situation, sentence: c.sentence }));
+      } catch (e) {
         console.log(JSON.stringify({ phase: "word_gen", attempt, error: String(e).slice(0, 200) }));
+        if (String(e).includes("gemini 429")) return json({ error: "generation_quota_reached", retry: "Next scheduled run can retry this slot; saved material is preserved." }, 429);
         if (attempt === 2) return json({ error: "generation_failed" }, 502);
         await new Promise((r) => setTimeout(r, 3000));
         continue;
       }
       for (const c of cands) {
-        if (!c?.word || !c?.sentence || usedKeys.has(c.word.trim().toLowerCase())) continue;
-        const { data, error } = await admin.from("american_word_emails").insert({ word: c.word.trim(), pronunciation: c.pronunciation, meaning: c.meaning, sentence: c.sentence.trim(), sent_for: date, et_hour: hour }).select("id").single();
+        if (!c?.word || !c?.sentence || !c?.pronunciation || !c?.meaning || !c?.situation || (introduce && usedKeys.has(c.word.trim().toLowerCase()))) continue;
+        if (c.situation.toLowerCase().includes(c.word.toLowerCase())) continue;
+        if (!introduce && !c.sentence.toLowerCase().includes(c.word.toLowerCase())) continue;
+        const { data, error } = await admin.from("american_word_emails").insert({ word: c.word.trim(), pronunciation: c.pronunciation, meaning: c.meaning, sentence: c.sentence.trim(), situation: c.situation.trim(), kind, review_of: introduce ? null : parent?.id, sent_for: date, et_hour: hour }).select("id").single();
         if (!error) { row = { id: data.id, sent_ok: false }; item = c; break outer; }
         if (error.code === "23505" && error.message.includes("sent_for")) return json({ skipped: "concurrent_run" });
-        usedKeys.add(c.word.trim().toLowerCase());
+        if (error.code !== "23505") throw new Error("Cannot save practice item");
+        if (introduce) usedKeys.add(c.word.trim().toLowerCase());
       }
       console.log(JSON.stringify({ phase: "word_gen", attempt, result: "all_repeats_retrying" }));
     }
     if (!item || !row) return json({ error: "all_candidates_were_repeats" }, 409);
   }
 
+  if (!row || !item) return json({ error: "practice_unavailable" }, 503);
   let audioUrl: string | null = null;
   try {
     const path = `${row.id}.wav`;
@@ -193,13 +234,20 @@ Deno.serve(async (req) => {
     audioUrl = signed.data.signedUrl;
   } catch (e) { console.log(JSON.stringify({ phase: "word_audio", error: String(e).slice(0, 200) })); }
 
-  const hourLabel = `${((hour + 11) % 12) + 1} ${hour < 12 ? "AM" : "PM"} ET`;
+  const hourLabel = `${((hour + 11) % 12) + 1}${hour === 9 ? ":10" : ":00"} ${hour < 12 ? "AM" : "PM"} ET`;
+  const label = kind === "new" ? "New American expression" : hour === 9 ? "Morning recall challenge" : hour >= 15 ? "Try it in a new situation" : "Spaced recall challenge";
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}` },
-    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `${item.word} — say it like an American (${hourLabel})`, html: render(item, hourLabel, audioUrl) }),
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}`, "Idempotency-Key": `american-learning-${date}-${hour}` },
+    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `${label}: what would you say? (${hourLabel})`, html: render(item, hourLabel, audioUrl, kind, hour) }),
   });
   if (res.ok) await admin.from("american_word_emails").update({ sent_ok: true }).eq("id", row.id);
   else console.log(JSON.stringify({ phase: "word_send", status: res.status, detail: (await res.text()).slice(0, 200) }));
-  return json({ ok: res.ok, word: item.word, date, hour, audio_available: Boolean(audioUrl) });
+  return json({ ok: res.ok, word: item.word, date, hour, kind, audio_available: Boolean(audioUrl) });
+  } catch (e) {
+    console.log(JSON.stringify({ phase: "learning_delivery", error: String(e).slice(0, 200) }));
+    return json({ error: "delivery_failed" }, 502);
+  } finally {
+    await admin.rpc("release_run_lock", { _name: lockName });
+  }
 });
