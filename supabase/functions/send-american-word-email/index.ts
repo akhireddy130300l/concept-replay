@@ -23,20 +23,36 @@ function easternNow() {
   return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
 }
 
-const THEMES = [
-  "workplace banter, watercooler chat, and office culture",
-  "street idioms, casual reactions, and natural daily slang",
-  "sports, gym, fitness, and weekend downtime",
-  "ordering coffee, casual dining, drinks, and foodie expressions",
-  "hanging out with friends, road trips, and social banter",
-  "running errands, shopping, neighbors, and casual small talk",
-  "entertainment, tech habits, and streaming/pop culture talk",
+export const THEMES = [
+  "ordering at a drive-thru or fast-casual place like Chipotle",
+  "office small talk, Slack messages, and Zoom meetings",
+  "airport, TSA lines, flight delays, and Uber/Lyft pickups",
+  "ordering custom drinks at a coffee shop",
+  "returning items or calling customer service",
+  "visiting the doctor, pharmacy, or feeling sick",
+  "bars, breweries, splitting the tab, and nights out",
+  "the gym, workouts, and sharing equipment",
+  "grocery shopping, the deli counter, and checkout chat",
+  "watching football or basketball with friends and tailgating",
+  "talking to a landlord, roommates, or a repair person",
+  "driving, traffic, road trips, and gas stations",
+  "making, changing, or canceling plans with friends",
+  "binge-watching shows, movies, and game night",
+  "chatting with neighbors and walking the dog",
+  "dining out, ordering, tipping, and splitting the check",
+  "job interviews, asking for a raise, and talking to a boss",
+  "texting friends and reacting to news or gossip",
+  "family holidays, Thanksgiving, and visiting parents",
+  "the bank, bills, money, and saving up",
+  "the weather, seasons, and weekend plans",
+  "hair salon or barbershop small talk",
+  "complimenting, cheering up, or comforting a friend",
+  "complaining or venting about a bad day",
 ];
 
-async function generate(used: string[], hour: number): Promise<Item[]> {
-  const dayIdx = Math.floor(Date.now() / 86400000);
-  const theme = THEMES[(hour + dayIdx) % THEMES.length];
-  const prompt = `Give 20 different everyday American English words or short phrases specifically used in: "${theme}".
+async function generate(used: string[], themeIdx: number): Promise<Item[]> {
+  const theme = THEMES[((themeIdx % THEMES.length) + THEMES.length) % THEMES.length];
+  const prompt = `Give 12 different everyday American English words or short phrases a native speaker would really say while ${theme}.
 Focus on natural conversational phrasing native speakers actually say daily, not textbook words or overused slang (avoid "cool", "dude", "awesome", "gonna", "totally", "like", "basically").
 For each: the word, how Americans actually pronounce it in relaxed casual speech (simple respelling with stressed syllable in CAPS, e.g. "water" -> "WAH-der", "going to" -> "GUN-nuh"), a short plain meaning, and one natural everyday sentence an American would say using it.
 Every sentence must be fresh and different. Do NOT use any of these already-used words: ${used.slice(-1500).join(", ") || "(none)"}.`;
@@ -115,13 +131,26 @@ Deno.serve(async (req) => {
   } else {
     const { data: usedRows } = await admin.from("american_word_emails").select("word");
     const used = (usedRows ?? []).map((r) => r.word);
-    let cands: Item[];
-    try { cands = await generate(used); } catch (e) { console.log(JSON.stringify({ phase: "word_gen", error: String(e) })); return json({ error: "generation_failed" }, 502); }
-    for (const c of cands) {
-      if (!c?.word || !c?.sentence) continue;
-      const { data, error } = await admin.from("american_word_emails").insert({ word: c.word.trim(), pronunciation: c.pronunciation, meaning: c.meaning, sentence: c.sentence.trim(), sent_for: date, et_hour: hour }).select("id").single();
-      if (!error) { row = { id: data.id, sent_ok: false }; item = c; break; }
-      if (error.code === "23505" && error.message.includes("sent_for")) return json({ skipped: "concurrent_run" });
+    const usedKeys = new Set(used.map((w) => w.trim().toLowerCase()));
+    const dayIdx = Math.floor(Date.now() / 86400000);
+    // Up to 3 tries, each with a different real-life situation, so repeats never skip an hour.
+    outer: for (let attempt = 0; attempt < 3 && !item; attempt++) {
+      const themeIdx = dayIdx * 9 + hour + attempt * 7;
+      let cands: Item[];
+      try { cands = await generate(used, themeIdx); } catch (e) {
+        console.log(JSON.stringify({ phase: "word_gen", attempt, error: String(e).slice(0, 200) }));
+        if (attempt === 2) return json({ error: "generation_failed" }, 502);
+        await new Promise((r) => setTimeout(r, 3000));
+        continue;
+      }
+      for (const c of cands) {
+        if (!c?.word || !c?.sentence || usedKeys.has(c.word.trim().toLowerCase())) continue;
+        const { data, error } = await admin.from("american_word_emails").insert({ word: c.word.trim(), pronunciation: c.pronunciation, meaning: c.meaning, sentence: c.sentence.trim(), sent_for: date, et_hour: hour }).select("id").single();
+        if (!error) { row = { id: data.id, sent_ok: false }; item = c; break outer; }
+        if (error.code === "23505" && error.message.includes("sent_for")) return json({ skipped: "concurrent_run" });
+        usedKeys.add(c.word.trim().toLowerCase());
+      }
+      console.log(JSON.stringify({ phase: "word_gen", attempt, result: "all_repeats_retrying" }));
     }
     if (!item || !row) return json({ error: "all_candidates_were_repeats" }, 409);
   }
