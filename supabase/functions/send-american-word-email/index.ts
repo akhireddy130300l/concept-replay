@@ -20,7 +20,8 @@ type Item = { word: string; pronunciation: string; meaning: string; sentence: st
 function easternNow() {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" })
     .formatToParts(new Date()).map((x) => [x.type, x.value]));
-  return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
+  const minute = new Date().getUTCMinutes();
+  return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour), minute };
 }
 
 export const THEMES = [
@@ -114,8 +115,10 @@ Deno.serve(async (req) => {
   if (!secret) secret = Deno.env.get("CRON_SECRET") ?? "";
   if (!secret || req.headers.get("x-cron-secret") !== secret) return json({ error: "Forbidden" }, 403);
   const body = await req.json().catch(() => ({}));
-  const { date, hour } = easternNow();
+  const { date, hour, minute } = easternNow();
   if (!body?.force && (hour < 9 || hour > 17)) return json({ skipped: "outside_9_to_5_eastern", hour });
+  // First email of the day goes out at 9:10 AM Eastern, not 9:00.
+  if (!body?.force && hour === 9 && minute < 10) return json({ skipped: "waits_for_9_10_am", hour, minute });
   const { data: existing } = await admin.from("american_word_emails").select("id,sent_ok").eq("sent_for", date).eq("et_hour", hour).maybeSingle();
   if (existing?.sent_ok) return json({ skipped: "already_sent", date, hour });
 
