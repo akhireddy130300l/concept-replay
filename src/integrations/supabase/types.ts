@@ -75,12 +75,15 @@ export type Database = {
           created_at: string
           et_hour: number
           id: string
+          kind: string
           meaning: string | null
           pronunciation: string
+          review_of: string | null
           sent_for: string
           sent_ok: boolean
           sentence: string
           sentence_key: string | null
+          situation: string | null
           word: string
           word_key: string | null
         }
@@ -88,12 +91,15 @@ export type Database = {
           created_at?: string
           et_hour: number
           id?: string
+          kind?: string
           meaning?: string | null
           pronunciation: string
+          review_of?: string | null
           sent_for: string
           sent_ok?: boolean
           sentence: string
           sentence_key?: string | null
+          situation?: string | null
           word: string
           word_key?: string | null
         }
@@ -101,16 +107,27 @@ export type Database = {
           created_at?: string
           et_hour?: number
           id?: string
+          kind?: string
           meaning?: string | null
           pronunciation?: string
+          review_of?: string | null
           sent_for?: string
           sent_ok?: boolean
           sentence?: string
           sentence_key?: string | null
+          situation?: string | null
           word?: string
           word_key?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "american_word_emails_review_of_fkey"
+            columns: ["review_of"]
+            isOneToOne: false
+            referencedRelation: "american_word_emails"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       american_word_recaps: {
         Row: {
