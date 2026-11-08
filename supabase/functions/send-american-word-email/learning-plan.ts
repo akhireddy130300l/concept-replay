@@ -28,15 +28,7 @@ export function shouldIntroduce(slot: Slot, newToday: number, hasReview: boolean
   return newToday < NEW_PER_DAY && (slot.kind === "new" || !hasReview);
 }
 
-export function distinctPhrases<T extends { word: string }>(rows: T[]): T[] {
-  const seen = new Set<string>();
-  return rows.filter((row) => {
-    const key = row.word.trim().toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
+export { distinctPhrases } from "../_shared/english-practice.ts";
 
 const dayDiff = (a: string, b: string) => Math.round((Date.parse(a) - Date.parse(b)) / 86400000);
 
