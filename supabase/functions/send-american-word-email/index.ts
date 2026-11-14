@@ -186,11 +186,13 @@ Deno.serve(async (req) => {
   let row = body.dry_run ? null : existing;
   let item: Item | null = null;
   let kind = "new";
+  let reviewOf: string | null = null;
   if (row) {
     const { data } = await admin.from("american_word_emails").select("*").eq("id", row.id).single();
     if (!data) throw new Error("Saved phrase unavailable");
     item = data as Item;
     kind = data.kind;
+    reviewOf = data.review_of ?? null;
   } else {
     const { data: usedRows, error: historyError } = await admin.from("american_word_emails").select("id,word,pronunciation,meaning,sentence,sent_for,et_hour,kind,review_of").order("sent_for").order("et_hour");
     if (historyError) throw new Error("Cannot load practice history");
@@ -228,7 +230,7 @@ Deno.serve(async (req) => {
         if (!introduce && !c.sentence.toLowerCase().includes(c.word.toLowerCase())) continue;
         if (body.dry_run) return json({ ok: true, dry_run: true, date, hour, kind, review_of: parent?.id ?? null, word: c.word, situation: c.situation, sentence: c.sentence, html: render(c, `${((hour + 11) % 12) + 1}${hour === 9 ? ":10" : ":00"} ${hour < 12 ? "AM" : "PM"} ET`, null, kind, hour), delivered: false });
         const { data, error } = await admin.from("american_word_emails").insert({ word: c.word.trim(), pronunciation: c.pronunciation, meaning: c.meaning, sentence: c.sentence.trim(), situation: c.situation.trim(), kind, review_of: introduce ? null : parent?.id, sent_for: date, et_hour: hour }).select("id").single();
-        if (!error) { row = { id: data.id, sent_ok: false }; item = c; break outer; }
+        if (!error) { row = { id: data.id, sent_ok: false }; item = c; reviewOf = introduce ? null : parent?.id ?? null; break outer; }
         if (error.code === "23505" && error.message.includes("sent_for")) return json({ skipped: "concurrent_run" });
         if (error.code !== "23505") throw new Error("Cannot save practice item");
         if (introduce) usedKeys.add(c.word.trim().toLowerCase());
@@ -257,7 +259,7 @@ Deno.serve(async (req) => {
   // Picture is optional: any failure still sends the normal email.
   let imageUrl: string | null = null;
   try {
-    const rootId = kind === "new" ? row.id : ((row as any).review_of ?? (item as any).review_of ?? null);
+    const rootId = kind === "new" ? row.id : reviewOf;
     if (rootId) {
       const ipath = `pictures/${rootId}.png`;
       const { data: ix, error: ie } = await admin.storage.from("word-audio").list("pictures", { search: `${rootId}.png` });
