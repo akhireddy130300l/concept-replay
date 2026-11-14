@@ -97,6 +97,24 @@ Write 4 options. Each has a "situation": one second-person sentence describing a
   return JSON.parse((data?.candidates?.[0]?.content?.parts ?? []).map((x: any) => x?.text ?? "").join(""));
 }
 
+// Memory picture: one image per new phrase, saved privately and reused by its reviews.
+async function drawMemoryPicture(it: Item): Promise<Uint8Array> {
+  const prompt = `Funny, vivid, colorful cartoon illustration that helps an English learner remember the American expression "${it.word}" (meaning: ${it.meaning}). Show one exaggerated, physical, slightly absurd scene that visually connects the literal words to the meaning, inspired by: "${it.sentence}". Clean modern editorial cartoon style, bright friendly colors, simple background, no text, no letters, no words anywhere in the image.`;
+  const res = await fetch("https://ai.gateway.lovable.dev/v1/images/generations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("LOVABLE_API_KEY") ?? ""}` },
+    body: JSON.stringify({ model: "openai/gpt-image-2.5-sunburst", prompt, size: "1024x1024", quality: "low" }),
+    signal: AbortSignal.timeout(45000),
+  });
+  if (!res.ok) throw new Error(`image ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  const b64 = data?.data?.[0]?.b64_json;
+  if (!b64) throw new Error("empty_image");
+  const bin = atob(b64); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 // Gemini TTS: one call per email, complete sentence only, saved as a private WAV.
 async function speak(it: Item): Promise<Uint8Array> {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(Deno.env.get("GEMINI_API_KEY") ?? "")}`, {
@@ -115,7 +133,7 @@ async function speak(it: Item): Promise<Uint8Array> {
   const out = new Uint8Array(44 + pcm.length); out.set(new Uint8Array(h.buffer)); out.set(pcm, 44); return out;
 }
 
-function render(it: Item, hourLabel: string, audioUrl: string | null, kind: string, hour: number) {
+function render(it: Item, hourLabel: string, audioUrl: string | null, kind: string, hour: number, imageUrl: string | null = null) {
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;padding:24px 0;"><tr><td align="center">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;padding:28px;"><tr><td>
@@ -125,6 +143,7 @@ function render(it: Item, hourLabel: string, audioUrl: string | null, kind: stri
 <p style="color:#0891b2;font-weight:700;">Say your answer out loud before scrolling down.</p>
 <p style="font-size:13px;color:#64748b;margin-bottom:64px;">Missed an earlier email? No catch-up needed. Start here.</p>
 <div style="border-top:1px solid #cbd5e1;padding-top:24px;">
+${imageUrl ? `<img src="${esc(imageUrl)}" width="504" alt="Memory picture for ${esc(it.word)}" style="display:block;width:100%;max-width:504px;height:auto;border-radius:12px;margin:0 0 8px;" /><div style="font-size:13px;color:#64748b;margin-bottom:20px;">Look at the picture for 3 seconds and connect it to the phrase below.</div>` : ""}
 <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;">One natural way to say it</div>
 <div style="font-size:30px;font-weight:700;color:#0f172a;margin:10px 0 4px;">${esc(it.word)}</div>
 <div style="font-size:18px;color:#0891b2;font-weight:700;margin-bottom:6px;">Say it: ${esc(it.pronunciation)}</div>
@@ -167,11 +186,13 @@ Deno.serve(async (req) => {
   let row = body.dry_run ? null : existing;
   let item: Item | null = null;
   let kind = "new";
+  let reviewOf: string | null = null;
   if (row) {
     const { data } = await admin.from("american_word_emails").select("*").eq("id", row.id).single();
     if (!data) throw new Error("Saved phrase unavailable");
     item = data as Item;
     kind = data.kind;
+    reviewOf = data.review_of ?? null;
   } else {
     const { data: usedRows, error: historyError } = await admin.from("american_word_emails").select("id,word,pronunciation,meaning,sentence,sent_for,et_hour,kind,review_of").order("sent_for").order("et_hour");
     if (historyError) throw new Error("Cannot load practice history");
@@ -209,7 +230,7 @@ Deno.serve(async (req) => {
         if (!introduce && !c.sentence.toLowerCase().includes(c.word.toLowerCase())) continue;
         if (body.dry_run) return json({ ok: true, dry_run: true, date, hour, kind, review_of: parent?.id ?? null, word: c.word, situation: c.situation, sentence: c.sentence, html: render(c, `${((hour + 11) % 12) + 1}${hour === 9 ? ":10" : ":00"} ${hour < 12 ? "AM" : "PM"} ET`, null, kind, hour), delivered: false });
         const { data, error } = await admin.from("american_word_emails").insert({ word: c.word.trim(), pronunciation: c.pronunciation, meaning: c.meaning, sentence: c.sentence.trim(), situation: c.situation.trim(), kind, review_of: introduce ? null : parent?.id, sent_for: date, et_hour: hour }).select("id").single();
-        if (!error) { row = { id: data.id, sent_ok: false }; item = c; break outer; }
+        if (!error) { row = { id: data.id, sent_ok: false }; item = c; reviewOf = introduce ? null : parent?.id ?? null; break outer; }
         if (error.code === "23505" && error.message.includes("sent_for")) return json({ skipped: "concurrent_run" });
         if (error.code !== "23505") throw new Error("Cannot save practice item");
         if (introduce) usedKeys.add(c.word.trim().toLowerCase());
@@ -235,16 +256,39 @@ Deno.serve(async (req) => {
     audioUrl = signed.data.signedUrl;
   } catch (e) { console.log(JSON.stringify({ phase: "word_audio", error: String(e).slice(0, 200) })); }
 
+  // Picture is optional: any failure still sends the normal email.
+  let imageUrl: string | null = null;
+  try {
+    const rootId = kind === "new" ? row.id : reviewOf;
+    if (rootId) {
+      const ipath = `pictures/${rootId}.png`;
+      const { data: ix, error: ie } = await admin.storage.from("word-audio").list("pictures", { search: `${rootId}.png` });
+      if (ie) throw new Error(ie.message);
+      let exists = Boolean(ix?.some((f) => f.name === `${rootId}.png`));
+      if (!exists && kind === "new") {
+        const png = await drawMemoryPicture(item);
+        const up = await admin.storage.from("word-audio").upload(ipath, png, { contentType: "image/png", upsert: true });
+        if (up.error) throw new Error(up.error.message);
+        exists = true;
+      }
+      if (exists) {
+        const signed = await admin.storage.from("word-audio").createSignedUrl(ipath, AUDIO_LINK_SECONDS);
+        if (signed.error) throw new Error(signed.error.message);
+        imageUrl = signed.data.signedUrl;
+      }
+    }
+  } catch (e) { console.log(JSON.stringify({ phase: "word_picture", error: String(e).slice(0, 200) })); }
+
   const hourLabel = `${((hour + 11) % 12) + 1}${hour === 9 ? ":10" : ":00"} ${hour < 12 ? "AM" : "PM"} ET`;
   const label = kind === "new" ? "New American expression" : hour === 9 ? "Morning recall challenge" : hour >= 15 ? "Try it in a new situation" : "Spaced recall challenge";
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}`, "Idempotency-Key": `american-learning-${date}-${hour}` },
-    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `${label}: what would you say? (${hourLabel})`, html: render(item, hourLabel, audioUrl, kind, hour) }),
+    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `${label}: what would you say? (${hourLabel})`, html: render(item, hourLabel, audioUrl, kind, hour, imageUrl) }),
   });
   if (res.ok) await admin.from("american_word_emails").update({ sent_ok: true }).eq("id", row.id);
   else console.log(JSON.stringify({ phase: "word_send", status: res.status, detail: (await res.text()).slice(0, 200) }));
-  return json({ ok: res.ok, word: item.word, date, hour, kind, audio_available: Boolean(audioUrl) });
+  return json({ ok: res.ok, word: item.word, date, hour, kind, audio_available: Boolean(audioUrl), picture_available: Boolean(imageUrl) });
   } catch (e) {
     console.log(JSON.stringify({ phase: "learning_delivery", error: String(e).slice(0, 200) }));
     return json({ error: "delivery_failed" }, 502);
