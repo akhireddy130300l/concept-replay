@@ -167,8 +167,16 @@ Deno.serve(async (req) => {
   if (!secret || req.headers.get("x-cron-secret") !== secret) return json({ error: "Forbidden" }, 403);
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object" || Array.isArray(body) || (body.force !== undefined && typeof body.force !== "boolean") || (body.dry_run !== undefined && typeof body.dry_run !== "boolean")) return json({ error: "Invalid request" }, 400);
-  const { date, hour, minute } = easternNow();
-  if (!eligibleHour(hour, minute)) return json({ skipped: "outside_learning_schedule", hour, minute });
+  const testRow = typeof body.test_row === "string" && /^[0-9a-f-]{36}$/.test(body.test_row) ? body.test_row : null;
+  const now = easternNow();
+  const { minute } = now;
+  let { date, hour } = now;
+  if (testRow) {
+    const { data: t } = await admin.from("american_word_emails").select("sent_for,et_hour").eq("id", testRow).maybeSingle();
+    if (!t) return json({ error: "test_row_not_found" }, 404);
+    date = t.sent_for; hour = t.et_hour;
+  }
+  if (!testRow && !eligibleHour(hour, minute)) return json({ skipped: "outside_learning_schedule", hour, minute });
   // Serialize the entire day: concurrent slots cannot exceed three new phrases.
   const lockName = `american-word-learning-${date}`;
   const lock = await admin.rpc("try_acquire_run_lock", { _name: lockName, _seconds: 300 });
@@ -177,7 +185,7 @@ Deno.serve(async (req) => {
   try {
   const { data: existing, error: existingError } = await admin.from("american_word_emails").select("id,sent_ok").eq("sent_for", date).eq("et_hour", hour).maybeSingle();
   if (existingError) throw new Error("Cannot read hourly delivery");
-  if (existing?.sent_ok && !body.dry_run) return json({ skipped: "already_sent", date, hour });
+  if (existing?.sent_ok && !body.dry_run && !testRow) return json({ skipped: "already_sent", date, hour });
 
   const { data: recips } = await admin.from("portfolio_feature_access").select("report_email");
   const to = (recips ?? []).map((r) => r.report_email).filter(Boolean);
@@ -283,8 +291,8 @@ Deno.serve(async (req) => {
   const label = kind === "new" ? "New American expression" : hour === 9 ? "Morning recall challenge" : hour >= 15 ? "Try it in a new situation" : "Spaced recall challenge";
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}`, "Idempotency-Key": `american-learning-${date}-${hour}` },
-    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `${label}: what would you say? (${hourLabel})`, html: render(item, hourLabel, audioUrl, kind, hour, imageUrl) }),
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}`, "Idempotency-Key": testRow ? `american-test-${testRow}-${Date.now()}` : `american-learning-${date}-${hour}` },
+    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `${testRow ? "[TEST] " : ""}${label}: what would you say? (${hourLabel})`, html: render(item, hourLabel, audioUrl, kind, hour, imageUrl) }),
   });
   if (res.ok) await admin.from("american_word_emails").update({ sent_ok: true }).eq("id", row.id);
   else console.log(JSON.stringify({ phase: "word_send", status: res.status, detail: (await res.text()).slice(0, 200) }));
