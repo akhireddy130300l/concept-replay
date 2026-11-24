@@ -33,11 +33,22 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const cronFailure = authenticateCronRequest(req);
-  if (cronFailure) return cronFailure;
-
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const cronFailure = authenticateCronRequest(req);
+  let callerUserId: string | null = null;
+
+  if (cronFailure) {
+    const authHeader = req.headers.get("Authorization") ?? "";
+    if (!authHeader.startsWith("Bearer ")) return cronFailure;
+    const userClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: userData, error: authErr } = await userClient.auth.getUser();
+    if (authErr || !userData?.user) return cronFailure;
+    callerUserId = userData.user.id;
+  }
   const signingSecret = Deno.env.get("START_TODAY_ACTION_SECRET") || serviceKey;
   const resendKey = Deno.env.get("RESEND_API_KEY");
   const appUrl = (Deno.env.get("APP_BASE_URL") || "https://concept-replay.lovable.app").replace(/\/$/, "");
@@ -58,11 +69,14 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { data: recipients } = await supabase
+    let recipientQuery = supabase
       .from("portfolio_feature_access")
       .select("user_id, report_email")
-      .eq("enabled", true)
-      .limit(10);
+      .eq("enabled", true);
+    if (callerUserId) {
+      recipientQuery = recipientQuery.eq("user_id", callerUserId);
+    }
+    const { data: recipients } = await recipientQuery.limit(10);
 
     if (!recipients?.length) {
       return new Response(JSON.stringify({ ok: true, sent: 0, reason: "no_recipients" }), {

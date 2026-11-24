@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Compass, ExternalLink, Loader2, Sparkles, CheckCircle2, Circle, Clock, XCircle, Mic, MicOff, Star } from "lucide-react";
+import { ArrowLeft, Compass, ExternalLink, Loader2, Sparkles, CheckCircle2, Circle, Clock, XCircle, Mail, Mic, MicOff, Star } from "lucide-react";
 
 type ActionStatus = "started" | "later" | "not_for_me";
 type FilterTab = "all" | ActionStatus;
@@ -60,6 +60,7 @@ const StartToday = () => {
   const [filter, setFilter] = useState<FilterTab>("all");
   const [askTopic, setAskTopic] = useState("");
   const [asking, setAsking] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [checkInDrafts, setCheckInDrafts] = useState<Record<string, string>>({});
   const [generatingPlanFor, setGeneratingPlanFor] = useState<string | null>(null);
   const [listeningFor, setListeningFor] = useState<string | null>(null);
@@ -86,6 +87,24 @@ const StartToday = () => {
       return { ideas: (ideasRes.data ?? []) as IdeaRow[], actionMap };
     },
   });
+
+  const handleSendDailyEmail = async () => {
+    setSendingEmail(true);
+    try {
+      const { data: res, error } = await supabase.functions.invoke("send-start-today-email");
+      if (error || res?.error) throw new Error(res?.error || error?.message || "Could not send email");
+      if (res?.sent > 0) {
+        toast({ title: "Daily email sent!", description: "Check your inbox to try Start, Later, or Pass." });
+        await queryClient.invalidateQueries({ queryKey: ["start-today", userId] });
+      } else {
+        toast({ title: "Already sent today", description: "Today's Start Today email was already delivered." });
+      }
+    } catch (err) {
+      toast({ title: "Could not send email", description: err instanceof Error ? err.message : "Try again", variant: "destructive" });
+    } finally {
+      setSendingEmail(false);
+    }
+  };
 
   const handleAsk = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -235,6 +254,10 @@ const StartToday = () => {
               <p className="text-xs sm:text-sm text-muted-foreground">Future Regret Radar · Anyone can learn or start anything</p>
             </div>
           </div>
+          <Button variant="outline" size="sm" onClick={handleSendDailyEmail} disabled={sendingEmail} className="glass-card border-border/50">
+            {sendingEmail ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Mail className="w-4 h-4 mr-1.5" />}
+            Send Today&apos;s Email
+          </Button>
         </header>
 
         <form onSubmit={handleAsk} className="glass-card rounded-2xl p-4 sm:p-5 space-y-3">
