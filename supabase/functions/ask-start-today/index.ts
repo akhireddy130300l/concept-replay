@@ -91,6 +91,7 @@ Deno.serve(async (req) => {
         time_estimate: idea.time_estimate,
         signals: idea.signals,
         sources: idea.sources,
+        opportunity_stage: idea.opportunity_stage,
         is_wildcard: false,
         is_ask_anything: true,
         sent_for: todayIso,

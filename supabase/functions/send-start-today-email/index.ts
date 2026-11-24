@@ -3,9 +3,14 @@ import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { authenticateCronRequest } from "../_shared/cron-auth.ts";
 import {
   buildStartTodayEmailHtml,
+  buildSundayFocusEmailHtml,
   normalizeTopicKey,
   selectDailyFields,
+  selectFieldSearchQuery,
+  signStartTodayActionToken,
+  type KickstartStep,
   type OpportunityEmailItem,
+  type SundayFocusItem,
 } from "../_shared/start-today.ts";
 import { searchWebSignals, synthesizeOpportunity } from "../_shared/start-today-research.ts";
 
@@ -32,8 +37,10 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const signingSecret = Deno.env.get("START_TODAY_ACTION_SECRET") || serviceKey;
   const resendKey = Deno.env.get("RESEND_API_KEY");
   const appUrl = (Deno.env.get("APP_BASE_URL") || "https://concept-replay.lovable.app").replace(/\/$/, "");
+  const actionEndpoint = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/start-today-action`;
 
   const supabase = createClient(supabaseUrl, serviceKey);
   const todayEt = getEasternDateIso();
@@ -63,7 +70,60 @@ Deno.serve(async (req) => {
     }
 
     let sentCount = 0;
+    const isSundayEt = new Date(`${todayEt}T12:00:00Z`).getUTCDay() === 0;
     for (const recipient of recipients) {
+      if (isSundayEt && resendKey && recipient.report_email) {
+        const { data: activeRows } = await supabase
+          .from("opportunity_actions")
+          .select("idea_id, weekly_steps, check_ins, is_weekly_focus, opportunity_ideas(id, topic, field)")
+          .eq("user_id", recipient.user_id)
+          .eq("status", "started")
+          .is("deleted_at", null)
+          .order("started_at", { ascending: false })
+          .limit(6);
+
+        const focusItems: SundayFocusItem[] = [];
+        for (const row of activeRows ?? []) {
+          const ideaRef = (row as { opportunity_ideas?: { id: string; topic: string; field: string } | null }).opportunity_ideas;
+          if (!ideaRef) continue;
+          const steps = Array.isArray(row.weekly_steps) ? (row.weekly_steps as KickstartStep[]) : [];
+          const checkIns = Array.isArray(row.check_ins) ? row.check_ins : [];
+          const focusToken = await signStartTodayActionToken(
+            { uid: recipient.user_id, iid: ideaRef.id, act: "focus" },
+            signingSecret,
+          );
+          focusItems.push({
+            topic: ideaRef.topic,
+            field: ideaRef.field,
+            completedSteps: steps.filter((s) => s.done).length,
+            totalSteps: steps.length || 7,
+            checkInCount: checkIns.length,
+            isWeeklyFocus: Boolean(row.is_weekly_focus),
+            focusUrl: `${actionEndpoint}?token=${encodeURIComponent(focusToken)}`,
+          });
+        }
+
+        if (focusItems.length > 0) {
+          const html = buildSundayFocusEmailHtml(focusItems, appUrl, todayEt);
+          const emailRes = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${resendKey}`,
+              "Content-Type": "application/json",
+              "Idempotency-Key": `start-today-sunday-${recipient.user_id}-${todayEt}`,
+            },
+            body: JSON.stringify({
+              from: "Concept Replay <onboarding@resend.dev>",
+              to: [recipient.report_email],
+              subject: `Start Today · Sunday Focus Edition (${todayEt})`,
+              html,
+            }),
+          });
+          if (emailRes.ok) sentCount += 1;
+          continue;
+        }
+      }
+
       const { data: existingToday } = await supabase
         .from("opportunity_ideas")
         .select("id")
@@ -102,10 +162,11 @@ Deno.serve(async (req) => {
       const createdIdeas: OpportunityEmailItem[] = [];
 
       for (const pick of dailyPicks) {
-        const sources = await searchWebSignals(pick.field.searchPrompt, 5);
+        const angleQuery = selectFieldSearchQuery(pick.field, todayEt);
+        const sources = await searchWebSignals(angleQuery, 5);
         const idea = await synthesizeOpportunity({
           fieldLabel: pick.field.label,
-          focusPrompt: pick.field.searchPrompt,
+          focusPrompt: `${angleQuery} (broad lens: ${pick.field.searchPrompt})`,
           sources,
           avoidTopics,
           isWildcard: pick.isWildcard,
@@ -115,28 +176,47 @@ Deno.serve(async (req) => {
         existingKeys.add(topicKey);
         avoidTopics.push(idea.topic);
 
-        const { error: insertErr } = await supabase.from("opportunity_ideas").insert({
-          user_id: recipient.user_id,
-          field: idea.field,
-          topic: idea.topic,
-          topic_key: topicKey,
-          why_rising: idea.why_rising,
-          five_year_vision: idea.five_year_vision,
-          real_examples: idea.real_examples,
-          first_step: idea.first_step,
-          difficulty: idea.difficulty,
-          cost_estimate: idea.cost_estimate,
-          time_estimate: idea.time_estimate,
-          signals: idea.signals,
-          sources: idea.sources,
-          is_wildcard: pick.isWildcard,
-          is_ask_anything: false,
-          sent_for: todayEt,
-          sent_at: new Date().toISOString(),
-        });
+        const { data: inserted, error: insertErr } = await supabase
+          .from("opportunity_ideas")
+          .insert({
+            user_id: recipient.user_id,
+            field: idea.field,
+            topic: idea.topic,
+            topic_key: topicKey,
+            why_rising: idea.why_rising,
+            five_year_vision: idea.five_year_vision,
+            real_examples: idea.real_examples,
+            first_step: idea.first_step,
+            difficulty: idea.difficulty,
+            cost_estimate: idea.cost_estimate,
+            time_estimate: idea.time_estimate,
+            signals: idea.signals,
+            sources: idea.sources,
+            opportunity_stage: idea.opportunity_stage,
+            is_wildcard: pick.isWildcard,
+            is_ask_anything: false,
+            sent_for: todayEt,
+            sent_at: new Date().toISOString(),
+          })
+          .select("id")
+          .single();
 
-        if (!insertErr) {
-          createdIdeas.push({ ...idea, is_wildcard: pick.isWildcard });
+        if (!insertErr && inserted?.id) {
+          const [startToken, laterToken, passToken] = await Promise.all([
+            signStartTodayActionToken({ uid: recipient.user_id, iid: inserted.id, act: "start" }, signingSecret),
+            signStartTodayActionToken({ uid: recipient.user_id, iid: inserted.id, act: "later" }, signingSecret),
+            signStartTodayActionToken({ uid: recipient.user_id, iid: inserted.id, act: "not_for_me" }, signingSecret),
+          ]);
+          createdIdeas.push({
+            ...idea,
+            id: inserted.id,
+            is_wildcard: pick.isWildcard,
+            actionLinks: {
+              startUrl: `${actionEndpoint}?token=${encodeURIComponent(startToken)}`,
+              laterUrl: `${actionEndpoint}?token=${encodeURIComponent(laterToken)}`,
+              passUrl: `${actionEndpoint}?token=${encodeURIComponent(passToken)}`,
+            },
+          });
         }
       }
 

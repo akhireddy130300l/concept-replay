@@ -57,6 +57,13 @@
       "when": 1795548431398,
       "tag": "0007_create_start_today_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795549631576,
+      "tag": "0008_upgrade_start_today_five_features",
+      "breakpoints": true
     }
   ]
 }

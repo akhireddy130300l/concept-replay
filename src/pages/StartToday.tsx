@@ -6,13 +6,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Compass, ExternalLink, Loader2, Sparkles, CheckCircle2, Clock, XCircle } from "lucide-react";
+import { ArrowLeft, Compass, ExternalLink, Loader2, Sparkles, CheckCircle2, Circle, Clock, XCircle, Mic, MicOff, Star } from "lucide-react";
 
 type ActionStatus = "started" | "later" | "not_for_me";
 type FilterTab = "all" | ActionStatus;
+type OpportunityStage = "early_wave" | "inflection_point" | "evergreen";
 
 interface SourceLink { title: string; url: string; }
 interface CheckInEntry { note: string; at: string; }
+interface KickstartStep { day: number; title: string; done: boolean; }
+
+const STAGE_LABELS: Record<OpportunityStage, { label: string; className: string }> = {
+  early_wave: { label: "Early Wave", className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30" },
+  inflection_point: { label: "Inflection Point", className: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30" },
+  evergreen: { label: "Evergreen Skill", className: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30" },
+};
 
 interface IdeaRow {
   id: string;
@@ -26,6 +34,7 @@ interface IdeaRow {
   cost_estimate: string;
   time_estimate: string;
   sources: unknown;
+  opportunity_stage?: string | null;
   is_wildcard: boolean;
   is_ask_anything: boolean;
   sent_for: string;
@@ -37,6 +46,8 @@ interface ActionRow {
   idea_id: string;
   status: ActionStatus;
   check_ins: unknown;
+  weekly_steps?: unknown;
+  is_weekly_focus?: boolean;
   started_at: string | null;
 }
 
@@ -49,6 +60,8 @@ const StartToday = () => {
   const [askTopic, setAskTopic] = useState("");
   const [asking, setAsking] = useState(false);
   const [checkInDrafts, setCheckInDrafts] = useState<Record<string, string>>({});
+  const [generatingPlanFor, setGeneratingPlanFor] = useState<string | null>(null);
+  const [listeningFor, setListeningFor] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -108,6 +121,82 @@ const StartToday = () => {
       return;
     }
     await queryClient.invalidateQueries({ queryKey: ["start-today", userId] });
+
+    const existingSteps = Array.isArray(existing?.weekly_steps) ? (existing.weekly_steps as KickstartStep[]) : [];
+    if (status === "started" && existingSteps.length === 0) {
+      setGeneratingPlanFor(ideaId);
+      try {
+        await supabase.functions.invoke("start-today-action", { body: { ideaId } });
+        await queryClient.invalidateQueries({ queryKey: ["start-today", userId] });
+      } finally {
+        setGeneratingPlanFor(null);
+      }
+    }
+  };
+
+  const toggleStep = async (ideaId: string, day: number) => {
+    const existing = data?.actionMap.get(ideaId);
+    if (!existing) return;
+    const steps = Array.isArray(existing.weekly_steps) ? (existing.weekly_steps as KickstartStep[]) : [];
+    const next = steps.map((s) => (s.day === day ? { ...s, done: !s.done } : s));
+    const { error } = await supabase.from("opportunity_actions").update({ weekly_steps: next as unknown as never }).eq("id", existing.id);
+    if (error) {
+      toast({ title: "Could not update step", description: error.message, variant: "destructive" });
+      return;
+    }
+    await queryClient.invalidateQueries({ queryKey: ["start-today", userId] });
+  };
+
+  const setWeeklyFocus = async (ideaId: string) => {
+    if (!userId) return;
+    const existing = data?.actionMap.get(ideaId);
+    if (!existing) return;
+    await supabase.from("opportunity_actions").update({ is_weekly_focus: false }).eq("user_id", userId).is("deleted_at", null);
+    const { error } = await supabase.from("opportunity_actions").update({ is_weekly_focus: true }).eq("id", existing.id);
+    if (error) {
+      toast({ title: "Could not set weekly focus", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Locked as Focus of the Week" });
+    await queryClient.invalidateQueries({ queryKey: ["start-today", userId] });
+  };
+
+  const startVoiceCheckIn = (ideaId: string) => {
+    const SpeechRec = (window as unknown as { SpeechRecognition?: new () => unknown; webkitSpeechRecognition?: new () => unknown }).SpeechRecognition
+      || (window as unknown as { webkitSpeechRecognition?: new () => unknown }).webkitSpeechRecognition;
+    if (!SpeechRec) {
+      toast({ title: "Voice input not supported", description: "Type your quick note instead.", variant: "destructive" });
+      return;
+    }
+    if (listeningFor === ideaId) {
+      setListeningFor(null);
+      return;
+    }
+    const rec = new SpeechRec() as {
+      lang: string;
+      interimResults: boolean;
+      maxAlternatives: number;
+      onresult: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
+      onerror: () => void;
+      onend: () => void;
+      start: () => void;
+    };
+    rec.lang = "en-US";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    setListeningFor(ideaId);
+    rec.onresult = (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+      if (transcript) {
+        setCheckInDrafts((prev) => ({ ...prev, [ideaId]: prev[ideaId] ? `${prev[ideaId]} ${transcript}` : transcript }));
+      }
+    };
+    rec.onerror = () => {
+      setListeningFor(null);
+      toast({ title: "Could not hear audio", description: "Check microphone permission and try again.", variant: "destructive" });
+    };
+    rec.onend = () => setListeningFor(null);
+    rec.start();
   };
 
   const addCheckIn = async (ideaId: string) => {
@@ -186,6 +275,11 @@ const StartToday = () => {
               const examples = Array.isArray(idea.real_examples) ? (idea.real_examples as string[]) : [];
               const sources = Array.isArray(idea.sources) ? (idea.sources as SourceLink[]) : [];
               const checkIns = Array.isArray(action?.check_ins) ? (action.check_ins as CheckInEntry[]) : [];
+              const steps = Array.isArray(action?.weekly_steps) ? (action.weekly_steps as KickstartStep[]) : [];
+              const stageKey = (idea.opportunity_stage === "inflection_point" || idea.opportunity_stage === "evergreen"
+                ? idea.opportunity_stage
+                : "early_wave") as OpportunityStage;
+              const stageBadge = STAGE_LABELS[stageKey];
               const daysStarted = action?.started_at ? Math.max(0, Math.floor((Date.now() - Date.parse(action.started_at)) / 86_400_000)) : null;
 
               return (
@@ -193,8 +287,12 @@ const StartToday = () => {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">{idea.field}</Badge>
+                      <Badge variant="outline" className={stageBadge.className}>{stageBadge.label}</Badge>
                       {idea.is_wildcard && <Badge variant="outline">Wild Card</Badge>}
                       {idea.is_ask_anything && <Badge variant="outline">Ask Anything</Badge>}
+                      {action?.is_weekly_focus && (
+                        <Badge variant="default" className="gap-1"><Star className="w-3 h-3" /> Focus of the Week</Badge>
+                      )}
                       {daysStarted !== null && action?.status === "started" && (
                         <Badge variant="default">Day {daysStarted}</Badge>
                       )}
@@ -234,15 +332,61 @@ const StartToday = () => {
                     <Button size="sm" variant={action?.status === "not_for_me" ? "secondary" : "outline"} onClick={() => setStatus(idea.id, "not_for_me")}>
                       <XCircle className="w-3.5 h-3.5 mr-1.5" /> Not for me
                     </Button>
+                    {action?.status === "started" && !action.is_weekly_focus && (
+                      <Button size="sm" variant="ghost" onClick={() => setWeeklyFocus(idea.id)}>
+                        <Star className="w-3.5 h-3.5 mr-1.5" /> Set Weekly Focus
+                      </Button>
+                    )}
                   </div>
 
                   {action?.status === "started" && (
-                    <div className="pt-2 border-t border-border/50 space-y-2">
+                    <div className="pt-3 border-t border-border/50 space-y-3">
+                      {generatingPlanFor === idea.id ? (
+                        <p className="text-xs text-muted-foreground flex items-center gap-2">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Building your 7-Day Kickstart Roadmap…
+                        </p>
+                      ) : steps.length > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            7-Day Kickstart Roadmap ({steps.filter((s) => s.done).length}/{steps.length} done)
+                          </p>
+                          <div className="space-y-1">
+                            {steps.map((step) => (
+                              <button
+                                key={step.day}
+                                type="button"
+                                onClick={() => toggleStep(idea.id, step.day)}
+                                className="w-full text-left flex items-start gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-muted/60 transition-colors"
+                              >
+                                {step.done ? (
+                                  <CheckCircle2 className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                                ) : (
+                                  <Circle className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                                )}
+                                <span className={step.done ? "line-through text-muted-foreground" : "text-foreground"}>
+                                  <strong>Day {step.day}:</strong> {step.title}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={listeningFor === idea.id ? "destructive" : "outline"}
+                          onClick={() => startVoiceCheckIn(idea.id)}
+                          aria-label="Tap to speak progress note"
+                          className="shrink-0 px-2.5"
+                        >
+                          {listeningFor === idea.id ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                        </Button>
                         <Input
                           value={checkInDrafts[idea.id] ?? ""}
                           onChange={(e) => setCheckInDrafts((prev) => ({ ...prev, [idea.id]: e.target.value }))}
-                          placeholder="Log a quick weekly progress check-in…"
+                          placeholder={listeningFor === idea.id ? "Listening…" : "Tap mic or type a progress note…"}
                           className="h-9 text-sm"
                         />
                         <Button size="sm" variant="outline" onClick={() => addCheckIn(idea.id)}>Save</Button>

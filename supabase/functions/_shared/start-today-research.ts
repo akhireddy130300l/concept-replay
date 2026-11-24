@@ -1,4 +1,9 @@
-import type { OpportunitySource } from "./start-today.ts";
+import {
+  buildFallbackKickstartPlan,
+  type KickstartStep,
+  type OpportunitySource,
+  type OpportunityStage,
+} from "./start-today.ts";
 
 export interface ResearchedOpportunity {
   field: string;
@@ -11,6 +16,7 @@ export interface ResearchedOpportunity {
   cost_estimate: string;
   time_estimate: string;
   signals: string[];
+  opportunity_stage: OpportunityStage;
   sources: OpportunitySource[];
 }
 
@@ -62,6 +68,7 @@ const IDEA_JSON_SCHEMA = {
     "cost_estimate",
     "time_estimate",
     "signals",
+    "opportunity_stage",
   ],
   properties: {
     field: { type: "string" },
@@ -74,6 +81,7 @@ const IDEA_JSON_SCHEMA = {
     cost_estimate: { type: "string" },
     time_estimate: { type: "string" },
     signals: { type: "array", items: { type: "string" } },
+    opportunity_stage: { type: "string", enum: ["early_wave", "inflection_point", "evergreen"] },
   },
 } as const;
 
@@ -98,7 +106,9 @@ export async function synthesizeOpportunity(params: {
   const systemText = [
     "You are the 'Start Today' Future Regret Radar researcher.",
     "Core belief: anyone can learn or start anything regardless of current job or background.",
-    "Return one concrete, specific, actionable rising opportunity that people who start today will be glad they started 3-10 years from now.",
+    "Search broadly across the entire world — small overlooked local businesses, niche trades, micro-SaaS, creative studios, health habits, emerging skills, community ventures, and global shifts — never limit yourself to only big mainstream headlines.",
+    "Return one concrete, specific, actionable opportunity that people who start today will be glad they started 3-10 years from now.",
+    "Assign opportunity_stage honestly: 'early_wave' (1-3 years ahead of mainstream), 'inflection_point' (surging right now — prime window), or 'evergreen' (timeless compounding skill).",
     "Never promise guaranteed money or investment returns. Keep financial ideas strictly educational.",
     "Keep every field concise, vivid, honest about difficulty/cost/time, and immediately actionable in 15 minutes today.",
   ].join(" ");
@@ -152,4 +162,84 @@ export async function synthesizeOpportunity(params: {
     field: params.fieldLabel,
     sources: params.sources.slice(0, 4),
   };
+}
+
+const KICKSTART_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["steps"],
+  properties: {
+    steps: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["day", "title"],
+        properties: {
+          day: { type: "integer" },
+          title: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+
+export async function generateKickstartRoadmap(params: {
+  topic: string;
+  firstStep: string;
+  field: string;
+}): Promise<KickstartStep[]> {
+  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+  if (!apiKey) return buildFallbackKickstartPlan(params.topic, params.firstStep);
+
+  try {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-6-astra",
+        reasoning: { effort: "low" },
+        max_output_tokens: 700,
+        input: [
+          {
+            role: "system",
+            content:
+              "Create a practical 7-day kickstart micro-plan where each day takes 15 minutes or less. Day 1 must be the provided first step. Keep each step short (under 110 characters), concrete, and beginner-friendly.",
+          },
+          {
+            role: "user",
+            content: `Field: ${params.field}\nTopic: ${params.topic}\nDay 1 first step: ${params.firstStep}`,
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "kickstart_roadmap",
+            strict: true,
+            schema: KICKSTART_JSON_SCHEMA,
+          },
+        },
+      }),
+    });
+    if (!res.ok) return buildFallbackKickstartPlan(params.topic, params.firstStep);
+    const payload = await res.json();
+    const outputText =
+      typeof payload?.output_text === "string"
+        ? payload.output_text
+        : payload?.output?.find((o: { type?: string }) => o.type === "message")?.content?.[0]?.text ?? "";
+    const parsed = JSON.parse(outputText) as { steps?: Array<{ day: number; title: string }> };
+    if (!Array.isArray(parsed.steps) || parsed.steps.length < 7) {
+      return buildFallbackKickstartPlan(params.topic, params.firstStep);
+    }
+    return parsed.steps.slice(0, 7).map((s, idx) => ({
+      day: idx + 1,
+      title: String(s.title).slice(0, 140),
+      done: false,
+    }));
+  } catch {
+    return buildFallbackKickstartPlan(params.topic, params.firstStep);
+  }
 }

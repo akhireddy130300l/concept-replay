@@ -1066,6 +1066,7 @@ export type Database = {
           deleted_at: string | null
           id: string
           idea_id: string
+          is_weekly_focus: boolean
           last_milestone_sent: number
           started_at: string | null
           status: string
@@ -1079,6 +1080,7 @@ export type Database = {
           deleted_at?: string | null
           id?: string
           idea_id: string
+          is_weekly_focus?: boolean
           last_milestone_sent?: number
           started_at?: string | null
           status: string
@@ -1092,6 +1094,7 @@ export type Database = {
           deleted_at?: string | null
           id?: string
           idea_id?: string
+          is_weekly_focus?: boolean
           last_milestone_sent?: number
           started_at?: string | null
           status?: string
@@ -1121,6 +1124,7 @@ export type Database = {
           id: string
           is_ask_anything: boolean
           is_wildcard: boolean
+          opportunity_stage: string
           real_examples: Json
           sent_at: string | null
           sent_for: string
@@ -1143,6 +1147,7 @@ export type Database = {
           id?: string
           is_ask_anything?: boolean
           is_wildcard?: boolean
+          opportunity_stage?: string
           real_examples?: Json
           sent_at?: string | null
           sent_for?: string
@@ -1165,6 +1170,7 @@ export type Database = {
           id?: string
           is_ask_anything?: boolean
           is_wildcard?: boolean
+          opportunity_stage?: string
           real_examples?: Json
           sent_at?: string | null
           sent_for?: string
