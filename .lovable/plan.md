@@ -1,30 +1,27 @@
-# New Feature Ideas for Concept Replay
+# "Start Today" — Future Regret Radar
 
-Brand-new features, separate from what is already built. Pick one or more and I will plan and build them.
+## The idea
+You often see people who started something early (a skill, an investment, a habit, a side business) and think, "I wish I had started back then." This feature tries to prevent that. Every day it finds rising trends that could matter to you in 3–10 years. It then gives you one small step you can take today.
 
-## 1. AI Life Coach "Daily Call"
-A 5-minute voice conversation each evening with an AI coach. It asks about your day, helps you plan tomorrow and remembers past talks, such as "Last week you said you'd fix your sleep. How's it going?" You also get speaking practice from this.
+## What you get
+- **A daily email at 8 AM Eastern called "Start Today":**
+  - **One rising opportunity**, such as a growing skill (AI agents, cloud security), a growing market, a useful habit or a new kind of career. It includes why it is growing, with real recent signals (news, job demand, adoption).
+  - **The "5 years from now" picture**: what people who start today could have by then.
+  - **A 15-minute first step for today**, such as a free lesson, one small action or one question to look into.
+  - **Fit for you**: it matches your topics, English goals, stock interests and career.
+- **A "Start Today" page in the app:**
+  - Mark each idea **Started**, **Later** or **Not for me**. The AI learns what you like.
+  - The ideas you started become small weekly steps, with progress checks in your review emails.
+  - Every 30, 90 and 365 days you get a "**Look how far you came**" email. It shows what you started and how long you've kept going. This replaces "I should have" with "I did".
 
-## 2. Money Tracker and Savings Coach
-Forward receipts or type in your spending. Each week the AI shows where your money went, warns about overspending and suggests how much to invest. It links to your stock research.
-
-## 3. Health and Habit Streaks
-Track water, sleep, gym and steps in a few taps. You get a gentle email nudge if you skip a habit. A monthly chart shows how good habits match your productive days.
-
-## 4. "Second Brain" Notes
-Save anything (a link, a voice note, a screenshot, an idea). The AI summarizes it, tags it and brings it back later in your review emails, so you never forget useful things you found.
-
-## 5. Career Booster
-Paste a job description. The AI finds your skill gaps, builds a study plan using your existing topics and runs mock interview questions out loud.
-
-## 6. Book and Podcast Digest
-Add a book or podcast you're going through. You get 3 key ideas in an email each day, plus a short quiz a week later to lock them in.
-
-## 7. Focus Timer with Accountability
-Pomodoro-style focus sessions. At the end of each one you say what you finished. The AI scores your week: hours of focus and what you got done.
-
-## My recommendation
-Start with **#1 AI Life Coach** (biggest daily impact) or **#4 Second Brain** (most useful long-term).
+## Safety and honesty
+- Ideas are based on real current sources, and every claim has a link.
+- No guaranteed money claims. Investment ideas are for learning only and never change your stock picks.
+- Ideas never repeat (the same no-repeat approach as the English emails).
 
 ## Technical notes
-Each feature is added as its own page and tables, without changing existing emails, stock logic or Speaking Gym rules. It uses the existing AI, voice and email setup.
+- New tables: `opportunity_ideas` (topic, category, signals, sources, first_step, sent_at) and `opportunity_actions` (user, idea, status, check-ins). Both have RLS (only you can access your rows), use soft delete, and have unique normalized topics.
+- New scheduled function `send-start-today-email`, which runs daily. It uses web search to find recent signals and Gemini to write the idea. It uses the same run lock and safe-resend setup as the other emails, and the HTML email uses inline styles.
+- New `/start-today` page in the glossy iPhone style, with a link from the dashboard.
+- A milestone job sends the 30/90/365-day progress emails.
+- Unit tests cover idea deduplication and milestone timing. Existing features stay unchanged.
