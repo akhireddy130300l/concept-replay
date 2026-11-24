@@ -47,11 +47,32 @@ def test_exact_duplicates_can_be_made_fatal():
         enforce_uniqueness(_rows(BASE + [BASE[0]]), allow_exact_duplicates=False)
 
 
-def test_conflicting_duplicates_fail_the_job():
+def test_conflicting_duplicates_fail_when_resolution_disabled():
     conflict = dict(BASE[0], technical_score=9.9)
     with pytest.raises(DuplicateRowsError) as exc:
-        enforce_uniqueness(_rows(BASE + [conflict]))
+        enforce_uniqueness(_rows(BASE + [conflict]), resolve_conflicts=False)
     assert "conflicting" in str(exc.value)
+
+
+def test_conflicting_duplicates_prefer_live_over_historical():
+    hist = dict(BASE[0], training_source="historical", checked_at="2026-01-01T14:00:00Z", example_id="1", technical_score=4.0)
+    live = dict(BASE[0], training_source="live", checked_at="2026-01-01T15:00:00Z", example_id="2", technical_score=8.0)
+    out, rep = enforce_uniqueness(_rows([hist, live, BASE[1]]))
+    assert len(out) == 2
+    assert rep["collapsed_conflicts"] == 1
+    assert rep["rows_after_dedup"] == 2
+    aaa = out[out["ticker"] == "AAA"].iloc[0]
+    assert aaa["training_source"] == "live"
+    assert aaa["technical_score"] == 8.0
+
+
+def test_conflicting_duplicates_keep_earliest_and_are_order_independent():
+    later = dict(BASE[0], training_source="live", checked_at="2026-01-01T16:00:00Z", example_id="b", technical_score=9.0)
+    earlier = dict(BASE[0], training_source="live", checked_at="2026-01-01T14:30:00Z", example_id="a", technical_score=5.5)
+    out1, _ = enforce_uniqueness(_rows([later, earlier, BASE[1]]))
+    out2, _ = enforce_uniqueness(_rows([earlier, later, BASE[1]]))
+    assert out1[out1["ticker"] == "AAA"].iloc[0]["example_id"] == "a"
+    assert out2[out2["ticker"] == "AAA"].iloc[0]["example_id"] == "a"
 
 
 def test_conflicting_duplicates_are_never_silently_dropped():

@@ -87,16 +87,20 @@ def duplicate_report(df: pd.DataFrame, compare_columns: list[str] | None = None)
 def enforce_uniqueness(
     df: pd.DataFrame,
     allow_exact_duplicates: bool = True,
+    resolve_conflicts: bool = True,
     compare_columns: list[str] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Validate the key uniqueness contract.
 
-    - Conflicting duplicates  -> always raise. We do not pick a winner.
+    - Conflicting duplicates  -> when resolve_conflicts=True (default), pick one
+                                 snapshot deterministically: matured first, live
+                                 over historical, earliest checked_at, lowest
+                                 example_id. Otherwise raise DuplicateRowsError.
     - Exact duplicates        -> collapsed to one row when allowed (and reported),
                                  otherwise raise.
     """
     report = duplicate_report(df, compare_columns=compare_columns)
-    if report["conflicting_keys"]:
+    if report["conflicting_keys"] and not resolve_conflicts:
         raise DuplicateRowsError(
             f"{report['conflicting_keys']} (ticker, decision_date, dataset_version) key(s) have "
             f"conflicting rows — refusing to guess which one is real. "
@@ -108,8 +112,47 @@ def enforce_uniqueness(
             f"allow_exact_duplicates=False")
 
     out = df
-    if report["exact_duplicate_rows"]:
+    collapsed_conflicts = 0
+    if report["conflicting_keys"] or report["exact_duplicate_rows"]:
         work = _key_frame(df)
-        out = df[~work.duplicated(subset=KEY_COLUMNS, keep="first")].copy()
+        if report["conflicting_keys"]:
+            matured_rank = (
+                (~work["label_matured"].fillna(False).astype(bool)).astype(int)
+                if "label_matured" in work.columns
+                else pd.Series(0, index=work.index)
+            )
+            source_rank = (
+                (work["training_source"].astype(str).str.lower() != "live").astype(int)
+                if "training_source" in work.columns
+                else pd.Series(1, index=work.index)
+            )
+            checked_rank = (
+                pd.to_datetime(work["checked_at"], utc=True, errors="coerce")
+                if "checked_at" in work.columns
+                else pd.Series(pd.NaT, index=work.index)
+            )
+            id_rank = (
+                work["example_id"].fillna("").astype(str)
+                if "example_id" in work.columns
+                else pd.Series("", index=work.index)
+            )
+            order_df = pd.DataFrame({
+                "__matured": matured_rank,
+                "__source": source_rank,
+                "__checked": checked_rank,
+                "__id": id_rank,
+            }, index=work.index).sort_values(
+                by=["__matured", "__source", "__checked", "__id"],
+                ascending=[True, True, True, True],
+                na_position="last",
+                kind="mergesort",
+            )
+            ordered_work = work.loc[order_df.index]
+            keep_idx = ordered_work.index[~ordered_work.duplicated(subset=KEY_COLUMNS, keep="first")]
+            out = df.loc[keep_idx].copy()
+            collapsed_conflicts = max(0, int(len(df) - len(out) - report["exact_duplicate_rows"]))
+        else:
+            out = df[~work.duplicated(subset=KEY_COLUMNS, keep="first")].copy()
+    report["collapsed_conflicts"] = collapsed_conflicts
     report["rows_after_dedup"] = int(len(out))
     return out, report

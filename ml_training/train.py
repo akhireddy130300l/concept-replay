@@ -127,6 +127,7 @@ def main() -> int:
             f"duplicate_keys={dup_report['duplicate_keys']} "
             f"exact_duplicate_rows={dup_report['exact_duplicate_rows']} "
             f"conflicting_keys={dup_report['conflicting_keys']} "
+            f"collapsed_conflicts={dup_report.get('collapsed_conflicts', 0)} "
             f"rows_after_dedup={dup_report.get('rows_after_dedup', dup_report['rows'])}")
         # ---- incremental gate: skip runs with too few new matured labels ---
         prev = None if settings.dry_run else registry.previous_model(settings)
