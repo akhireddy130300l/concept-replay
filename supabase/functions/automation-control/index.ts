@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
     if (body.action === "model-performance") {
       if (!access?.enabled) return json({ error: "Stock and English access is not enabled for this account" }, 403);
       const [versions, predictions] = await Promise.all([
-        admin.from("model_versions").select("id,algorithm,version,status,metrics").order("created_at", { ascending: false }).limit(20),
+        admin.from("model_versions").select("id,algorithm,version,status,metrics").in("status", ["live", "candidate"]).order("created_at", { ascending: false }).limit(20),
         admin.from("prediction_history").select("model_version_id,actual_label,actual_return").not("model_version_id", "is", null).limit(5000),
       ]);
       if (versions.error) throw versions.error;

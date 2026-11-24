@@ -43,6 +43,13 @@
       "when": 1795540612615,
       "tag": "0005_automation_delivery_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795546682172,
+      "tag": "0006_multi_model_tournament_safeguards",
+      "breakpoints": true
     }
   ]
 }

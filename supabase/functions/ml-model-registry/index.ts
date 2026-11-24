@@ -87,6 +87,13 @@ Deno.serve(async (req) => {
         modelId = created.id;
       }
 
+      // Retire older candidate versions for this algorithm so only the latest candidate stays active.
+      await admin
+        .from("model_versions")
+        .update({ status: "retired" })
+        .eq("algorithm", algorithm)
+        .eq("status", "candidate");
+
       const { data: version, error: vErr } = await admin.from("model_versions").insert({
         model_id: modelId,
         version: body.version ?? new Date().toISOString(),
@@ -134,24 +141,38 @@ Deno.serve(async (req) => {
       const preds: any[] = Array.isArray(body.predictions) ? body.predictions : [];
       if (!body.model_version_id) return json({ error: "model_version_id required" }, 400);
       if (!preds.length) return json({ inserted: 0 });
-      const rows = preds.slice(0, 5000).map((p) => ({
-        model_version_id: body.model_version_id,
-        model_version: body.model_version ?? null,
-        mode: "shadow",
-        ticker: p.ticker,
-        prediction_date: p.prediction_date,
-        predicted_at: new Date().toISOString(),
-        probability: p.probability,
-        predicted_probability: p.probability,
-        predicted_label: p.predicted_label,
-        confidence_score: p.confidence_score ?? null,
-        training_example_id: p.training_example_id ?? null,
-        features_snapshot: p.features_snapshot ?? null,
-        created_by_pipeline: "github_actions_shadow_v1",
-      }));
-      const { error } = await admin.from("prediction_history").insert(rows);
-      if (error) throw error;
-      console.log(`[ml-registry] shadow predictions logged: ${rows.length}`);
+      const seen = new Set<string>();
+      const rows: Record<string, unknown>[] = [];
+      const nowIso = new Date().toISOString();
+      for (const p of preds.slice(0, 2000)) {
+        const key = `${p.ticker}::${p.prediction_date}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push({
+          model_version_id: body.model_version_id,
+          model_version: body.model_version ?? null,
+          mode: "shadow",
+          ticker: p.ticker,
+          prediction_date: p.prediction_date,
+          predicted_at: nowIso,
+          probability: p.probability,
+          predicted_probability: p.probability,
+          predicted_label: p.predicted_label,
+          confidence_score: p.confidence_score ?? null,
+          training_example_id: p.training_example_id ?? null,
+          features_snapshot: p.features_snapshot ?? null,
+          created_by_pipeline: "github_actions_shadow_v1",
+        });
+      }
+      const chunkSize = 500;
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        const chunk = rows.slice(i, i + chunkSize);
+        const { error } = await admin
+          .from("prediction_history")
+          .upsert(chunk, { onConflict: "model_version_id,ticker,prediction_date", ignoreDuplicates: true });
+        if (error) throw error;
+      }
+      console.log(`[ml-registry] shadow predictions upserted: ${rows.length}`);
       return json({ inserted: rows.length });
     }
 

@@ -7,7 +7,11 @@ import {
 } from "../_shared/prediction-outcomes.ts";
 import {
   DEFAULT_PROMOTION_THRESHOLDS,
+  DEFAULT_CHALLENGER_WIN_RATE_MARGIN,
   evaluatePromotionGate,
+  selectPromotionWinner,
+  type LiveModelBenchmark,
+  type PromotionCandidateInput,
 } from "../_shared/model-promotion-gate.ts";
 
 const LOCK_NAME = "score-prediction-outcomes";
@@ -22,25 +26,32 @@ function json(body: unknown, status = 200) {
 }
 
 async function runAutoPromotionCheck(admin: ReturnType<typeof createClient>, nowIso: string) {
-  const { data: candidates } = await admin
-    .from("model_versions")
-    .select("id, version, algorithm, status, metrics")
-    .eq("status", "candidate")
-    .order("created_at", { ascending: false })
-    .limit(5);
+  const [{ data: candidates }, { data: liveModels }] = await Promise.all([
+    admin
+      .from("model_versions")
+      .select("id, version, algorithm, status, metrics")
+      .eq("status", "candidate")
+      .order("created_at", { ascending: false })
+      .limit(10),
+    admin
+      .from("model_versions")
+      .select("id, version, algorithm, status, metrics")
+      .eq("status", "live")
+      .order("promoted_at", { ascending: false })
+      .limit(1),
+  ]);
 
   if (!candidates || candidates.length === 0) {
     return { checked: 0, promoted: false, reason: "no_candidate_models" };
   }
 
-  for (const model of candidates) {
+  const scoreModel = async (modelId: string) => {
     const { data: scoredRows } = await admin
       .from("prediction_history")
       .select("actual_label, actual_return")
-      .eq("model_version_id", model.id)
+      .eq("model_version_id", modelId)
       .not("actual_label", "is", null)
       .not("actual_return", "is", null);
-
     const rows = scoredRows ?? [];
     const scoredCount = rows.length;
     const positiveCount = rows.filter((r) => r.actual_label === "positive").length;
@@ -48,47 +59,74 @@ async function runAutoPromotionCheck(admin: ReturnType<typeof createClient>, now
       scoredCount > 0
         ? rows.reduce((sum, r) => sum + Number(r.actual_return ?? 0), 0) / scoredCount
         : 0;
-    const rawAuc = (model.metrics as Record<string, Record<string, unknown>> | null)?.test?.roc_auc;
-    const testRocAuc = typeof rawAuc === "number" && Number.isFinite(rawAuc) ? rawAuc : null;
+    return { scoredCount, positiveCount, avgReturnPct };
+  };
 
-    const evaluation = evaluatePromotionGate({
-      scoredCount,
-      positiveCount,
-      avgReturnPct,
-      testRocAuc,
-      thresholds: DEFAULT_PROMOTION_THRESHOLDS,
-    });
-
-    if (evaluation.eligible) {
-      await admin
-        .from("model_versions")
-        .update({ status: "retired" })
-        .eq("status", "live");
-
-      await admin
-        .from("model_versions")
-        .update({ status: "live", promoted_at: nowIso })
-        .eq("id", model.id);
-
-      const summary = `auto_promoted: scored=${evaluation.scoredCount} win_rate=${(evaluation.winRate * 100).toFixed(1)}% avg_return=${evaluation.avgReturnPct.toFixed(2)}% roc_auc=${testRocAuc?.toFixed(3)}`;
-      await admin.from("ml_model_promotions").insert({
-        model_version_id: model.id,
-        from_status: model.status,
-        to_status: "live",
-        reason: summary,
-      });
-
-      console.log(`[score-prediction-outcomes] ${summary} version=${model.version}`);
-      return {
-        checked: candidates.length,
-        promoted: true,
-        model_version: model.version,
-        evaluation,
+  let currentLive: LiveModelBenchmark | null = null;
+  const liveModel = liveModels?.[0];
+  if (liveModel) {
+    const liveStats = await scoreModel(liveModel.id);
+    if (liveStats.scoredCount > 0) {
+      currentLive = {
+        modelVersionId: liveModel.id,
+        winRate: liveStats.positiveCount / liveStats.scoredCount,
+        avgReturnPct: liveStats.avgReturnPct,
       };
     }
   }
 
-  return { checked: candidates.length, promoted: false, reason: "thresholds_not_met" };
+  const evaluated: PromotionCandidateInput[] = [];
+  for (const model of candidates) {
+    const stats = await scoreModel(model.id);
+    const rawAuc = (model.metrics as Record<string, Record<string, unknown>> | null)?.test?.roc_auc;
+    const testRocAuc = typeof rawAuc === "number" && Number.isFinite(rawAuc) ? rawAuc : null;
+    const evaluation = evaluatePromotionGate({
+      scoredCount: stats.scoredCount,
+      positiveCount: stats.positiveCount,
+      avgReturnPct: stats.avgReturnPct,
+      testRocAuc,
+      thresholds: DEFAULT_PROMOTION_THRESHOLDS,
+    });
+    evaluated.push({
+      modelVersionId: model.id,
+      version: model.version,
+      algorithm: model.algorithm,
+      status: model.status,
+      evaluation,
+    });
+  }
+
+  const selection = selectPromotionWinner(evaluated, currentLive, DEFAULT_CHALLENGER_WIN_RATE_MARGIN);
+  if (selection.winner) {
+    const winner = selection.winner;
+    await admin
+      .from("model_versions")
+      .update({ status: "retired" })
+      .eq("status", "live");
+
+    await admin
+      .from("model_versions")
+      .update({ status: "live", promoted_at: nowIso })
+      .eq("id", winner.modelVersionId);
+
+    const summary = `auto_promoted: scored=${winner.evaluation.scoredCount} win_rate=${(winner.evaluation.winRate * 100).toFixed(1)}% avg_return=${winner.evaluation.avgReturnPct.toFixed(2)}% roc_auc=${winner.evaluation.testRocAuc?.toFixed(3)}`;
+    await admin.from("ml_model_promotions").insert({
+      model_version_id: winner.modelVersionId,
+      from_status: winner.status,
+      to_status: "live",
+      reason: summary,
+    });
+
+    console.log(`[score-prediction-outcomes] ${summary} version=${winner.version}`);
+    return {
+      checked: candidates.length,
+      promoted: true,
+      model_version: winner.version,
+      evaluation: winner.evaluation,
+    };
+  }
+
+  return { checked: candidates.length, promoted: false, reason: selection.reason };
 }
 
 Deno.serve(async (req) => {

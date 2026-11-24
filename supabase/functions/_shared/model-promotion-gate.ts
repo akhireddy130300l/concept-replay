@@ -12,6 +12,27 @@ export const DEFAULT_PROMOTION_THRESHOLDS: PromotionThresholds = {
   minTestRocAuc: 0.52,
 };
 
+export const DEFAULT_CHALLENGER_WIN_RATE_MARGIN = 0.02;
+
+export interface PromotionCandidateInput {
+  modelVersionId: string;
+  version: string;
+  algorithm: string | null;
+  status: string;
+  evaluation: PromotionEvaluation;
+}
+
+export interface LiveModelBenchmark {
+  modelVersionId: string;
+  winRate: number;
+  avgReturnPct: number;
+}
+
+export interface PromotionSelectionResult {
+  winner: PromotionCandidateInput | null;
+  reason: string;
+}
+
 export interface PromotionEvaluation {
   eligible: boolean;
   scoredCount: number;
@@ -59,4 +80,42 @@ export function evaluatePromotionGate(input: {
     testRocAuc: input.testRocAuc,
     reasons,
   };
+}
+
+export function selectPromotionWinner(
+  candidates: PromotionCandidateInput[],
+  currentLive: LiveModelBenchmark | null,
+  minChallengerMargin = DEFAULT_CHALLENGER_WIN_RATE_MARGIN,
+): PromotionSelectionResult {
+  const eligible = candidates
+    .filter((c) => c.evaluation.eligible)
+    .sort((a, b) => {
+      if (b.evaluation.winRate !== a.evaluation.winRate) {
+        return b.evaluation.winRate - a.evaluation.winRate;
+      }
+      if (b.evaluation.avgReturnPct !== a.evaluation.avgReturnPct) {
+        return b.evaluation.avgReturnPct - a.evaluation.avgReturnPct;
+      }
+      const aucA = a.evaluation.testRocAuc ?? -Infinity;
+      const aucB = b.evaluation.testRocAuc ?? -Infinity;
+      if (aucB !== aucA) return aucB - aucA;
+      return a.modelVersionId.localeCompare(b.modelVersionId);
+    });
+
+  const top = eligible[0];
+  if (!top) {
+    return { winner: null, reason: "thresholds_not_met" };
+  }
+
+  if (currentLive) {
+    const requiredWinRate = currentLive.winRate + minChallengerMargin;
+    if (top.evaluation.winRate < requiredWinRate - 1e-9) {
+      return {
+        winner: null,
+        reason: `challenger_margin_not_met (${(top.evaluation.winRate * 100).toFixed(1)}% < ${(requiredWinRate * 100).toFixed(1)}%)`,
+      };
+    }
+  }
+
+  return { winner: top, reason: "eligible_winner" };
 }

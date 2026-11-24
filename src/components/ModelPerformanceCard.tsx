@@ -8,6 +8,8 @@ interface ModelSummary {
   algorithm: string;
   version: string;
   status: string;
+  rank: number;
+  isLeader: boolean;
   testRocAuc: number | null;
   predictions: number;
   scored: number;
@@ -34,7 +36,13 @@ export function ModelPerformanceCard() {
     <div className="mb-5 flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 text-xl font-semibold" id="model-performance-heading"><BarChart3 className="h-5 w-5 text-primary" />Model Performance</h3><Button variant="ghost" size="icon" aria-label="Refresh model performance" title="Refresh model performance" disabled={query.isFetching} onClick={() => query.refetch()}><RefreshCw className={`h-4 w-4 ${query.isFetching ? "animate-spin" : ""}`} /></Button></div>
     {query.isPending ? <p className="text-sm text-muted-foreground">Loading model results…</p> : query.isError ? <p role="alert" className="text-sm text-destructive">Model performance unavailable. Your schedules are unchanged.</p> : !models?.length ? <p className="text-sm text-muted-foreground">No trained models registered yet.</p> : <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {models.map(m => <article key={m.modelVersionId} className="rounded-xl border border-border/60 bg-card/60 p-4 backdrop-blur-sm">
-        <div className="flex items-center justify-between gap-2"><h4 className="break-words font-medium capitalize">{m.algorithm.replace(/_/g, " ")}</h4><span className="shrink-0 rounded-full border border-border/60 px-2 py-0.5 text-xs text-muted-foreground">{m.status}</span></div>
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="break-words font-medium capitalize"><span className="mr-1.5 text-xs text-muted-foreground">#{m.rank}</span>{m.algorithm.replace(/_/g, " ")}</h4>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {m.isLeader && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">Leader</span>}
+            <span className="rounded-full border border-border/60 px-2 py-0.5 text-xs text-muted-foreground">{m.status}</span>
+          </div>
+        </div>
         <dl className="mt-3 space-y-1.5 text-sm">
           <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Win rate</dt><dd className="font-medium">{pct(m.winRate)}</dd></div>
           <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Avg return (10 sessions)</dt><dd className="font-medium">{ret(m.avgReturnPct)}</dd></div>

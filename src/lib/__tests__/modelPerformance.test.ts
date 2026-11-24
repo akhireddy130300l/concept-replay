@@ -47,5 +47,21 @@ describe("summarizeModelPerformance", () => {
     expect(result[0].predictions).toBe(0);
     expect(result[0].testRocAuc).toBeNull();
     expect(result[0].winRate).toBeNull();
+    expect(result[0].rank).toBe(1);
+    expect(result[0].isLeader).toBe(false);
+  });
+
+  it("orders leaderboard by scored win rate then average return and marks leader", () => {
+    const result = summarizeModelPerformance(versions, [
+      { model_version_id: "v1", actual_label: "positive", actual_return: 4 },
+      { model_version_id: "v1", actual_label: "negative", actual_return: -2 },
+      { model_version_id: "v2", actual_label: "positive", actual_return: 5 },
+    ]);
+    expect(result[0].modelVersionId).toBe("v2");
+    expect(result[0].rank).toBe(1);
+    expect(result[0].isLeader).toBe(true);
+    expect(result[1].modelVersionId).toBe("v1");
+    expect(result[1].rank).toBe(2);
+    expect(result[1].isLeader).toBe(false);
   });
 });

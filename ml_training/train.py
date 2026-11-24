@@ -315,6 +315,7 @@ def main() -> int:
 
 
         registered = []
+        registered_for_shadow: list[dict[str, Any]] = []
         for r in results:
             if settings.dry_run:
                 continue
@@ -350,25 +351,26 @@ def main() -> int:
             }
             res = registry.register_model(settings, payload)
             registered.append({"algorithm": r["name"], "model_version_id": res["model_version_id"]})
+            registered_for_shadow.append({
+                "name": r["name"],
+                "pipeline": r["pipeline"],
+                "model_version_id": res["model_version_id"],
+                "version": payload["version"],
+            })
             log(f"[train] registered candidate {r['name']} -> {res['model_version_id']}")
 
-            if r["name"] == best["name"]:
-                shadow = data.load_unmatured(settings)
-                if not shadow.empty:
-                    sdf = features.prepare_frame(shadow)
-                    raw = r["pipeline"].predict_proba(sdf[cols])[:, 1]
-                    proba = calibrator.transform(raw)
-                    preds = [{
-                        "ticker": row.ticker,
-                        "prediction_date": str(row.decision_date),
-                        "probability": float(p),
-                        "predicted_label": "positive" if p >= 0.5 else "negative",
-                        "confidence_score": float(abs(p - 0.5) * 2),
-                        "training_example_id": row.example_id,
-                    } for row, p in zip(sdf.itertuples(), proba)]
-                    out = registry.log_predictions(settings, res["model_version_id"], payload["version"], preds)
-                    log(f"[train] shadow predictions logged: {out.get('inserted', 0)} "
-                        f"({'calibrated' if calibrator.is_fitted else 'raw'} probabilities)")
+        if registered_for_shadow:
+            shadow = data.load_unmatured(settings)
+            registry.log_shadow_predictions_for_models(
+                settings=settings,
+                registered_models=registered_for_shadow,
+                shadow_df=shadow,
+                cols=cols,
+                best_name=best["name"],
+                calibrator=calibrator,
+                prepare_frame_fn=features.prepare_frame,
+                log_fn=log,
+            )
 
 
         if not settings.dry_run:

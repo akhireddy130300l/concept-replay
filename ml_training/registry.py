@@ -45,9 +45,76 @@ def previous_model(settings: Settings) -> dict | None:
     return _post(settings, "previous_model", {}).get("previous_model")
 
 
-def log_predictions(settings: Settings, model_version_id: str, version: str, predictions: list[dict]) -> dict:
-    return _post(settings, "log_predictions", {
-        "model_version_id": model_version_id,
-        "model_version": version,
-        "predictions": predictions,
-    })
+def log_predictions(
+    settings: Settings,
+    model_version_id: str,
+    version: str,
+    predictions: list[dict],
+    batch_size: int = 500,
+    max_predictions: int = 2000,
+) -> dict:
+    capped = predictions[:max_predictions]
+    if not capped:
+        return {"inserted": 0, "batches": 0}
+    total_inserted = 0
+    batches = 0
+    for i in range(0, len(capped), batch_size):
+        chunk = capped[i : i + batch_size]
+        res = _post(settings, "log_predictions", {
+            "model_version_id": model_version_id,
+            "model_version": version,
+            "predictions": chunk,
+        })
+        total_inserted += int(res.get("inserted", 0))
+        batches += 1
+    return {"inserted": total_inserted, "batches": batches}
+
+
+def log_shadow_predictions_for_models(
+    settings: Settings,
+    registered_models: list[dict[str, Any]],
+    shadow_df: Any,
+    cols: list[str],
+    best_name: str,
+    calibrator: Any,
+    prepare_frame_fn: Any,
+    log_fn: Any,
+    log_predictions_fn: Any = log_predictions,
+    max_predictions: int = 2000,
+) -> list[dict[str, Any]]:
+    """Log shadow predictions for every candidate model with per-model failure isolation."""
+    results: list[dict[str, Any]] = []
+    if shadow_df.empty:
+        return results
+    sdf = prepare_frame_fn(shadow_df).head(max_predictions)
+    for entry in registered_models:
+        name = entry["name"]
+        try:
+            raw = entry["pipeline"].predict_proba(sdf[cols])[:, 1]
+            use_calibrator = name == best_name and calibrator is not None and calibrator.is_fitted
+            proba = calibrator.transform(raw) if use_calibrator else raw
+            preds = [{
+                "ticker": row.ticker,
+                "prediction_date": str(row.decision_date),
+                "probability": float(p),
+                "predicted_label": "positive" if p >= 0.5 else "negative",
+                "confidence_score": float(abs(p - 0.5) * 2),
+                "training_example_id": row.example_id,
+            } for row, p in zip(sdf.itertuples(), proba)]
+            out = log_predictions_fn(
+                settings,
+                entry["model_version_id"],
+                entry["version"],
+                preds,
+                max_predictions=max_predictions,
+            )
+            inserted = int(out.get("inserted", 0))
+            log_fn(
+                f"[train] shadow predictions logged for {name}: {inserted} "
+                f"({'calibrated' if use_calibrator else 'raw'} probabilities)"
+            )
+            results.append({"algorithm": name, "ok": True, "inserted": inserted})
+        except Exception as exc:
+            log_fn(f"[train] shadow predictions failed for {name} (isolated): {exc}")
+            results.append({"algorithm": name, "ok": False, "error": str(exc)})
+    return results
