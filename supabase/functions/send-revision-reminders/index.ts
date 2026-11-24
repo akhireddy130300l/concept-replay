@@ -2530,7 +2530,7 @@ function nextRevisionInstant(now: Date, daysFromNow: number, hour: number, minut
   return instant;
 }
 
-async function generateTopicDescription(topic: string): Promise<string> {
+async function generateTopicDescription(topic: string, preview = false): Promise<string> {
   const normalizedTopic = normalizeTopicForIntent(topic);
   const isMarketGainers = isLatestMarketGainersRequest(topic);
 
@@ -2588,7 +2588,7 @@ async function generateTopicDescription(topic: string): Promise<string> {
           });
         }
         const admin = createClient(supabaseUrl, supabaseServiceKey);
-        const swing = await runSwingTraderWatch(admin, inputs);
+        const swing = await runSwingTraderWatch(admin, inputs, undefined, undefined, { preview });
         let modelViewHtml = "";
         try {
           const modelView = await fetchLatestModelView(admin, swing.selected?.ticker ?? null);
@@ -3003,7 +3003,7 @@ serve(async (req) => {
           });
 
           if (isMarketGainersTopic) {
-            const desc = await generateTopicDescription(topic.title);
+            const desc = await generateTopicDescription(topic.title, Boolean(testUserId));
             console.log("Generated market gainers description without MCQ for topic:", topic.title);
             return { ...topic, aiDescription: desc, mcq: null };
           }

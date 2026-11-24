@@ -1,12 +1,15 @@
 // Persist the exact provider payload before delivery so retries use stable content and keys.
+import { withinProviderRetryWindow } from "./automation-policy.ts";
 export async function sendRecordedEmail(admin: any, input: {
   userId: string; kind: "stock" | "english" | "recap"; key: string; isTest?: boolean;
   from: string; to: string; subject: string; html: string; audioAvailable?: boolean; apiKey: string;
 }) {
   const { data: prior, error: readError } = await admin.from("automation_email_deliveries")
-    .select("status,subject,content_html,provider_id,audio_available").eq("delivery_key", input.key).maybeSingle();
+    .select("status,subject,content_html,provider_id,audio_available,created_at").eq("delivery_key", input.key).maybeSingle();
   if (readError) throw new Error("Delivery history unavailable");
   if (prior?.status === "sent") return { ok: true, duplicate: true, id: prior.provider_id };
+  // Provider keys expire after 24 hours; uncertain older deliveries need reconciliation, not blind resend.
+  if (prior && !withinProviderRetryWindow(prior.created_at)) throw new Error("Older unconfirmed delivery needs review before retry");
   const subject = prior?.subject ?? input.subject;
   const html = prior?.content_html ?? input.html;
   if (!prior) {

@@ -4,6 +4,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { conversationSpeechRequest, pcmToWav } from "./recap-audio.ts";
 import { distinctPhrases } from "../_shared/english-practice.ts";
+import { LEARNING_LINK_SECONDS } from "../_shared/automation-policy.ts";
+import { sendRecordedEmail } from "../_shared/recorded-email.ts";
+import { z } from "npm:zod@3";
 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -71,11 +74,20 @@ Deno.serve(async (req) => {
   try { const { data } = await admin.rpc("get_cron_secret"); if (typeof data === "string") secret = data; } catch { /* ignore */ }
   if (!secret) secret = Deno.env.get("CRON_SECRET") ?? "";
   if (!secret || req.headers.get("x-cron-secret") !== secret) return json({ error: "Forbidden" }, 403);
-  const body = await req.json().catch(() => ({}));
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  const parsed = z.object({ force: z.boolean().optional() }).strict().safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) return json({ error: "Invalid request" }, 400);
+  const body = parsed.data;
   const { date, hour } = easternNow();
   if (!body?.force && hour !== 17) return json({ skipped: "not_530_eastern", hour });
 
-  const { data: ex } = await admin.from("american_word_recaps").select("id,sent_ok").eq("sent_for", date).maybeSingle();
+  const lockName = `american-recap-${date}`;
+  const lock = await admin.rpc("try_acquire_run_lock", { _name: lockName, _seconds: 300 });
+  if (lock.error) return json({ error: "delivery_lock_unavailable" }, 503);
+  if (!lock.data) return json({ skipped: "concurrent_run" });
+  try {
+  const { data: ex, error: recapError } = await admin.from("american_word_recaps").select("id,sent_ok,story").eq("sent_for", date).maybeSingle();
+  if (recapError) throw recapError;
   if (ex?.sent_ok) return json({ skipped: "already_sent", date });
 
   const { data: practiced, error: practiceError } = await admin.from("american_word_emails").select("word,pronunciation,meaning,sentence,et_hour")
@@ -84,17 +96,25 @@ Deno.serve(async (req) => {
   const words = distinctPhrases(practiced ?? []);
   if (!words.length) return json({ skipped: "no_words_today", date });
 
-  const { data: recips } = await admin.from("portfolio_feature_access").select("report_email");
-  const to = (recips ?? []).map((r) => r.report_email).filter(Boolean);
-  if (!to.length) return json({ skipped: "no_recipients" });
+  const { data: recips, error: recipientError } = await admin.from("portfolio_feature_access").select("user_id,report_email");
+  if (recipientError) throw recipientError;
+  const recipients = (recips ?? []).filter(r => r.report_email);
+  if (!recipients.length) return json({ skipped: "no_recipients" });
 
   let s: { title: string; lines: Line[] };
-  try { s = await story(words as W[]); } catch (e) { console.log(JSON.stringify({ phase: "recap_gen", error: String(e) })); return json({ error: "generation_failed" }, 502); }
+  try { s = ex?.story ? JSON.parse(ex.story) : await story(words as W[]); } catch (e) { console.log(JSON.stringify({ phase: "recap_gen", error: String(e) })); return json({ error: "generation_failed" }, 502); }
+  if (!ex?.story) {
+    const { error } = await admin.from("american_word_recaps").upsert({ sent_for: date, story: JSON.stringify(s), sent_ok: false }, { onConflict: "sent_for" });
+    if (error) throw error;
+  }
 
   // One TTS call per day; email still goes out if audio fails.
   let audioUrl: string | null = null;
   try {
-    const path = `recap-${date}-${Date.now()}.wav`;
+    const path = `recap-${date}.wav`;
+    const listed = await admin.storage.from("word-audio").list("", { search: path });
+    if (listed.error) throw listed.error;
+    if (!listed.data?.some(f => f.name === path)) {
     const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(Deno.env.get("GEMINI_API_KEY") ?? "")}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(conversationSpeechRequest(s.lines)),
     });
@@ -104,17 +124,20 @@ Deno.serve(async (req) => {
     if (!b64) throw new Error("empty_audio");
     const up = await admin.storage.from("word-audio").upload(path, pcmToWav(b64), { contentType: "audio/wav", upsert: true });
     if (up.error) throw new Error(up.error.message);
-    const signed = await admin.storage.from("word-audio").createSignedUrl(path, 365 * 24 * 60 * 60);
+    }
+    const signed = await admin.storage.from("word-audio").createSignedUrl(path, LEARNING_LINK_SECONDS);
     if (signed.error) throw new Error(signed.error.message);
     audioUrl = signed.data.signedUrl;
   } catch (e) { console.log(JSON.stringify({ phase: "recap_audio", error: String(e).slice(0, 200) })); }
 
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}`, "Idempotency-Key": `american-recap-${date}` },
-    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `Today's ${words.length} words in one story: ${s.title}`, html: render(s, words as W[], audioUrl) }),
-  });
-  if (res.ok) await admin.from("american_word_recaps").upsert({ sent_for: date, story: JSON.stringify(s), sent_ok: true }, { onConflict: "sent_for" });
-  else console.log(JSON.stringify({ phase: "recap_send", status: res.status, detail: (await res.text()).slice(0, 200) }));
-  return json({ ok: res.ok, date, words: words.length, title: s.title });
+  for (const recipient of recipients) {
+    await sendRecordedEmail(admin, { userId: recipient.user_id, kind: "recap", key: `american-recap-${date}-${recipient.user_id}`,
+      from: "American Word <onboarding@resend.dev>", to: recipient.report_email, subject: `Today's ${words.length} words in one story: ${s.title}`,
+      html: render(s, words as W[], audioUrl), audioAvailable: Boolean(audioUrl), apiKey: Deno.env.get("RESEND_API_KEY") ?? "" });
+  }
+  const { error } = await admin.from("american_word_recaps").update({ sent_ok: true }).eq("sent_for", date);
+  if (error) throw error;
+  return json({ ok: true, date, words: words.length, title: s.title });
+  } catch { return json({ error: "recap_delivery_failed" }, 502); }
+  finally { await admin.rpc("release_run_lock", { _name: lockName }); }
 });

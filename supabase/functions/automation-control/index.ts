@@ -41,13 +41,13 @@ Deno.serve(async (req) => {
       ]);
       for (const result of [speaking, topics, deliveries, cooldowns]) if (result.error) throw result.error;
       const stockTopics = (topics.data ?? []).filter(t => /latest\s+market\s+gainers/i.test(t.title));
-      let english: any = null, swing: any = null, training: any = null, model: any = null;
+      let english: any = null, swing: any = null, training: any = null, model: any = null, prediction: any = null;
       if (access?.enabled) {
         const results = await Promise.all([
           admin.from("american_word_emails").select("id,word,et_hour,sent_ok,created_at").eq("sent_for", eastern).order("et_hour"),
           admin.from("swing_trade_runs").select("selected_ticker,run_date,created_at").eq("run_date", eastern).order("created_at", { ascending: false }).limit(1).maybeSingle(),
           admin.from("ml_training_jobs").select("started_at,finished_at,status,best_model").order("started_at", { ascending: false }).limit(1).maybeSingle(),
-          admin.from("model_versions").select("algorithm,version,status,created_at").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+          admin.from("prediction_history").select("ticker,predicted_probability,prediction_date,model_versions(algorithm,version,status)").not("model_version_id", "is", null).order("prediction_date", { ascending: false }).order("predicted_probability", { ascending: false }).limit(1).maybeSingle(),
         ]);
         for (const result of results) if (result.error) throw result.error;
         const rows = results[0].data ?? [];
@@ -58,10 +58,8 @@ Deno.serve(async (req) => {
           audio = listed.error ? null : Boolean(listed.data?.some(f => f.name === `${last.id}.wav`));
         }
         english = { sent: rows.filter(r => r.sent_ok).length, remaining: Math.max(0, 9 - rows.filter(r => r.sent_ok).length), lastWord: last?.word ?? null, audio, day: eastern };
-        swing = results[1].data; training = results[2].data; model = results[3].data;
+        swing = results[1].data; training = results[2].data; model = results[3].data?.model_versions ?? null; prediction = results[3].data;
       }
-      // Status shows the raw training estimate; email picks undergo additional live market checks.
-      const { data: prediction } = access?.enabled ? await admin.from("prediction_history").select("ticker,predicted_probability,prediction_date").not("model_version_id", "is", null).order("prediction_date", { ascending: false }).order("predicted_probability", { ascending: false }).limit(1).maybeSingle() : { data: null };
       return json({ enabled: Boolean(access?.enabled), english, speaking: { required: speaking.data?.require_speaking_for_stock ?? true, completedToday: speaking.data?.last_completed_date === today, gate: classifyGate({ gateStartedAt: speaking.data?.speaking_gate_started_at ?? null, lastCompletedDate: speaking.data?.last_completed_date ?? null, requireSpeaking: speaking.data?.require_speaking_for_stock ?? true }) }, stock: { lastSent: deliveries.data?.find(d => d.kind === "stock" && !d.is_test && d.status === "sent")?.sent_at ?? null, nextRun: stockTopics[0]?.next_revision_date ?? null, topPick: swing?.selected_ticker ?? null }, ml: { training, model, prediction: prediction && prediction.prediction_date === eastern ? prediction : null }, cooldowns: Object.fromEntries((cooldowns.data ?? []).map(c => [c.kind, testCooldownRemaining(c.requested_at)])), lastTests: (deliveries.data ?? []).filter(d => d.is_test).slice(0, 2) });
     }
     if (!access?.enabled) return json({ error: "Stock and English access is not enabled for this account" }, 403);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { confidenceTier, validModelMarket, LEARNING_LINK_SECONDS, stockDeliveryKey, testDeliveryKey, testCooldownRemaining } from "../../../supabase/functions/_shared/automation-policy";
+import { confidenceTier, validModelMarket, LEARNING_LINK_SECONDS, stockDeliveryKey, testDeliveryKey, testCooldownRemaining, withinProviderRetryWindow } from "../../../supabase/functions/_shared/automation-policy";
 import { sendRecordedEmail } from "../../../supabase/functions/_shared/recorded-email";
 
 describe("automation safeguards", () => {
@@ -26,11 +26,33 @@ describe("automation safeguards", () => {
     expect(testDeliveryKey("u", "stock", "r")).not.toBe(stockDeliveryKey("u", "t", "2026-11-24T16:18:00Z"));
   });
   it("test sends have a five-minute cooldown", () => { expect(testCooldownRemaining(new Date(now).toISOString(), now + 299000)).toBe(1); expect(testCooldownRemaining(new Date(now).toISOString(), now + 300000)).toBe(0); });
+  it("never blindly retries beyond the provider deduplication window", () => { expect(withinProviderRetryWindow(new Date(now - 22 * 3600000).toISOString(), now)).toBe(true); expect(withinProviderRetryWindow(new Date(now - 24 * 3600000).toISOString(), now)).toBe(false); });
   it("does not contact the provider again after a confirmed delivery", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const admin = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { status: "sent", provider_id: "confirmed" }, error: null }) }) }) }) };
     const result = await sendRecordedEmail(admin, { userId: "u", kind: "stock", key: "same", from: "from@example.com", to: "to@example.com", subject: "test", html: "<p>test</p>", apiKey: "test" });
     expect(result).toEqual({ ok: true, duplicate: true, id: "confirmed" });
     expect(fetchMock).not.toHaveBeenCalled(); fetchMock.mockRestore();
+  });
+  it("a network retry retains the originally recorded payload and provider key", async () => {
+    let stored: Record<string, unknown> | null = null;
+    const query: any = {
+      select: () => query, eq: () => query,
+      maybeSingle: async () => ({ data: stored, error: null }),
+      insert: async (row: Record<string, unknown>) => { stored = { ...row, created_at: new Date().toISOString() }; return { error: null }; },
+      update: (row: Record<string, unknown>) => { stored = { ...stored, ...row }; return query; },
+      then: (resolve: (r: unknown) => void) => resolve({ error: null }),
+    };
+    const admin = { from: () => query };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("network timeout")).mockResolvedValueOnce(new Response(JSON.stringify({ id: "accepted" }), { status: 200 }));
+    const input = { userId: "u", kind: "stock" as const, key: "stable", from: "from@example.com", to: "to@example.com", subject: "first", html: "original payload", apiKey: "test" };
+    try {
+      await expect(sendRecordedEmail(admin, input)).rejects.toThrow("network timeout");
+      const result = await sendRecordedEmail(admin, { ...input, subject: "regenerated", html: "different payload" });
+      expect(result.id).toBe("accepted");
+      expect(fetchMock.mock.calls[0][1]?.body).toEqual(fetchMock.mock.calls[1][1]?.body);
+      expect(fetchMock.mock.calls[0][1]?.headers).toEqual(fetchMock.mock.calls[1][1]?.headers);
+      expect(stored).toMatchObject({ status: "sent" });
+    } finally { fetchMock.mockRestore(); }
   });
 });

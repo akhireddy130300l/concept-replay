@@ -805,6 +805,7 @@ export async function runSwingTraderWatch(
   rawInputs: SwingTickerInput[],
   emailRunId?: string,
   userId?: string,
+  options: { preview?: boolean } = {},
 ): Promise<SwingResult> {
   const started = Date.now();
   const apiKey = Deno.env.get("EXA_API_KEY") || "";
@@ -812,7 +813,7 @@ export async function runSwingTraderWatch(
   const inputs = dedupeInputs(rawInputs);
 
   // Best-effort outcome update for older training examples. Never blocks email.
-  try { await updateOutcomes(admin); } catch (e) {
+  try { if (!options.preview) await updateOutcomes(admin); } catch (e) {
     console.log(`[ml-training] outcome_update_wrapper_failed reason=${(e as Error).message}`);
   }
 
@@ -972,6 +973,7 @@ export async function runSwingTraderWatch(
 
   let runId: string | undefined;
   try {
+    if (!options.preview) {
     const runRow: any = {
       email_run_id: emailRunId ?? null,
       run_date: today,
@@ -1050,6 +1052,7 @@ export async function runSwingTraderWatch(
         }
       }
     }
+    }
   } catch (e) {
     console.log(JSON.stringify({ phase: "swing", failure_category: "persist_failed", message: (e as Error).message }));
   }
@@ -1077,7 +1080,7 @@ export async function runSwingTraderWatch(
   // Save one training example per checked ticker. Best-effort.
   let savedThisRun = 0;
   try {
-    savedThisRun = await saveTrainingExamples(admin, preliminary, inputs, userId ?? null, runId ?? null);
+    if (!options.preview) savedThisRun = await saveTrainingExamples(admin, preliminary, inputs, userId ?? null, runId ?? null);
   } catch (e) {
     console.log(`[ml-training] save_wrapper_failed reason=${(e as Error).message}`);
   }

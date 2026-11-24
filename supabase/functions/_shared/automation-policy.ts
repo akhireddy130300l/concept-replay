@@ -9,6 +9,10 @@ export function stockDeliveryKey(userId: string, topicId: string, dueAt: string)
 export function testCooldownRemaining(requestedAt: string | null, now = Date.now()) {
   return requestedAt ? Math.max(0, TEST_COOLDOWN_SECONDS - Math.floor((now - Date.parse(requestedAt)) / 1000)) : 0;
 }
+export function withinProviderRetryWindow(createdAt: string, now = Date.now()) {
+  const age = now - Date.parse(createdAt);
+  return Number.isFinite(age) && age >= 0 && age < 23 * 60 * 60 * 1000;
+}
 export function confidenceTier(probability: number) {
   if (!Number.isFinite(probability) || probability < 0 || probability > 1) return null;
   return probability >= 0.7 ? "High Conviction" : probability >= 0.6 ? "Moderate" : "Watchlist Only";
