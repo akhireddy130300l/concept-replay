@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod@3";
+import { sendRecordedEmail } from "../_shared/recorded-email.ts";
+import { stockDeliveryKey, testDeliveryKey } from "../_shared/automation-policy.ts";
 import { Resend } from "https://esm.sh/resend@4.0.0";
 import { classifyGate, WARNING_BANNER_HTML } from "../_shared/speaking-gate.ts";
 import { runSwingTraderWatch, buildSwingSectionsHTML, type SwingTickerInput } from "../_shared/swing-watch.ts";
@@ -2846,12 +2849,18 @@ serve(async (req) => {
     });
   }
 
+  if (req.method !== "POST") return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  const parsed = z.object({ test_user_id: z.string().uuid().optional(), test_request_id: z.string().uuid().optional() }).strict().safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success || Boolean(parsed.data.test_user_id) !== Boolean(parsed.data.test_request_id)) return new Response(JSON.stringify({ error: "Invalid request" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  const testUserId = parsed.data.test_user_id ?? null;
+  const testRequestId = parsed.data.test_request_id ?? null;
+
   // ── In-progress run lock: an overlapping cron trigger exits immediately ──
   let runLockHeld = false;
   {
     const { data: got, error: lockErr } = await createClient(supabaseUrl, supabaseServiceKey)
       .rpc("try_acquire_run_lock", { _name: "send-revision-reminders", _seconds: 600 });
-    if (lockErr) console.error("[run-lock] acquire failed, continuing:", lockErr.message);
+    if (lockErr) return new Response(JSON.stringify({ error: "Delivery lock unavailable" }), { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     else if (got !== true) {
       console.log("[run-lock] previous run still in progress — skipping this trigger");
       return new Response(JSON.stringify({ skipped: "run_in_progress" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -2865,11 +2874,14 @@ serve(async (req) => {
     const now = new Date();
     const currentTime = now.toISOString();
     console.log("Fetching topics due for revision up to:", currentTime);
-    const { data: dueTopics, error: fetchError } = await supabase
-      .from("learned_topics")
-      .select("*")
-      .lte("next_revision_date", currentTime)
-      .is("deleted_at", null);
+    let topicQuery = supabase.from("learned_topics").select("*").is("deleted_at", null);
+    if (testUserId) {
+      const { data: access } = await supabase.from("portfolio_feature_access").select("enabled").eq("user_id", testUserId).maybeSingle();
+      if (!access?.enabled) return new Response(JSON.stringify({ error: "Access not enabled" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      topicQuery = topicQuery.eq("user_id", testUserId);
+    } else topicQuery = topicQuery.lte("next_revision_date", currentTime);
+    const { data: fetchedTopics, error: fetchError } = await topicQuery;
+    const dueTopics = testUserId ? (fetchedTopics ?? []).filter(t => isLatestMarketGainersRequest(t.title)).sort((a, b) => a.next_revision_date.localeCompare(b.next_revision_date)).slice(0, 1) : fetchedTopics;
 
     if (fetchError) {
       console.error("Error fetching topics:", fetchError);
@@ -2918,7 +2930,7 @@ serve(async (req) => {
         skippedStockIds = skipped.map((s) => s.id);
         console.log(`[email] duplicate_stock_topics_found count=${stockTopics.length} selected_topic_id=${selectedStock.id} skipped_topic_ids=${JSON.stringify(skippedStockIds)}`);
         // Advance the skipped duplicates' next_revision_date so they don't re-fire immediately.
-        for (const s of skipped) {
+        for (const s of testUserId ? [] : skipped) {
           const next = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
           try {
             await supabase.from("learned_topics").update({ next_revision_date: next }).eq("id", s.id);
@@ -2927,37 +2939,9 @@ serve(async (req) => {
         topicsArray = [...nonStockTopics, selectedStock];
       }
 
-      // ── Stock-email idempotency claim ──
-      // If a stock (market-gainers) topic is present, atomically advance its
-      // next_revision_date so a concurrent invocation cannot send a duplicate
-      // stock email. If the claim fails, drop stock topics from this run entirely.
-      let stockClaimedTopicId: string | null = null;
-      {
-        const stockCandidate = topicsArray.find((t) => isLatestMarketGainersRequest(t.title));
-        if (stockCandidate) {
-          const claimUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-          const nowIso = new Date().toISOString();
-          const nyBucket = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-          const idemKey = `${userId}:stock_gainers_email:${nyBucket}:${stockCandidate.id}`;
-          const { data: claimed, error: claimErr } = await supabase
-            .from("learned_topics")
-            .update({
-              next_revision_date: claimUntil,
-              revision_count: (stockCandidate.revision_count || 0) + 1,
-            })
-            .eq("id", stockCandidate.id)
-            .lte("next_revision_date", nowIso)
-            .select("id");
-          if (claimErr || !claimed || claimed.length === 0) {
-            console.log(`[stock-email] duplicate_send_skipped user_id=${userId} idempotency_key=${idemKey} err=${claimErr?.message || "already_claimed"}`);
-            topicsArray = topicsArray.filter((t) => !isLatestMarketGainersRequest(t.title));
-            if (topicsArray.length === 0) continue;
-          } else {
-            stockClaimedTopicId = stockCandidate.id;
-            console.log(`[stock-email] sending_once user_id=${userId} idempotency_key=${idemKey}`);
-          }
-        }
-      }
+      // Reserve a stable provider key based on this scheduled occurrence; advance dates only after success.
+      const stockCandidate = topicsArray.find(t => isLatestMarketGainersRequest(t.title));
+      const stockSendKey = stockCandidate ? (testUserId && testRequestId ? testDeliveryKey(userId, "stock", testRequestId) : stockDeliveryKey(userId, stockCandidate.id, stockCandidate.next_revision_date)) : null;
 
       console.log("Processing user:", userId, "with", topicsArray.length, "topics");
 
@@ -2984,6 +2968,7 @@ serve(async (req) => {
       if (gateStatus === "paused") {
         console.log(JSON.stringify({ phase: "reminder_send", user_id: userId, skipped_reason: "speaking_paused" }));
         // Don't advance next_revision_date — topics will be picked up again when the user resumes.
+        if (testUserId) return new Response(JSON.stringify({ skipped: "speaking_paused" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
         continue;
       }
       const speakingWarningBanner = gateStatus === "warning" ? WARNING_BANNER_HTML : "";
@@ -3090,9 +3075,6 @@ serve(async (req) => {
       const fromEmail = "onboarding@resend.dev";
       const toEmail = userEmail;
 
-      // Idempotency claim was performed earlier (before content generation).
-      // stockClaimedTopicId is in scope from the block above.
-
       const topicNames = topicsArray.map(t => escapeHtml(t.title));
       let emailSubject: string;
       if (topicNames.length === 1) {
@@ -3108,31 +3090,21 @@ serve(async (req) => {
       console.log("TO:", toEmail);
       console.log("SUBJECT:", emailSubject);
 
+      let delivered = false;
       try {
-        const result = await resend.emails.send({
-          from: fromEmail,
-          to: [toEmail],
-          subject: emailSubject,
-          html: emailContent,
-        });
-        console.log("Resend API response:", result);
-
-        if (result.data?.id) {
-          emailsSent++;
-          console.log("Email sent successfully to:", toEmail);
+        if (stockSendKey) {
+          const result = await sendRecordedEmail(supabase, { userId, kind: "stock", key: stockSendKey, isTest: Boolean(testUserId), from: fromEmail, to: toEmail, subject: `${testUserId ? "[TEST] " : ""}${emailSubject}`, html: emailContent, apiKey: Deno.env.get("RESEND_API_KEY") ?? "" });
+          delivered = result.ok;
         } else {
-          console.error("Email not sent, response:", result.error);
+          const result = await resend.emails.send({ from: fromEmail, to: [toEmail], subject: emailSubject, html: emailContent });
+          delivered = Boolean(result.data?.id);
         }
-      } catch (err) {
-        console.error("Resend send failed:", err);
-      }
+        if (delivered) emailsSent++;
+      } catch (err) { console.error("Email delivery requires retry:", (err as Error).message); }
+      if (!delivered || testUserId) continue;
 
       console.log("Updating next revision dates for topics...");
       for (const topic of topicsArray) {
-        if (stockClaimedTopicId && topic.id === stockClaimedTopicId) {
-          console.log(`Skipping post-send date update for already-claimed stock topic ${topic.id}`);
-          continue;
-        }
         const now = new Date();
         if (topic.is_daily) {
           const nextRevisionDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -3162,7 +3134,7 @@ serve(async (req) => {
 
     console.log(`All users processed. Emails sent: ${emailsSent}`);
     return new Response(
-      JSON.stringify({ message: `Successfully sent ${emailsSent} reminder email(s)`, topicsProcessed: dueTopics.length }),
+      JSON.stringify({ message: `Successfully sent ${emailsSent} reminder email(s)`, topicsProcessed: dueTopics.length, emailsSent }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {

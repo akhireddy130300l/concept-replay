@@ -6,6 +6,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { AUDIO_LINK_SECONDS, sentenceSpeechRequest } from "./sentence-audio.ts";
 import { PLAN, eligibleHour, pickReview, shouldIntroduce } from "./learning-plan.ts";
+import { z } from "npm:zod@3";
+import { testDeliveryKey } from "../_shared/automation-policy.ts";
+import { sendRecordedEmail } from "../_shared/recorded-email.ts";
 
 type SavedItem = Item & { id: string; sent_for: string; et_hour: number; kind: string; review_of: string | null };
 
@@ -165,9 +168,11 @@ Deno.serve(async (req) => {
   try { const { data } = await admin.rpc("get_cron_secret"); if (typeof data === "string") secret = data; } catch { /* ignore */ }
   if (!secret) secret = Deno.env.get("CRON_SECRET") ?? "";
   if (!secret || req.headers.get("x-cron-secret") !== secret) return json({ error: "Forbidden" }, 403);
-  const body = await req.json().catch(() => null);
-  if (!body || typeof body !== "object" || Array.isArray(body) || (body.force !== undefined && typeof body.force !== "boolean") || (body.dry_run !== undefined && typeof body.dry_run !== "boolean")) return json({ error: "Invalid request" }, 400);
-  const testRow = typeof body.test_row === "string" && /^[0-9a-f-]{36}$/.test(body.test_row) ? body.test_row : null;
+  const parsed = z.object({ force: z.boolean().optional(), dry_run: z.boolean().optional(), test_row: z.string().uuid().optional(), test_user_id: z.string().uuid().optional(), test_request_id: z.string().uuid().optional() }).strict().safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return json({ error: "Invalid request" }, 400);
+  const body = parsed.data;
+  const testRow = body.test_row ?? null;
+  if (body.test_user_id && (!testRow || !body.test_request_id)) return json({ error: "Incomplete test request" }, 400);
   const now = easternNow();
   const { minute } = now;
   let { date, hour } = now;
@@ -187,9 +192,12 @@ Deno.serve(async (req) => {
   if (existingError) throw new Error("Cannot read hourly delivery");
   if (existing?.sent_ok && !body.dry_run && !testRow) return json({ skipped: "already_sent", date, hour });
 
-  const { data: recips } = await admin.from("portfolio_feature_access").select("report_email");
-  const to = (recips ?? []).map((r) => r.report_email).filter(Boolean);
-  if (!to.length) return json({ skipped: "no_recipients" });
+  let recipientQuery = admin.from("portfolio_feature_access").select("user_id,report_email");
+  if (body.test_user_id) recipientQuery = recipientQuery.eq("user_id", body.test_user_id).eq("enabled", true);
+  const { data: recips, error: recipientError } = await recipientQuery;
+  if (recipientError) throw new Error("Recipients unavailable");
+  const recipients = (recips ?? []).filter(r => r.report_email);
+  if (!recipients.length) return json({ skipped: "no_recipients" });
 
   let row = body.dry_run ? null : existing;
   let item: Item | null = null;
@@ -273,7 +281,7 @@ Deno.serve(async (req) => {
       const { data: ix, error: ie } = await admin.storage.from("word-audio").list("pictures", { search: `${rootId}.png` });
       if (ie) throw new Error(ie.message);
       let exists = Boolean(ix?.some((f) => f.name === `${rootId}.png`));
-      if (!exists && kind === "new") {
+      if (!exists && kind === "new" && !testRow) {
         const png = await drawMemoryPicture(item);
         const up = await admin.storage.from("word-audio").upload(ipath, png, { contentType: "image/png", upsert: true });
         if (up.error) throw new Error(up.error.message);
@@ -289,14 +297,18 @@ Deno.serve(async (req) => {
 
   const hourLabel = `${((hour + 11) % 12) + 1}${hour === 9 ? ":10" : ":00"} ${hour < 12 ? "AM" : "PM"} ET`;
   const label = kind === "new" ? "New American expression" : hour === 9 ? "Morning recall challenge" : hour >= 15 ? "Try it in a new situation" : "Spaced recall challenge";
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("RESEND_API_KEY")}`, "Idempotency-Key": testRow ? `american-test-${testRow}-${Date.now()}` : `american-learning-${date}-${hour}` },
-    body: JSON.stringify({ from: "American Word <onboarding@resend.dev>", to, subject: `${testRow ? "[TEST] " : ""}${label}: what would you say? (${hourLabel})`, html: render(item, hourLabel, audioUrl, kind, hour, imageUrl) }),
-  });
-  if (res.ok) await admin.from("american_word_emails").update({ sent_ok: true }).eq("id", row.id);
-  else console.log(JSON.stringify({ phase: "word_send", status: res.status, detail: (await res.text()).slice(0, 200) }));
-  return json({ ok: res.ok, word: item.word, date, hour, kind, audio_available: Boolean(audioUrl), picture_available: Boolean(imageUrl) });
+  const subject = `${testRow ? "[TEST] " : ""}${label}: what would you say? (${hourLabel})`;
+  const html = render(item, hourLabel, audioUrl, kind, hour, imageUrl);
+  for (const recipient of recipients) {
+    await sendRecordedEmail(admin, { userId: recipient.user_id, kind: "english", isTest: Boolean(testRow),
+      key: testRow ? testDeliveryKey(recipient.user_id, "english", body.test_request_id ?? testRow) : `american-learning-${date}-${hour}-${recipient.user_id}`,
+      from: "American Word <onboarding@resend.dev>", to: recipient.report_email, subject, html, audioAvailable: Boolean(audioUrl), apiKey: Deno.env.get("RESEND_API_KEY") ?? "" });
+  }
+  if (!testRow) {
+    const { error } = await admin.from("american_word_emails").update({ sent_ok: true }).eq("id", row.id);
+    if (error) throw new Error("Delivery confirmation unavailable");
+  }
+  return json({ ok: true, word: item.word, date, hour, kind, audio_available: Boolean(audioUrl), picture_available: Boolean(imageUrl) });
   } catch (e) {
     console.log(JSON.stringify({ phase: "learning_delivery", error: String(e).slice(0, 200) }));
     return json({ error: "delivery_failed" }, 502);

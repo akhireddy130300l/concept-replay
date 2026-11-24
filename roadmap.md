@@ -7,3 +7,7 @@
 - [x] No penalty for missed emails (each email self-contained)
 - [x] 9:10 AM Morning Recall Challenge using yesterday's key phrase
 - [x] Finish, test, and deploy the hourly learning plan and distinct-phrase recap; nine tests passed and live recall preview returned successfully
+- [ ] Add owner-scoped automation status and rate-limited stock/English test sends
+- [ ] Add shadow model confidence tiers and validated fresh, liquid prices
+- [ ] Harden delivery idempotency and extend private learning links to seven days
+- [ ] Run regression tests, deploy changed functions, and verify dashboard controls signed in

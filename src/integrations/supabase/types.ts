@@ -153,6 +153,75 @@ export type Database = {
         }
         Relationships: []
       }
+      automation_email_deliveries: {
+        Row: {
+          audio_available: boolean | null
+          content_html: string | null
+          created_at: string
+          delivery_key: string
+          error_message: string | null
+          id: string
+          is_test: boolean
+          kind: string
+          provider_id: string | null
+          sent_at: string | null
+          status: string
+          subject: string | null
+          user_id: string
+        }
+        Insert: {
+          audio_available?: boolean | null
+          content_html?: string | null
+          created_at?: string
+          delivery_key: string
+          error_message?: string | null
+          id?: string
+          is_test?: boolean
+          kind: string
+          provider_id?: string | null
+          sent_at?: string | null
+          status?: string
+          subject?: string | null
+          user_id: string
+        }
+        Update: {
+          audio_available?: boolean | null
+          content_html?: string | null
+          created_at?: string
+          delivery_key?: string
+          error_message?: string | null
+          id?: string
+          is_test?: boolean
+          kind?: string
+          provider_id?: string | null
+          sent_at?: string | null
+          status?: string
+          subject?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      automation_test_cooldowns: {
+        Row: {
+          kind: string
+          request_id: string
+          requested_at: string
+          user_id: string
+        }
+        Insert: {
+          kind: string
+          request_id: string
+          requested_at?: string
+          user_id: string
+        }
+        Update: {
+          kind?: string
+          request_id?: string
+          requested_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       backtest_equity_curve: {
         Row: {
           backtest_run_id: string | null
@@ -3050,6 +3119,10 @@ export type Database = {
       }
     }
     Functions: {
+      claim_automation_test: {
+        Args: { _kind: string; _request_id: string; _user_id: string }
+        Returns: boolean
+      }
       get_cron_secret: { Args: never; Returns: string }
       release_run_lock: { Args: { _name: string }; Returns: undefined }
       try_acquire_run_lock: {

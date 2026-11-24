@@ -111,7 +111,7 @@ export async function fetchYahooChartWithRetry(symbol: string, retries = 2): Pro
   let last: YahooFetchResult = { ok: false, reason: "not_attempted", httpStatus: null };
   for (let i = 0; i <= retries; i++) {
     last = await fetchOnce(symbol);
-    if (last.ok) return last;
+    if (last.ok === true) return last;
     if (last.httpStatus === 404) return last; // permanent
     if (i < retries) await new Promise((r) => setTimeout(r, 250 * (i + 1)));
   }

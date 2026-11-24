@@ -1,3 +1,4 @@
+import { LEARNING_LINK_SECONDS } from "../_shared/automation-policy.ts";
 // Keep the spoken sentence separate from delivery direction so pronunciation and definitions cannot leak into synthesis.
 export function sentenceSpeechRequest(sentence: string) {
   return {
@@ -12,4 +13,4 @@ export function sentenceSpeechRequest(sentence: string) {
   };
 }
 
-export const AUDIO_LINK_SECONDS = 365 * 24 * 60 * 60;
+export const AUDIO_LINK_SECONDS = LEARNING_LINK_SECONDS;

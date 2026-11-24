@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { ReminderSettings, type UserPreferences } from "@/components/ReminderSettings";
 import { nextRevisionInstant, formatInTz, getBrowserTimezone } from "@/lib/reminderTime";
+import { AutomationStatus } from "@/components/AutomationStatus";
 
 const TruncatedText = ({ text, maxLength = 120, className }: { text: string; maxLength?: number; className?: string }) => {
   const [expanded, setExpanded] = useState(false);
@@ -450,6 +451,8 @@ const Dashboard = () => {
             Add topics you've learned today and we'll remind you to review them.
           </p>
         </div>
+
+        {user && <AutomationStatus userId={user.id} />}
 
         <Card className="mb-8 glass-card float-hover animate-fade-in" style={{ animationDelay: '0.1s' }}>
           <CardHeader>

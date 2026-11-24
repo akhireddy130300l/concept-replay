@@ -1,6 +1,8 @@
 // Read-only shadow ML model view for the stock email.
 // Displays the latest registered model's top picks and probabilities alongside
 // the rule-based Swing Trader Watch pick without altering selection or prices.
+import { confidenceTier, validModelMarket } from "./automation-policy.ts";
+import { fetchYahooChartWithRetry } from "./yahoo-chart.ts";
 
 export interface ModelViewPick {
   ticker: string;
@@ -51,14 +53,15 @@ export function buildModelViewHTML(data: ModelViewData | null, appBaseUrl: strin
   const metricsLine = metricsParts.length > 0 ? ` · ${metricsParts.join(" · ")}` : "";
 
   const rows = data.picks.map((p, idx) => {
-    const isPositive = p.label.toLowerCase() === "positive";
+    const tier = confidenceTier(p.probability) ?? "Unavailable";
+    const isPositive = tier === "High Conviction";
     const badgeBg = isPositive ? "#dcfce7" : "#f1f5f9";
     const badgeFg = isPositive ? "#166534" : "#475569";
     return `<tr>
       <td style="padding:7px 10px;border-bottom:1px solid #e2e8f0;color:#64748b;font-size:12px;">#${idx + 1}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;">${tickerLink(appBaseUrl, p.ticker)}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:700;color:#0f172a;">${pct(p.probability)}</td>
-      <td style="padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;"><span style="display:inline-block;padding:2px 7px;border-radius:999px;background:${badgeBg};color:${badgeFg};font-weight:600;">${esc(p.label)}</span></td>
+      <td style="padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:11px;"><span style="display:inline-block;padding:2px 7px;border-radius:6px;background:${badgeBg};color:${badgeFg};font-weight:600;">${esc(tier)}</span></td>
     </tr>`;
   }).join("");
 
@@ -86,7 +89,7 @@ export function buildModelViewHTML(data: ModelViewData | null, appBaseUrl: strin
         </table>
       </div>
       ${ruleNote}
-      <p style="margin:8px 0 0 0;font-size:11px;color:#4338ca;">Shadow mode only — this does not change the rule-based pick, entry, target, or stop-loss above.</p>
+      <p style="margin:8px 0 0 0;font-size:11px;color:#4338ca;">Shadow mode only — this does not change the rule-based pick, entry, target, or stop-loss above. Confidence tiers are model estimates, not guarantees. Only fresh USD quotes ≥ $5 with average volume ≥ 100,000 shares and ≥ $1M daily liquidity are shown.</p>
     </div>`;
 }
 
@@ -102,6 +105,8 @@ export async function fetchLatestModelView(admin: any, ruleSelectedTicker?: stri
     .maybeSingle();
 
   if (latestErr || !latest?.model_version_id || !latest?.prediction_date) return null;
+  const predictionAge = Date.now() - Date.parse(`${latest.prediction_date}T00:00:00Z`);
+  if (!Number.isFinite(predictionAge) || predictionAge < 0 || predictionAge > 4 * 86400000) return null;
 
   const [{ data: mv }, { data: preds }] = await Promise.all([
     admin
@@ -125,21 +130,35 @@ export async function fetchLatestModelView(admin: any, ruleSelectedTicker?: stri
   for (const row of preds) {
     const ticker = String(row.ticker ?? "").trim().toUpperCase();
     const prob = Number(row.predicted_probability ?? row.probability);
-    if (!ticker || !Number.isFinite(prob) || seen.has(ticker)) continue;
+    if (!/^[A-Z0-9.-]{1,12}$/.test(ticker) || confidenceTier(prob) === null || seen.has(ticker)) continue;
     seen.add(ticker);
+    // Fetch bounded live quotes rather than trusting training-time prices/relative volume.
+    // Process four candidates together below to keep provider load bounded.
     picks.push({
       ticker,
       probability: prob,
       label: String(row.predicted_label ?? (prob >= 0.5 ? "positive" : "negative")),
     });
-    if (picks.length >= topN) break;
   }
-  if (picks.length === 0) return null;
+  const validated: ModelViewPick[] = [];
+  for (let i = 0; i < picks.length && validated.length < topN; i += 4) {
+    const batch = await Promise.all(picks.slice(i, i + 4).map(async (pick) => {
+      const result = await fetchYahooChartWithRetry(pick.ticker, 0);
+      if (!result.ok) return null;
+      const chart = result.chart;
+      const volumes = chart.volumes.slice(0, -1).slice(-20);
+      const averageVolume = volumes.length >= 5 ? volumes.reduce((a, b) => a + b, 0) / volumes.length : NaN;
+      const quoteAt = (chart.timestamps.at(-1) ?? NaN) * 1000;
+      return validModelMarket({ price: chart.price, averageVolume, quoteAt, predictionDate: latest.prediction_date, currency: chart.currency }) ? pick : null;
+    }));
+    for (const pick of batch) if (pick && validated.length < topN) validated.push(pick);
+  }
+  if (validated.length === 0) return null;
 
   let ruleSelectedProbability: number | null = null;
   const cleanRuleTicker = ruleSelectedTicker?.trim().toUpperCase() || null;
   if (cleanRuleTicker) {
-    const inTop = picks.find((p) => p.ticker === cleanRuleTicker);
+    const inTop = validated.find((p) => p.ticker === cleanRuleTicker);
     if (inTop) {
       ruleSelectedProbability = inTop.probability;
     } else {
@@ -151,8 +170,8 @@ export async function fetchLatestModelView(admin: any, ruleSelectedTicker?: stri
         .eq("ticker", cleanRuleTicker)
         .limit(1)
         .maybeSingle();
-      const p = Number(match?.predicted_probability ?? match?.probability);
-      if (Number.isFinite(p)) ruleSelectedProbability = p;
+      const raw = match?.predicted_probability ?? match?.probability;
+      if (raw !== null && raw !== undefined && confidenceTier(Number(raw)) !== null) ruleSelectedProbability = Number(raw);
     }
   }
 
@@ -165,7 +184,7 @@ export async function fetchLatestModelView(admin: any, ruleSelectedTicker?: stri
     predictionDate: String(latest.prediction_date),
     testPrecisionAt3: typeof testMetrics?.precision_at_3 === "number" ? testMetrics.precision_at_3 : null,
     testWinRate: typeof testMetrics?.ev_win_rate === "number" ? testMetrics.ev_win_rate : null,
-    picks,
+    picks: validated,
     ruleSelectedTicker: cleanRuleTicker,
     ruleSelectedProbability,
   };

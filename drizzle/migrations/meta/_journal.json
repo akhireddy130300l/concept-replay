@@ -36,6 +36,13 @@
       "when": 1795536239274,
       "tag": "0004_add_require_speaking_for_stock",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795540612615,
+      "tag": "0005_automation_delivery_controls",
+      "breakpoints": true
     }
   ]
 }
