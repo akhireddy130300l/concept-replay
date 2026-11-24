@@ -1,37 +1,30 @@
-# Concept Replay: Improvement Ideas
+# New Feature Ideas for Concept Replay
 
-Concept Replay already has four parts: revision reminders and quizzes, hourly American English emails, the Speaking Gym, and the stock and swing research emails. These ideas link them together so the app helps with daily habits, not just sending emails. Pick the ones you want and I will build them in that order.
+Brand-new features, separate from what is already built. Pick one or more and I will plan and build them.
 
-## Tier 1: Biggest impact, low effort
+## 1. AI Life Coach "Daily Call"
+A 5-minute voice conversation each evening with an AI coach. It asks about your day, helps you plan tomorrow and remembers past talks, such as "Last week you said you'd fix your sleep. How's it going?" You also get speaking practice from this.
 
-1. **One morning "Today" page.** One screen for the day: English phrases due, topics to review, the Speaking Gym task, the stock pick and a single progress ring. You open one page instead of many emails.
-2. **Reply-to-email practice.** You reply to an English email with your own sentence. The AI grades it and the score counts toward your streak. This builds active recall without opening the app.
-3. **Weekly report email (Sunday evening).** Phrases learned, what you remembered, speaking minutes, quiz accuracy, stock pick results and one goal for next week.
-4. **Busy-day mode.** One switch for travel or busy days. All emails shrink to one short summary and streaks pause without breaking.
+## 2. Money Tracker and Savings Coach
+Forward receipts or type in your spending. Each week the AI shows where your money went, warns about overspending and suggests how much to invest. It links to your stock research.
 
-## Tier 2: New ways to learn
+## 3. Health and Habit Streaks
+Track water, sleep, gym and steps in a few taps. You get a gentle email nudge if you skip a habit. A monthly chart shows how good habits match your productive days.
 
-5. **Speak the phrase back.** Each English email has a 20-second recording link. The Speaking Gym checks your pronunciation of that phrase. This covers the missing speaking practice in the English emails.
-6. **Paper-trading journal.** Each stock pick is logged as a pretend trade. After 10 trading days you get a short note: what happened, and whether you would have followed the pick. This builds trading discipline without real money.
-7. **Mistake notebook.** Wrong quiz answers, misheard phrases and losing picks go into one list, and those items are reviewed more often.
-8. **Interview and meeting rehearsal.** 5-minute role-play practice (standup, client call, interview) using phrases you have already learned.
+## 4. "Second Brain" Notes
+Save anything (a link, a voice note, a screenshot, an idea). The AI summarizes it, tags it and brings it back later in your review emails, so you never forget useful things you found.
 
-## Tier 3: Life and wellbeing
+## 5. Career Booster
+Paste a job description. The AI finds your skill gaps, builds a study plan using your existing topics and runs mock interview questions out loud.
 
-9. **Daily reflection (1 minute, 9 PM).** Three quick questions: a win, a lesson and tomorrow's priority. It goes into a searchable journal and feeds the weekly report.
-10. **Goal tracker linked to the app.** For example "Speak fluently in meetings by March" or "Read 12 books". Each goal shows progress from your actual activity.
-11. **Indian Law and general-knowledge cards.** Turn the existing 6 PM lessons into review cards so they are not forgotten.
+## 6. Book and Podcast Digest
+Add a book or podcast you're going through. You get 3 key ideas in an email each day, plus a short quiz a week later to lock them in.
 
-## Reliability and upkeep
+## 7. Focus Timer with Accountability
+Pomodoro-style focus sessions. At the end of each one you say what you finished. The AI scores your week: hours of focus and what you got done.
 
-- One "health" line on the dashboard: shows if any email was missed today, with a one-tap resend.
-- Monthly cost and usage summary covering AI, image and voice credits.
-- Fix the Gemini image quota later, either by enabling Google billing or by keeping pictures optional.
-
-## Suggested order
-Today page, then reply-to-email practice, then weekly report, then busy-day mode, then the rest.
+## My recommendation
+Start with **#1 AI Life Coach** (biggest daily impact) or **#4 Second Brain** (most useful long-term).
 
 ## Technical notes
-- New items are added on top of the existing app. Existing schedules, stock-selection rules and the ML promotion gate stay unchanged.
-- Reply grading needs incoming email (Resend inbound) or a reply link to a small in-app form. The form is simpler and more reliable.
-- The weekly report and reflection reuse the existing scheduled jobs, run lock and safe-resend pattern.
+Each feature is added as its own page and tables, without changing existing emails, stock logic or Speaking Gym rules. It uses the existing AI, voice and email setup.
