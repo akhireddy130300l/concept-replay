@@ -421,14 +421,14 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen bg-[image:var(--gradient-hero)]">
       <header className="glass-card sticky top-0 z-10 border-b border-border/30">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="container mx-auto px-4 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-[var(--shadow-button)] animate-glow-pulse">
               <Brain className="w-5 h-5 text-primary-foreground" />
             </div>
             <h1 className="text-xl font-semibold tracking-tight">LearnLoop</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button onClick={() => navigate("/start-today")} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
               Start Today
             </Button>
