@@ -5,6 +5,10 @@ import {
   computeHorizonOutcome,
   DEFAULT_HORIZON_SESSIONS,
 } from "../_shared/prediction-outcomes.ts";
+import {
+  DEFAULT_PROMOTION_THRESHOLDS,
+  evaluatePromotionGate,
+} from "../_shared/model-promotion-gate.ts";
 
 const LOCK_NAME = "score-prediction-outcomes";
 const LOCK_SECONDS = 300;
@@ -15,6 +19,76 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+async function runAutoPromotionCheck(admin: ReturnType<typeof createClient>, nowIso: string) {
+  const { data: candidates } = await admin
+    .from("model_versions")
+    .select("id, version, algorithm, status, metrics")
+    .eq("status", "candidate")
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  if (!candidates || candidates.length === 0) {
+    return { checked: 0, promoted: false, reason: "no_candidate_models" };
+  }
+
+  for (const model of candidates) {
+    const { data: scoredRows } = await admin
+      .from("prediction_history")
+      .select("actual_label, actual_return")
+      .eq("model_version_id", model.id)
+      .not("actual_label", "is", null)
+      .not("actual_return", "is", null);
+
+    const rows = scoredRows ?? [];
+    const scoredCount = rows.length;
+    const positiveCount = rows.filter((r) => r.actual_label === "positive").length;
+    const avgReturnPct =
+      scoredCount > 0
+        ? rows.reduce((sum, r) => sum + Number(r.actual_return ?? 0), 0) / scoredCount
+        : 0;
+    const rawAuc = (model.metrics as Record<string, Record<string, unknown>> | null)?.test?.roc_auc;
+    const testRocAuc = typeof rawAuc === "number" && Number.isFinite(rawAuc) ? rawAuc : null;
+
+    const evaluation = evaluatePromotionGate({
+      scoredCount,
+      positiveCount,
+      avgReturnPct,
+      testRocAuc,
+      thresholds: DEFAULT_PROMOTION_THRESHOLDS,
+    });
+
+    if (evaluation.eligible) {
+      await admin
+        .from("model_versions")
+        .update({ status: "retired" })
+        .eq("status", "live");
+
+      await admin
+        .from("model_versions")
+        .update({ status: "live", promoted_at: nowIso })
+        .eq("id", model.id);
+
+      const summary = `auto_promoted: scored=${evaluation.scoredCount} win_rate=${(evaluation.winRate * 100).toFixed(1)}% avg_return=${evaluation.avgReturnPct.toFixed(2)}% roc_auc=${testRocAuc?.toFixed(3)}`;
+      await admin.from("ml_model_promotions").insert({
+        model_version_id: model.id,
+        from_status: model.status,
+        to_status: "live",
+        reason: summary,
+      });
+
+      console.log(`[score-prediction-outcomes] ${summary} version=${model.version}`);
+      return {
+        checked: candidates.length,
+        promoted: true,
+        model_version: model.version,
+        evaluation,
+      };
+    }
+  }
+
+  return { checked: candidates.length, promoted: false, reason: "thresholds_not_met" };
 }
 
 Deno.serve(async (req) => {
@@ -82,6 +156,7 @@ Deno.serve(async (req) => {
     if (qErr) throw qErr;
     const pendingRows = rows ?? [];
     if (pendingRows.length === 0) {
+      const promotion = await runAutoPromotionCheck(admin, new Date().toISOString());
       return json({
         ok: true,
         scanned: 0,
@@ -90,6 +165,7 @@ Deno.serve(async (req) => {
         pending: 0,
         failed: 0,
         tickers_fetched: 0,
+        promotion,
       });
     }
 
@@ -179,6 +255,7 @@ Deno.serve(async (req) => {
     console.log(
       `[score-prediction-outcomes] scanned=${pendingRows.length} matured=${matured} updated=${updated} pending=${pending} failed=${failed} tickers=${charts.size}/${uniqueTickers.length}`,
     );
+    const promotion = await runAutoPromotionCheck(admin, nowIso);
     return json({
       ok: true,
       scanned: pendingRows.length,
@@ -187,6 +264,7 @@ Deno.serve(async (req) => {
       pending,
       failed,
       tickers_fetched: charts.size,
+      promotion,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "unknown_error";
