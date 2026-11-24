@@ -1,27 +1,45 @@
 # "Start Today" — Future Regret Radar
 
 ## The idea
-You often see people who started something early (a skill, an investment, a habit, a side business) and think, "I wish I had started back then." This feature tries to prevent that. Every day it finds rising trends that could matter to you in 3–10 years. It then gives you one small step you can take today.
+You see people who started something early and think "I should have started back then." This feature stops that from happening again. Every day it searches the whole world (news, research, jobs, markets, creators, communities, every country) for things that are rising now and could change lives in 3–10 years. Then it tells you how to start today.
+
+The rule: **anyone can learn or do anything.** Ideas are never limited to your current job, skills or background.
+
+## Search everything, every field
+Ideas rotate across all areas of life and never stick to one topic:
+- Money: investing, new asset types, side income, businesses and online selling
+- Career: skills employers will need, new job types, freelancing, certifications
+- Technology: AI, robotics, energy, biotech, space, chips and tools anyone can use
+- Creative: content creation, writing, music, design, video and personal brands
+- Health and body: fitness, nutrition, sleep, longevity and mental strength
+- Mind: languages, public speaking, reading, thinking and memory skills
+- Life: relationships, networking, travel, real estate, location and lifestyle choices
+- Society: rising countries and cities, policy changes and new opportunities opening up
+- Hobbies and craft: practical skills (cooking, repair, farming, art) that grow into something bigger
 
 ## What you get
-- **A daily email at 8 AM Eastern called "Start Today":**
-  - **One rising opportunity**, such as a growing skill (AI agents, cloud security), a growing market, a useful habit or a new kind of career. It includes why it is growing, with real recent signals (news, job demand, adoption).
-  - **The "5 years from now" picture**: what people who start today could have by then.
-  - **A 15-minute first step for today**, such as a free lesson, one small action or one question to look into.
-  - **Fit for you**: it matches your topics, English goals, stock interests and career.
+- **Daily "Start Today" email at 8 AM Eastern** with **3 ideas from 3 different fields** (for example, one about money, one skill and one about life). Each idea has:
+  - Why it's rising, with real signals and source links from recent news, data and trends
+  - "5 years from now": where people who start today could be
+  - "Who's already doing it": real examples, so you can see it's possible
+  - **A 15-minute first step you can take today**, free or cheap
+  - Difficulty, cost and time needed, shown honestly
+- **A "Wild card" idea once a week**: something completely outside your usual interests, to widen your view.
 - **A "Start Today" page in the app:**
-  - Mark each idea **Started**, **Later** or **Not for me**. The AI learns what you like.
-  - The ideas you started become small weekly steps, with progress checks in your review emails.
-  - Every 30, 90 and 365 days you get a "**Look how far you came**" email. It shows what you started and how long you've kept going. This replaces "I should have" with "I did".
+  - Mark each idea **Started**, **Later** or **Not for me**. Future picks learn from this but still stay varied across fields.
+  - Started ideas turn into small weekly steps with progress check-ins.
+  - **Ask anything:** type "I want to get into X" and get a researched start plan for it, whatever it is.
+  - **"Look how far you came" emails at 30, 90 and 365 days** show what you started and kept doing. "I should have" becomes "I did."
 
 ## Safety and honesty
-- Ideas are based on real current sources, and every claim has a link.
-- No guaranteed money claims. Investment ideas are for learning only and never change your stock picks.
-- Ideas never repeat (the same no-repeat approach as the English emails).
+- Every claim comes from real current sources, with links.
+- No guaranteed-money claims. Investment ideas are for learning only and never change your stock picks.
+- No idea ever repeats.
 
 ## Technical notes
-- New tables: `opportunity_ideas` (topic, category, signals, sources, first_step, sent_at) and `opportunity_actions` (user, idea, status, check-ins). Both have RLS (only you can access your rows), use soft delete, and have unique normalized topics.
-- New scheduled function `send-start-today-email`, which runs daily. It uses web search to find recent signals and Gemini to write the idea. It uses the same run lock and safe-resend setup as the other emails, and the HTML email uses inline styles.
+- New tables: `opportunity_ideas` (field, topic, signals, sources, examples, first_step, difficulty, sent_at) with a unique normalized topic, and `opportunity_actions` (user, idea, status, check-ins). RLS limits rows to their owner, and deletes are soft deletes.
+- New scheduled function `send-start-today-email` runs daily. It runs a broad web search per field (rotating fields so 3 different ones appear each day), and Gemini writes and verifies the ideas against the sources. It reuses the existing run-lock and safe-resend pattern, and the email is HTML with inline styles.
+- On-demand "Ask anything" function: authenticated, rate-limited, and uses the same search plus Gemini.
 - New `/start-today` page in the glossy iPhone style, with a link from the dashboard.
-- A milestone job sends the 30/90/365-day progress emails.
-- Unit tests cover idea deduplication and milestone timing. Existing features stay unchanged.
+- A milestone job sends the 30/90/365-day emails.
+- Unit tests cover field rotation (3 distinct fields per day), deduplication and milestone timing. Existing features stay unchanged.
