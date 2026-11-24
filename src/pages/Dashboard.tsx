@@ -31,6 +31,7 @@ import {
 import { ReminderSettings, type UserPreferences } from "@/components/ReminderSettings";
 import { nextRevisionInstant, formatInTz, getBrowserTimezone } from "@/lib/reminderTime";
 import { AutomationStatus } from "@/components/AutomationStatus";
+import { ModelPerformanceCard } from "@/components/ModelPerformanceCard";
 
 const TruncatedText = ({ text, maxLength = 120, className }: { text: string; maxLength?: number; className?: string }) => {
   const [expanded, setExpanded] = useState(false);
@@ -453,6 +454,7 @@ const Dashboard = () => {
         </div>
 
         {user && <AutomationStatus userId={user.id} />}
+        {user && <ModelPerformanceCard />}
 
         <Card className="mb-8 glass-card float-hover animate-fade-in" style={{ animationDelay: '0.1s' }}>
           <CardHeader>

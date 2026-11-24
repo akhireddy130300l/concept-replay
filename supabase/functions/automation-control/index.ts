@@ -3,9 +3,11 @@ import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { z } from "npm:zod@3";
 import { classifyGate } from "../_shared/speaking-gate.ts";
 import { testDeliveryKey, testCooldownRemaining } from "../_shared/automation-policy.ts";
+import { summarizeModelPerformance } from "../_shared/model-performance.ts";
 
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("status"), timezone: z.string().max(100) }).strict(),
+  z.object({ action: z.literal("model-performance") }).strict(),
   z.object({ action: z.literal("test"), kind: z.enum(["stock", "english"]), request_id: z.string().uuid() }).strict(),
 ]);
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -61,6 +63,16 @@ Deno.serve(async (req) => {
         swing = results[1].data; training = results[2].data; model = results[3].data?.model_versions ?? null; prediction = results[3].data;
       }
       return json({ enabled: Boolean(access?.enabled), english, speaking: { required: speaking.data?.require_speaking_for_stock ?? true, completedToday: speaking.data?.last_completed_date === today, gate: classifyGate({ gateStartedAt: speaking.data?.speaking_gate_started_at ?? null, lastCompletedDate: speaking.data?.last_completed_date ?? null, requireSpeaking: speaking.data?.require_speaking_for_stock ?? true }) }, stock: { lastSent: deliveries.data?.find(d => d.kind === "stock" && !d.is_test && d.status === "sent")?.sent_at ?? null, nextRun: stockTopics[0]?.next_revision_date ?? null, topPick: swing?.selected_ticker ?? null }, ml: { training, model, prediction: prediction && prediction.prediction_date === eastern ? prediction : null }, cooldowns: Object.fromEntries((cooldowns.data ?? []).map(c => [c.kind, testCooldownRemaining(c.requested_at)])), lastTests: (deliveries.data ?? []).filter(d => d.is_test).slice(0, 2) });
+    }
+    if (body.action === "model-performance") {
+      if (!access?.enabled) return json({ error: "Stock and English access is not enabled for this account" }, 403);
+      const [versions, predictions] = await Promise.all([
+        admin.from("model_versions").select("id,algorithm,version,status,metrics").order("created_at", { ascending: false }).limit(20),
+        admin.from("prediction_history").select("model_version_id,actual_label,actual_return").not("model_version_id", "is", null).limit(5000),
+      ]);
+      if (versions.error) throw versions.error;
+      if (predictions.error) throw predictions.error;
+      return json({ models: summarizeModelPerformance(versions.data ?? [], predictions.data ?? []) });
     }
     if (!access?.enabled) return json({ error: "Stock and English access is not enabled for this account" }, 403);
     const deliveryKey = testDeliveryKey(userId, body.kind, body.request_id);
