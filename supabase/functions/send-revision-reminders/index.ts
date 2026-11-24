@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Resend } from "https://esm.sh/resend@4.0.0";
 import { classifyGate, WARNING_BANNER_HTML } from "../_shared/speaking-gate.ts";
 import { runSwingTraderWatch, buildSwingSectionsHTML, type SwingTickerInput } from "../_shared/swing-watch.ts";
+import { fetchLatestModelView, buildModelViewHTML } from "../_shared/swing-model-view.ts";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
@@ -2585,7 +2586,14 @@ async function generateTopicDescription(topic: string): Promise<string> {
         }
         const admin = createClient(supabaseUrl, supabaseServiceKey);
         const swing = await runSwingTraderWatch(admin, inputs);
-        swingHtml = buildSwingSectionsHTML(swing, APP_BASE_URL);
+        let modelViewHtml = "";
+        try {
+          const modelView = await fetchLatestModelView(admin, swing.selected?.ticker ?? null);
+          modelViewHtml = buildModelViewHTML(modelView, APP_BASE_URL);
+        } catch (mvErr) {
+          console.warn("Model view lookup failed (non-fatal):", mvErr);
+        }
+        swingHtml = buildSwingSectionsHTML(swing, APP_BASE_URL, modelViewHtml);
       } catch (err) {
         console.error("Swing Trader Watch failed (non-fatal):", err);
         swingHtml = `<div style="margin:14px 0;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;font-size:12px;color:#7f1d1d;">🎯 Swing Trader Watch is temporarily unavailable for this run. The rest of this email is unchanged.</div>`;

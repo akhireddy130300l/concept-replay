@@ -1172,7 +1172,7 @@ function tickerLink(base: string, ticker: string): string {
   return `<a href="${base.replace(/\/+$/, "")}/stock-insight?ticker=${encodeURIComponent(ticker)}&source=stock-email" style="color:#0891b2;text-decoration:none;font-weight:700;">${esc(ticker)}</a>`;
 }
 
-export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): string {
+export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string, modelViewHtml = ""): string {
   const s = r.selected;
   const disclaimer = `<p style="margin:10px 0 0 0;font-size:11px;color:#7f1d1d;line-height:1.5;">This is not financial advice. This setup can fail. Use position sizing, stop discipline, and your own research before making any trade.</p>`;
 
@@ -1318,5 +1318,5 @@ export function buildSwingSectionsHTML(r: SwingResult, appBaseUrl: string): stri
     </div>` : "";
 
   const mlSection = r.mlStats ? buildMLTrainingSectionHTML(r.mlStats) : "";
-  return `${swingSection}\n${closestSection}\n${checkedSection}\n${prevSection}\n${mlSection}`;
+  return `${swingSection}\n${modelViewHtml}\n${closestSection}\n${checkedSection}\n${prevSection}\n${mlSection}`;
 }
