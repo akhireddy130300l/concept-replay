@@ -50,6 +50,13 @@
       "when": 1795546682172,
       "tag": "0006_multi_model_tournament_safeguards",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795548431398,
+      "tag": "0007_create_start_today_tables",
+      "breakpoints": true
     }
   ]
 }

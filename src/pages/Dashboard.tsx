@@ -429,6 +429,9 @@ const Dashboard = () => {
             <h1 className="text-xl font-semibold tracking-tight">LearnLoop</h1>
           </div>
           <div className="flex items-center gap-2">
+            <Button onClick={() => navigate("/start-today")} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
+              Start Today
+            </Button>
             <Button onClick={() => navigate("/speaking-gym")} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
               <Sparkles className="w-4 h-4 mr-2" />
               Speaking Gym

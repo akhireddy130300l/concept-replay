@@ -1059,6 +1059,125 @@ export type Database = {
           },
         ]
       }
+      opportunity_actions: {
+        Row: {
+          check_ins: Json
+          created_at: string
+          deleted_at: string | null
+          id: string
+          idea_id: string
+          last_milestone_sent: number
+          started_at: string | null
+          status: string
+          updated_at: string
+          user_id: string
+          weekly_steps: Json
+        }
+        Insert: {
+          check_ins?: Json
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          idea_id: string
+          last_milestone_sent?: number
+          started_at?: string | null
+          status: string
+          updated_at?: string
+          user_id: string
+          weekly_steps?: Json
+        }
+        Update: {
+          check_ins?: Json
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          idea_id?: string
+          last_milestone_sent?: number
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+          weekly_steps?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "opportunity_actions_idea_id_fkey"
+            columns: ["idea_id"]
+            isOneToOne: false
+            referencedRelation: "opportunity_ideas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      opportunity_ideas: {
+        Row: {
+          cost_estimate: string
+          created_at: string
+          deleted_at: string | null
+          difficulty: string
+          field: string
+          first_step: string
+          five_year_vision: string
+          id: string
+          is_ask_anything: boolean
+          is_wildcard: boolean
+          real_examples: Json
+          sent_at: string | null
+          sent_for: string
+          signals: Json
+          sources: Json
+          time_estimate: string
+          topic: string
+          topic_key: string
+          user_id: string
+          why_rising: string
+        }
+        Insert: {
+          cost_estimate?: string
+          created_at?: string
+          deleted_at?: string | null
+          difficulty?: string
+          field: string
+          first_step: string
+          five_year_vision: string
+          id?: string
+          is_ask_anything?: boolean
+          is_wildcard?: boolean
+          real_examples?: Json
+          sent_at?: string | null
+          sent_for?: string
+          signals?: Json
+          sources?: Json
+          time_estimate?: string
+          topic: string
+          topic_key: string
+          user_id: string
+          why_rising: string
+        }
+        Update: {
+          cost_estimate?: string
+          created_at?: string
+          deleted_at?: string | null
+          difficulty?: string
+          field?: string
+          first_step?: string
+          five_year_vision?: string
+          id?: string
+          is_ask_anything?: boolean
+          is_wildcard?: boolean
+          real_examples?: Json
+          sent_at?: string | null
+          sent_for?: string
+          signals?: Json
+          sources?: Json
+          time_estimate?: string
+          topic?: string
+          topic_key?: string
+          user_id?: string
+          why_rising?: string
+        }
+        Relationships: []
+      }
       portfolio_feature_access: {
         Row: {
           created_at: string

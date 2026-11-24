@@ -12,6 +12,7 @@ import Speaking from "./pages/Speaking";
 import StockInsight from "./pages/StockInsight";
 import MLTraining from "./pages/MLTraining";
 import AmericanShadow from "./pages/AmericanShadow";
+import StartToday from "./pages/StartToday";
 import NotFound from "./pages/NotFound";
 
 const FEATURE_PORTFOLIO_AGENT = String(import.meta.env.VITE_FEATURE_PORTFOLIO_AGENT ?? "").toLowerCase() === "true";
@@ -34,6 +35,7 @@ const App = () => (
           <Route path="/stock-insight" element={<StockInsight />} />
           <Route path="/ml-training" element={<MLTraining />} />
           <Route path="/american-shadow" element={<AmericanShadow />} />
+          <Route path="/start-today" element={<StartToday />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
