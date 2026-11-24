@@ -29,9 +29,31 @@ jobs:
       - name: Unit tests (splits, leakage guard, metrics)
         run: python -m pytest ml_training/tests -q
 
-      - name: Train candidate models
+      - name: Check training configuration
+        id: config
         env:
-          SUPABASE_FUNCTIONS_URL: ${{ secrets.SUPABASE_FUNCTIONS_URL }}
+          SECRET_URL: ${{ secrets.SUPABASE_FUNCTIONS_URL }}
+          ML_TRAINING_KEY: ${{ secrets.ML_TRAINING_KEY }}
+        run: |
+          URL="$SECRET_URL"
+          if [ -z "$URL" ] && [ -f .env ]; then
+            BASE=$(grep -E '^VITE_SUPABASE_URL=' .env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'")
+            if [ -n "$BASE" ]; then
+              URL="${BASE%/}/functions/v1"
+            fi
+          fi
+          if [ -z "$URL" ] || [ -z "$ML_TRAINING_KEY" ]; then
+            echo "::notice::Skipping Swing ML Training: set ML_TRAINING_KEY in GitHub Actions secrets to enable automated training."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "functions_url=$URL" >> "$GITHUB_OUTPUT"
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Train candidate models
+        if: steps.config.outputs.ready == 'true'
+        env:
+          SUPABASE_FUNCTIONS_URL: ${{ steps.config.outputs.functions_url }}
           ML_TRAINING_KEY: ${{ secrets.ML_TRAINING_KEY }}
           TRIGGER_SOURCE: ${{ github.event.inputs.trigger_source || 'github_actions' }}
         run: python -m ml_training.train
