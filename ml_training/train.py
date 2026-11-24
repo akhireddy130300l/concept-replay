@@ -155,15 +155,36 @@ def main() -> int:
         df = df.sort_values(features.DATE_COL)
 
         if len(df) < settings.min_matured_rows:
-            raise RuntimeError(f"not enough matured rows ({len(df)} < {settings.min_matured_rows})")
+            reason = f"not enough matured rows ({len(df)} < {settings.min_matured_rows})"
+            log(f"::notice::Skipping Swing ML Training: {reason}")
+            if job_id and not settings.dry_run:
+                registry.complete_job(
+                    settings, job_id, status="skipped",
+                    total_rows=int(len(df)), matured_rows=int(len(df)),
+                    logs="\n".join(logs)[-20000:], github_run_url=settings.github_run_url,
+                )
+            print(json.dumps({"status": "skipped", "reason": reason}, indent=2))
+            return 0
 
         masks, windows = chronological_split(
             df, settings.train_frac, settings.val_frac, settings.purge_days, settings.embargo_days,
             calib_frac=settings.calib_frac)
         for split, m in masks.items():
             log(f"[train] {split}: rows={int(m.sum())} dates={len(windows[split])}")
-        if int(masks["test"].sum()) < settings.min_test_rows:
-            raise RuntimeError("test split too small after purge/embargo")
+        if int(masks["train"].sum()) == 0 or int(masks["val"].sum()) == 0 or int(masks["test"].sum()) < settings.min_test_rows:
+            reason = (
+                f"insufficient date span after purge/embargo "
+                f"(train={int(masks['train'].sum())}, val={int(masks['val'].sum())}, test={int(masks['test'].sum())})"
+            )
+            log(f"::notice::Skipping Swing ML Training: {reason}")
+            if job_id and not settings.dry_run:
+                registry.complete_job(
+                    settings, job_id, status="skipped",
+                    total_rows=int(len(df)), matured_rows=int(len(df)),
+                    logs="\n".join(logs)[-20000:], github_run_url=settings.github_run_url,
+                )
+            print(json.dumps({"status": "skipped", "reason": reason}, indent=2))
+            return 0
 
         cols = features.feature_columns()
         features.assert_no_leakage(cols)

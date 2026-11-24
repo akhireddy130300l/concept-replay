@@ -9,7 +9,7 @@ import requests
 
 from .config import Settings
 
-PAGE = 20000
+PAGE = 1000
 
 
 def _fetch_pages(settings: Settings, params: dict) -> list[dict]:
@@ -27,10 +27,12 @@ def _fetch_pages(settings: Settings, params: dict) -> list[dict]:
         if not resp.ok:
             raise RuntimeError(f"export failed [{resp.status_code}]: {resp.text[:500]}")
         chunk = [json.loads(line) for line in io.StringIO(resp.text) if line.strip()]
+        if not chunk:
+            break
         rows.extend(chunk)
         if len(chunk) < PAGE:
             break
-        offset += PAGE
+        offset += len(chunk)
     return rows
 
 

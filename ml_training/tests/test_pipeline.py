@@ -75,3 +75,31 @@ def test_metrics_are_sane_on_perfect_scores():
     assert m["precision_at_1"] == 1.0
     assert m["negative_recall"] == 1.0
     assert 0 <= m["brier"] <= 1
+
+
+def test_fetch_pages_paginates_past_1000_row_cap(monkeypatch):
+    from ml_training import data
+    from ml_training.config import Settings
+
+    calls = []
+
+    class FakeResp:
+        ok = True
+        status_code = 200
+
+        def __init__(self, rows):
+            self.text = "\n".join(f'{{"id": {r}}}' for r in rows)
+
+    def fake_get(url, params, headers, timeout):
+        offset = params["offset"]
+        limit = params["limit"]
+        calls.append((offset, limit))
+        total = 2500
+        end = min(total, offset + limit)
+        return FakeResp(range(offset, end))
+
+    monkeypatch.setattr(data.requests, "get", fake_get)
+    settings = Settings(functions_url="https://example.test/functions/v1", ml_training_key="k")
+    rows = data._fetch_pages(settings, {"only_matured": "true"})
+    assert len(rows) == 2500
+    assert calls == [(0, 1000), (1000, 1000), (2000, 1000)]

@@ -51,17 +51,28 @@ Deno.serve(async (req) => {
   const limit = Math.min(200000, Number(url.searchParams.get("limit") ?? 100000));
   const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
 
-  let q = admin.from(view).select("*").order(dateCol, { ascending: true }).range(offset, offset + limit - 1);
-  if (dsv) q = q.eq("dataset_version", dsv);
-  if (from) q = q.gte(dateCol, from);
-  if (to) q = q.lte(dateCol, to);
-  if (view === "ml_training_dataset_v3") {
-    if (onlyMatured) q = q.eq("label_matured", true);
-    if (unmaturedOnly) q = q.eq("label_matured", false);
+  // PostgREST caps each query to 1000 rows, so page internally up to `limit`.
+  const PAGE_SIZE = 1000;
+  const rows: Record<string, unknown>[] = [];
+  let cursor = offset;
+  while (rows.length < limit) {
+    const batch = Math.min(PAGE_SIZE, limit - rows.length);
+    let q = admin.from(view).select("*").order(dateCol, { ascending: true });
+    if (view === "ml_training_dataset_v3") {
+      q = q.order("example_id", { ascending: true });
+      if (onlyMatured) q = q.eq("label_matured", true);
+      if (unmaturedOnly) q = q.eq("label_matured", false);
+    }
+    if (dsv) q = q.eq("dataset_version", dsv);
+    if (from) q = q.gte(dateCol, from);
+    if (to) q = q.lte(dateCol, to);
+    const { data, error } = await q.range(cursor, cursor + batch - 1);
+    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...CORS, "content-type": "application/json" } });
+    const chunk = (data ?? []) as Record<string, unknown>[];
+    rows.push(...chunk);
+    if (chunk.length < batch) break;
+    cursor += chunk.length;
   }
-  const { data, error } = await q;
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...CORS, "content-type": "application/json" } });
-  const rows = data ?? [];
   console.log(`[ml-export] view=${view} rows=${rows.length} format=${format} offset=${offset} matured_only=${onlyMatured}`);
 
   const commonHeaders = {
