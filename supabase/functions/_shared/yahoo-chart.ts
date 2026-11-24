@@ -59,8 +59,8 @@ function alignArrays(
   return out;
 }
 
-async function fetchOnce(symbol: string): Promise<YahooFetchResult> {
-  const url = `${YAHOO_CHART_BASE}/${encodeURIComponent(symbol)}?interval=${DEFAULT_INTERVAL}&range=${DEFAULT_RANGE}`;
+async function fetchOnce(symbol: string, range = DEFAULT_RANGE): Promise<YahooFetchResult> {
+  const url = `${YAHOO_CHART_BASE}/${encodeURIComponent(symbol)}?interval=${DEFAULT_INTERVAL}&range=${encodeURIComponent(range)}`;
   try {
     const res = await withTimeout(
       fetch(url, {
@@ -107,10 +107,14 @@ async function fetchOnce(symbol: string): Promise<YahooFetchResult> {
   }
 }
 
-export async function fetchYahooChartWithRetry(symbol: string, retries = 2): Promise<YahooFetchResult> {
+export async function fetchYahooChartWithRetry(
+  symbol: string,
+  retries = 2,
+  range = DEFAULT_RANGE,
+): Promise<YahooFetchResult> {
   let last: YahooFetchResult = { ok: false, reason: "not_attempted", httpStatus: null };
   for (let i = 0; i <= retries; i++) {
-    last = await fetchOnce(symbol);
+    last = await fetchOnce(symbol, range);
     if (last.ok === true) return last;
     if (last.httpStatus === 404) return last; // permanent
     if (i < retries) await new Promise((r) => setTimeout(r, 250 * (i + 1)));
