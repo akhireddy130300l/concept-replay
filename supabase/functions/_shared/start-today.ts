@@ -269,6 +269,55 @@ export function selectDailyFields(
 }
 
 export const MILESTONE_DAYS = [30, 90, 365] as const;
+export const BREAKTHROUGH_COOLDOWN_DAYS = 180;
+
+export interface PriorTopicRow {
+  id: string;
+  topic: string;
+  topic_key: string;
+  sent_for?: string | null;
+  created_at?: string | null;
+}
+
+export interface PriorTopicClassification {
+  blockedKeys: Set<string>;
+  blockedTopics: string[];
+  reAlertCandidates: Map<string, { id: string; topic: string; sentFor: string }>;
+}
+
+export function classifyPriorTopics(
+  rows: PriorTopicRow[],
+  now: Date = new Date(),
+  cooldownDays = BREAKTHROUGH_COOLDOWN_DAYS,
+): PriorTopicClassification {
+  const blockedKeys = new Set<string>();
+  const blockedTopics: string[] = [];
+  const reAlertCandidates = new Map<string, { id: string; topic: string; sentFor: string }>();
+  const nowMs = now.getTime();
+
+  for (const row of rows) {
+    const baseKey = normalizeTopicKey(row.topic) || row.topic_key;
+    if (!baseKey) continue;
+    const dateStr = row.sent_for ? `${row.sent_for.slice(0, 10)}T12:00:00Z` : row.created_at ?? "";
+    const rowMs = Date.parse(dateStr);
+    const ageDays = Number.isFinite(rowMs) ? Math.floor((nowMs - rowMs) / 86_400_000) : 0;
+
+    if (ageDays < cooldownDays) {
+      blockedKeys.add(baseKey);
+      blockedKeys.add(row.topic_key);
+      blockedTopics.push(row.topic);
+      reAlertCandidates.delete(baseKey);
+    } else if (!blockedKeys.has(baseKey) && !reAlertCandidates.has(baseKey)) {
+      reAlertCandidates.set(baseKey, {
+        id: row.id,
+        topic: row.topic,
+        sentFor: row.sent_for?.slice(0, 10) ?? "",
+      });
+    }
+  }
+
+  return { blockedKeys, blockedTopics, reAlertCandidates };
+}
 
 export function getDueMilestone(
   startedAtIso: string | null | undefined,
@@ -306,6 +355,7 @@ export interface OpportunityEmailItem {
   time_estimate: string;
   sources: OpportunitySource[];
   is_wildcard: boolean;
+  is_breakthrough_update?: boolean;
   opportunity_stage?: OpportunityStage;
   actionLinks?: {
     startUrl: string;
@@ -331,6 +381,9 @@ export function buildStartTodayEmailHtml(
     .map((idea) => {
       const stageMeta = getStageBadgeMeta(idea.opportunity_stage);
       const stageBadge = `<span style="display:inline-block;background:${stageMeta.bg};color:${stageMeta.color};font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;margin-left:6px;">${escapeHtml(stageMeta.label)}</span>`;
+      const updateBadge = idea.is_breakthrough_update
+        ? `<span style="display:inline-block;background:#ede9fe;color:#6d28d9;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;margin-left:6px;">NEW UPDATE</span>`
+        : "";
       const badge = idea.is_wildcard
         ? `<span style="display:inline-block;background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;margin-left:6px;">WILD CARD</span>`
         : "";
@@ -353,7 +406,7 @@ export function buildStartTodayEmailHtml(
       return `
         <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:18px 20px;margin-bottom:16px;">
           <div style="margin-bottom:8px;">
-            <span style="display:inline-block;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;">${escapeHtml(idea.field)}</span>${stageBadge}${badge}
+            <span style="display:inline-block;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;">${escapeHtml(idea.field)}</span>${stageBadge}${updateBadge}${badge}
           </div>
           <h2 style="margin:0 0 8px;font-size:18px;color:#0f172a;">${escapeHtml(idea.topic)}</h2>
           <p style="margin:0 0 8px;font-size:14px;line-height:1.5;color:#1e293b;"><strong>Why it's rising:</strong> ${escapeHtml(idea.why_rising)}</p>

@@ -90,6 +90,7 @@ export async function synthesizeOpportunity(params: {
   focusPrompt: string;
   sources: OpportunitySource[];
   avoidTopics: string[];
+  reAlertEligibleTopics?: string[];
   isWildcard?: boolean;
 }): Promise<ResearchedOpportunity> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
@@ -102,6 +103,10 @@ export async function synthesizeOpportunity(params: {
   const avoidText = params.avoidTopics.length
     ? `Do NOT repeat or closely paraphrase any of these already-sent topics:\n- ${params.avoidTopics.slice(-40).join("\n- ")}`
     : "No prior topics yet.";
+
+  const reAlertText = params.reAlertEligibleTopics?.length
+    ? `Older topics (6+ months ago) that may ONLY be revisited if a genuine, major new breakthrough happened recently (explain clearly what changed in why_rising):\n- ${params.reAlertEligibleTopics.slice(0, 20).join("\n- ")}`
+    : "";
 
   const systemText = [
     "You are the 'Start Today' Future Regret Radar researcher.",
@@ -117,8 +122,9 @@ export async function synthesizeOpportunity(params: {
     `Field: ${params.fieldLabel}${params.isWildcard ? " (WEEKLY WILD CARD — pick something surprising and eye-opening)" : ""}`,
     `Focus: ${params.focusPrompt}`,
     avoidText,
+    reAlertText,
     `Current public signals:\n${sourcesList}`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/responses", {
     method: "POST",

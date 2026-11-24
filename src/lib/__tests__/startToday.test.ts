@@ -3,6 +3,7 @@ import {
   OPPORTUNITY_FIELDS,
   selectDailyFields,
   selectFieldSearchQuery,
+  classifyPriorTopics,
   normalizeTopicKey,
   deduplicateIdeas,
   getDueMilestone,
@@ -138,5 +139,45 @@ describe("Start Today helpers", () => {
     expect(sundayHtml).toContain("Sunday Focus Edition");
     expect(sundayHtml).toContain("3/7 days done");
     expect(sundayHtml).toContain("https://example.com/focus");
+  });
+
+  it("blocks topics within 180 days and allows major-breakthrough re-alerts after 180 days", () => {
+    const now = new Date("2026-11-24T12:00:00Z");
+    const result = classifyPriorTopics(
+      [
+        { id: "recent-1", topic: "Home Battery Microgrids", topic_key: "home battery microgrids", sent_for: "2026-10-01" },
+        { id: "old-1", topic: "Vertical Urban Farming", topic_key: "vertical urban farming", sent_for: "2026-01-15" },
+      ],
+      now,
+    );
+
+    expect(result.blockedKeys.has("home battery microgrids")).toBe(true);
+    expect(result.reAlertCandidates.has("home battery microgrids")).toBe(false);
+
+    expect(result.blockedKeys.has("vertical urban farming")).toBe(false);
+    expect(result.reAlertCandidates.get("vertical urban farming")?.id).toBe("old-1");
+
+    const html = buildStartTodayEmailHtml(
+      [
+        {
+          field: "Hobbies & Craft",
+          topic: "Vertical Urban Farming",
+          why_rising: "New low-cost LED kits cut energy use in half.",
+          five_year_vision: "Neighborhood micro-greens hubs.",
+          real_examples: ["Local micro-farms"],
+          first_step: "Price a starter tray.",
+          difficulty: "Beginner",
+          cost_estimate: "$80",
+          time_estimate: "15 mins/day",
+          sources: [],
+          is_wildcard: false,
+          is_breakthrough_update: true,
+          opportunity_stage: "inflection_point",
+        },
+      ],
+      "https://app.example.com",
+      "2026-11-24",
+    );
+    expect(html).toContain("NEW UPDATE");
   });
 });

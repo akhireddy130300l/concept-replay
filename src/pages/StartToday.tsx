@@ -35,6 +35,7 @@ interface IdeaRow {
   time_estimate: string;
   sources: unknown;
   opportunity_stage?: string | null;
+  is_breakthrough_update?: boolean;
   is_wildcard: boolean;
   is_ask_anything: boolean;
   sent_for: string;
@@ -288,6 +289,9 @@ const StartToday = () => {
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">{idea.field}</Badge>
                       <Badge variant="outline" className={stageBadge.className}>{stageBadge.label}</Badge>
+                      {idea.is_breakthrough_update && (
+                        <Badge variant="outline" className="bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30">New Update</Badge>
+                      )}
                       {idea.is_wildcard && <Badge variant="outline">Wild Card</Badge>}
                       {idea.is_ask_anything && <Badge variant="outline">Ask Anything</Badge>}
                       {action?.is_weekly_focus && (

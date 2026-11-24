@@ -4,6 +4,7 @@ import { authenticateCronRequest } from "../_shared/cron-auth.ts";
 import {
   buildStartTodayEmailHtml,
   buildSundayFocusEmailHtml,
+  classifyPriorTopics,
   normalizeTopicKey,
   selectDailyFields,
   selectFieldSearchQuery,
@@ -137,14 +138,15 @@ Deno.serve(async (req) => {
 
       const { data: priorRows } = await supabase
         .from("opportunity_ideas")
-        .select("topic, topic_key")
+        .select("id, topic, topic_key, sent_for, created_at")
         .eq("user_id", recipient.user_id)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
-        .limit(120);
+        .limit(200);
 
-      const existingKeys = new Set((priorRows ?? []).map((r) => r.topic_key));
-      const avoidTopics = (priorRows ?? []).map((r) => r.topic);
+      const { blockedKeys, blockedTopics, reAlertCandidates } = classifyPriorTopics(priorRows ?? []);
+      const avoidTopics = [...blockedTopics];
+      const reAlertEligibleTopics = Array.from(reAlertCandidates.values()).map((c) => c.topic);
 
       const { data: startedActions } = await supabase
         .from("opportunity_actions")
@@ -169,11 +171,16 @@ Deno.serve(async (req) => {
           focusPrompt: `${angleQuery} (broad lens: ${pick.field.searchPrompt})`,
           sources,
           avoidTopics,
+          reAlertEligibleTopics,
           isWildcard: pick.isWildcard,
         });
-        const topicKey = normalizeTopicKey(idea.topic);
-        if (!topicKey || existingKeys.has(topicKey)) continue;
-        existingKeys.add(topicKey);
+        const baseTopicKey = normalizeTopicKey(idea.topic);
+        if (!baseTopicKey || blockedKeys.has(baseTopicKey)) continue;
+        const reAlertMatch = reAlertCandidates.get(baseTopicKey);
+        const isBreakthroughUpdate = Boolean(reAlertMatch);
+        const topicKey = isBreakthroughUpdate ? `${baseTopicKey}-update-${todayEt}` : baseTopicKey;
+        blockedKeys.add(baseTopicKey);
+        blockedKeys.add(topicKey);
         avoidTopics.push(idea.topic);
 
         const { data: inserted, error: insertErr } = await supabase
@@ -193,6 +200,8 @@ Deno.serve(async (req) => {
             signals: idea.signals,
             sources: idea.sources,
             opportunity_stage: idea.opportunity_stage,
+            is_breakthrough_update: isBreakthroughUpdate,
+            previous_idea_id: reAlertMatch?.id ?? null,
             is_wildcard: pick.isWildcard,
             is_ask_anything: false,
             sent_for: todayEt,
@@ -211,6 +220,7 @@ Deno.serve(async (req) => {
             ...idea,
             id: inserted.id,
             is_wildcard: pick.isWildcard,
+            is_breakthrough_update: isBreakthroughUpdate,
             actionLinks: {
               startUrl: `${actionEndpoint}?token=${encodeURIComponent(startToken)}`,
               laterUrl: `${actionEndpoint}?token=${encodeURIComponent(laterToken)}`,

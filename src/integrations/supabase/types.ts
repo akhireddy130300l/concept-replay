@@ -1123,8 +1123,10 @@ export type Database = {
           five_year_vision: string
           id: string
           is_ask_anything: boolean
+          is_breakthrough_update: boolean
           is_wildcard: boolean
           opportunity_stage: string
+          previous_idea_id: string | null
           real_examples: Json
           sent_at: string | null
           sent_for: string
@@ -1146,8 +1148,10 @@ export type Database = {
           five_year_vision: string
           id?: string
           is_ask_anything?: boolean
+          is_breakthrough_update?: boolean
           is_wildcard?: boolean
           opportunity_stage?: string
+          previous_idea_id?: string | null
           real_examples?: Json
           sent_at?: string | null
           sent_for?: string
@@ -1169,8 +1173,10 @@ export type Database = {
           five_year_vision?: string
           id?: string
           is_ask_anything?: boolean
+          is_breakthrough_update?: boolean
           is_wildcard?: boolean
           opportunity_stage?: string
+          previous_idea_id?: string | null
           real_examples?: Json
           sent_at?: string | null
           sent_for?: string

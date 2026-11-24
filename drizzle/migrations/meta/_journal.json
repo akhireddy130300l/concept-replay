@@ -64,6 +64,13 @@
       "when": 1795549631576,
       "tag": "0008_upgrade_start_today_five_features",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795550112122,
+      "tag": "0009_add_breakthrough_realert_fields",
+      "breakpoints": true
     }
   ]
 }
