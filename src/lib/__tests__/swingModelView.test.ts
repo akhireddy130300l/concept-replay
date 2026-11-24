@@ -45,4 +45,20 @@ describe("buildModelViewHTML", () => {
     expect(html).toContain("61.2%");
     expect(html).toContain("Shadow mode only");
   });
+
+  it("renders promoted live model picks when status is live", () => {
+    const data: ModelViewData = {
+      modelVersion: "balanced_random_forest-20261124T170155Z",
+      algorithm: "balanced_random_forest",
+      status: "live",
+      labelHorizon: "10_session",
+      predictionDate: "2026-11-24",
+      picks: [{ ticker: "INSM", probability: 0.7724, label: "positive" }],
+    };
+    const html = buildModelViewHTML(data, "https://app.example.com");
+    expect(html).toContain("Live Model Picks");
+    expect(html).toContain("(promoted · live)");
+    expect(html).toContain("Live promoted model");
+    expect(html).not.toContain("Shadow mode only");
+  });
 });

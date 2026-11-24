@@ -69,10 +69,23 @@ export function buildModelViewHTML(data: ModelViewData | null, appBaseUrl: strin
     ? `<p style="margin:8px 0 0 0;font-size:12px;color:#312e81;">Today's rule-based pick <strong>${esc(data.ruleSelectedTicker)}</strong> scored <strong>${pct(data.ruleSelectedProbability)}</strong> in this model batch.</p>`
     : "";
 
+  const isLive = data.status === "live";
+  const heading = isLive
+    ? `🤖 Live Model Picks <span style="font-weight:600;color:#15803d;font-size:13px;">(promoted · live)</span>`
+    : `🤖 Model View <span style="font-weight:400;color:#64748b;font-size:13px;">(shadow · read-only)</span>`;
+  const boxStyle = isLive
+    ? "padding:14px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-left:4px solid #16a34a;border-radius:10px;"
+    : "padding:14px 16px;background:#eef2ff;border:1px solid #c7d2fe;border-left:4px solid #4f46e5;border-radius:10px;";
+  const metaColor = isLive ? "#14532d" : "#312e81";
+  const footerColor = isLive ? "#166534" : "#4338ca";
+  const footerNote = isLive
+    ? "Live promoted model — met the scored win rate (≥55%) and 10-session return (≥+1.5%) promotion gate. Confidence tiers are model estimates, not guarantees. Only fresh USD quotes ≥ $5 with average volume ≥ 100,000 shares and ≥ $1M daily liquidity are shown."
+    : "Shadow mode only — this does not change the rule-based pick, entry, target, or stop-loss above. Confidence tiers are model estimates, not guarantees. Only fresh USD quotes ≥ $5 with average volume ≥ 100,000 shares and ≥ $1M daily liquidity are shown.";
+
   return `
-    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">🤖 Model View <span style="font-weight:400;color:#64748b;font-size:13px;">(shadow · read-only)</span></h3>
-    <div style="padding:14px 16px;background:#eef2ff;border:1px solid #c7d2fe;border-left:4px solid #4f46e5;border-radius:10px;">
-      <p style="margin:0 0 10px 0;font-size:12px;color:#312e81;">
+    <h3 style="margin:28px 0 10px 0;color:#0f172a;font-size:16px;">${heading}</h3>
+    <div style="${boxStyle}">
+      <p style="margin:0 0 10px 0;font-size:12px;color:${metaColor};">
         <strong>${esc(data.algorithm)}</strong> (${esc(data.modelVersion)}) · ${esc(data.labelHorizon)} horizon · predictions for <strong>${esc(data.predictionDate)}</strong>${esc(metricsLine)}
       </p>
       <div style="overflow-x:auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;">
@@ -89,22 +102,49 @@ export function buildModelViewHTML(data: ModelViewData | null, appBaseUrl: strin
         </table>
       </div>
       ${ruleNote}
-      <p style="margin:8px 0 0 0;font-size:11px;color:#4338ca;">Shadow mode only — this does not change the rule-based pick, entry, target, or stop-loss above. Confidence tiers are model estimates, not guarantees. Only fresh USD quotes ≥ $5 with average volume ≥ 100,000 shares and ≥ $1M daily liquidity are shown.</p>
+      <p style="margin:8px 0 0 0;font-size:11px;color:${footerColor};">${footerNote}</p>
     </div>`;
 }
 
 // deno-lint-ignore no-explicit-any
 export async function fetchLatestModelView(admin: any, ruleSelectedTicker?: string | null, topN = 5): Promise<ModelViewData | null> {
-  const { data: latest, error: latestErr } = await admin
-    .from("prediction_history")
-    .select("prediction_date, model_version_id, model_version")
-    .not("model_version_id", "is", null)
-    .order("prediction_date", { ascending: false })
-    .order("predicted_at", { ascending: false })
+  // Prefer a promoted live model's latest predictions when available.
+  let latest: { prediction_date: string; model_version_id: string; model_version: string | null } | null = null;
+  const { data: liveModel } = await admin
+    .from("model_versions")
+    .select("id")
+    .eq("status", "live")
+    .order("promoted_at", { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle();
 
-  if (latestErr || !latest?.model_version_id || !latest?.prediction_date) return null;
+  if (liveModel?.id) {
+    const { data: liveLatest } = await admin
+      .from("prediction_history")
+      .select("prediction_date, model_version_id, model_version")
+      .eq("model_version_id", liveModel.id)
+      .order("prediction_date", { ascending: false })
+      .order("predicted_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (liveLatest?.model_version_id && liveLatest?.prediction_date) {
+      latest = liveLatest;
+    }
+  }
+
+  if (!latest) {
+    const { data: fallbackLatest, error: latestErr } = await admin
+      .from("prediction_history")
+      .select("prediction_date, model_version_id, model_version")
+      .not("model_version_id", "is", null)
+      .order("prediction_date", { ascending: false })
+      .order("predicted_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestErr || !fallbackLatest?.model_version_id || !fallbackLatest?.prediction_date) return null;
+    latest = fallbackLatest;
+  }
+
   const predictionAge = Date.now() - Date.parse(`${latest.prediction_date}T00:00:00Z`);
   if (!Number.isFinite(predictionAge) || predictionAge < 0 || predictionAge > 4 * 86400000) return null;
 
