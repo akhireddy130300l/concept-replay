@@ -21,7 +21,9 @@ export function classifyGate(opts: {
   gateStartedAt: string | null;
   lastCompletedDate: string | null; // YYYY-MM-DD
   today?: string; // YYYY-MM-DD UTC
+  requireSpeaking?: boolean;
 }): GateStatus {
+  if (opts.requireSpeaking === false) return "inactive";
   if (!opts.gateStartedAt) return "inactive";
   const today = opts.today ?? localDateUtc(new Date());
   if (!opts.lastCompletedDate) {

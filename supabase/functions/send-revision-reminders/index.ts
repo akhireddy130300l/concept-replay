@@ -2965,12 +2965,13 @@ serve(async (req) => {
       // Speaking Gym accountability gate — only enforced when the user has activated it.
       const { data: speakingState } = await supabase
         .from("speaking_user_state")
-        .select("last_completed_date, speaking_gate_started_at")
+        .select("last_completed_date, speaking_gate_started_at, require_speaking_for_stock")
         .eq("user_id", userId)
         .maybeSingle();
       const gateStatus = classifyGate({
         gateStartedAt: speakingState?.speaking_gate_started_at ?? null,
         lastCompletedDate: speakingState?.last_completed_date ?? null,
+        requireSpeaking: speakingState?.require_speaking_for_stock ?? true,
       });
       if (gateStatus === "paused") {
         console.log(JSON.stringify({ phase: "reminder_send", user_id: userId, skipped_reason: "speaking_paused" }));

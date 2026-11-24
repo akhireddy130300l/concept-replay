@@ -14,7 +14,9 @@ export function classifyGate(opts: {
   gateStartedAt: string | null;
   lastCompletedDate: string | null;
   today?: string;
+  requireSpeaking?: boolean;
 }): GateStatus {
+  if (opts.requireSpeaking === false) return "inactive";
   if (!opts.gateStartedAt) return "inactive";
   const today = opts.today ?? localDateStr(new Date());
   if (!opts.lastCompletedDate) {
@@ -29,7 +31,13 @@ export function classifyGate(opts: {
   return "paused";
 }
 
-export function gateLabel(s: GateStatus): { text: string; tone: "green" | "amber" | "red" | "muted" } {
+export function gateLabel(
+  s: GateStatus,
+  requireSpeaking = true,
+): { text: string; tone: "green" | "amber" | "red" | "muted" } {
+  if (!requireSpeaking) {
+    return { text: "Speaking not required — stock emails send on schedule", tone: "muted" };
+  }
   switch (s) {
     case "active": return { text: "All scheduled emails active", tone: "green" };
     case "warning": return { text: "Warning day: complete today's speaking session to avoid pause", tone: "amber" };

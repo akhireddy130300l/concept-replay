@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import {
   ALL_MODES, MODE_DESCRIPTIONS, pickScenarioForMode, todaysMode, todaysWarmups,
@@ -28,6 +29,7 @@ type UserState = {
   next_improvement_target: string | null;
   last_main_weakness: string | null;
   speaking_gate_started_at: string | null;
+  require_speaking_for_stock: boolean;
 };
 
 function localDateStr(d = new Date()): string {
@@ -622,6 +624,7 @@ const Speaking = () => {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [state, setState] = useState<UserState | null>(null);
+  const [togglingGate, setTogglingGate] = useState(false);
 
   const defaultMode = useMemo(() => todaysMode(), []);
   const [mode, setMode] = useState<SpeakingMode>(defaultMode);
@@ -902,11 +905,37 @@ const Speaking = () => {
     );
   }
 
+  const requireSpeaking = state?.require_speaking_for_stock ?? true;
+
+  async function handleToggleRequireSpeaking(next: boolean) {
+    if (!userId || !state) return;
+    setTogglingGate(true);
+    const prev = state.require_speaking_for_stock;
+    setState({ ...state, require_speaking_for_stock: next });
+    const { error } = await supabase
+      .from("speaking_user_state")
+      .update({ require_speaking_for_stock: next })
+      .eq("user_id", userId);
+    setTogglingGate(false);
+    if (error) {
+      setState({ ...state, require_speaking_for_stock: prev });
+      toast({ title: "Couldn't update setting", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({
+      title: next ? "Speaking required for stock emails" : "Stock emails won't wait for speaking",
+      description: next
+        ? "Stock emails will follow your daily speaking status."
+        : "Stock emails will arrive on their normal schedule.",
+    });
+  }
+
   const gateStatus: GateStatus = classifyGate({
     gateStartedAt: state?.speaking_gate_started_at ?? null,
     lastCompletedDate: state?.last_completed_date ?? null,
+    requireSpeaking,
   });
-  const gateInfo = gateLabel(gateStatus);
+  const gateInfo = gateLabel(gateStatus, requireSpeaking);
   const gateToneClass =
     gateInfo.tone === "green" ? "bg-emerald-50 border-emerald-300 text-emerald-900" :
     gateInfo.tone === "amber" ? "bg-amber-50 border-amber-300 text-amber-900" :
@@ -942,9 +971,18 @@ const Speaking = () => {
       </header>
 
       <main className="container mx-auto px-4 py-6 max-w-3xl">
-        {/* Email gate status pill */}
-        <div className={`border rounded-md px-3 py-2 text-sm mb-4 ${gateToneClass}`}>
-          {gateInfo.text}
+        {/* Email gate status & toggle */}
+        <div className={`border rounded-md px-3 py-2.5 text-sm mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${gateToneClass}`}>
+          <span>{gateInfo.text}</span>
+          <label className="flex items-center gap-2 text-xs font-medium cursor-pointer shrink-0">
+            <span>Require speaking for stock emails</span>
+            <Switch
+              checked={requireSpeaking}
+              disabled={togglingGate}
+              onCheckedChange={handleToggleRequireSpeaking}
+              aria-label="Require speaking for stock emails"
+            />
+          </label>
         </div>
 
         {/* Streak deadline indicator */}

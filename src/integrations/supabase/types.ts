@@ -1600,6 +1600,7 @@ export type Database = {
           next_improvement_target: string | null
           paused: boolean
           preferred_mode: string | null
+          require_speaking_for_stock: boolean
           speaking_gate_started_at: string | null
           updated_at: string
           user_id: string
@@ -1615,6 +1616,7 @@ export type Database = {
           next_improvement_target?: string | null
           paused?: boolean
           preferred_mode?: string | null
+          require_speaking_for_stock?: boolean
           speaking_gate_started_at?: string | null
           updated_at?: string
           user_id: string
@@ -1630,6 +1632,7 @@ export type Database = {
           next_improvement_target?: string | null
           paused?: boolean
           preferred_mode?: string | null
+          require_speaking_for_stock?: boolean
           speaking_gate_started_at?: string | null
           updated_at?: string
           user_id?: string
