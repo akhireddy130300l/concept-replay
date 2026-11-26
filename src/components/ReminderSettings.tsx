@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Clock, MapPin } from "lucide-react";
+import { Clock, MapPin, ChevronDown, ChevronUp } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -35,6 +35,7 @@ export function ReminderSettings({ userId, onChange }: Props) {
   const { toast } = useToast();
   const [prefs, setPrefs] = useState<UserPreferences | null>(null);
   const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const timezones = useMemo(() => listTimezones(), []);
 
   useEffect(() => {
@@ -93,77 +94,83 @@ export function ReminderSettings({ userId, onChange }: Props) {
   );
 
   return (
-    <Card className="glass-card animate-fade-in" style={{ animationDelay: "0.12s" }}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <Clock className="w-5 h-5 text-primary" />
-          Reminder Time
-        </CardTitle>
-        <CardDescription>
-          Choose your location and what time of day you want emails to arrive.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid sm:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
-              <MapPin className="w-3 h-3" /> Timezone
-            </Label>
-            <Select
-              value={prefs.timezone}
-              onValueChange={(v) => save({ timezone: v })}
-            >
-              <SelectTrigger className="glass-input border-border/50">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="max-h-72">
-                {timezones.map((tz) => (
-                  <SelectItem key={tz} value={tz}>
-                    {tz.replace(/_/g, " ")}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => save({ timezone: getBrowserTimezone() })}
-            >
-              Use my device timezone ({getBrowserTimezone()})
-            </Button>
+    <Card className="surface-panel border-0">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full px-5 py-4 flex items-center justify-between gap-3 text-left"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Clock className="w-4 h-4 text-primary" />
           </div>
-          <div className="space-y-2">
-            <Label className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
-              <Clock className="w-3 h-3" /> Send at (local time)
-            </Label>
-            <Input
-              type="time"
-              value={timeValue}
-              className="glass-input border-border/50"
-              onChange={(e) => {
-                const [h, m] = e.target.value.split(":").map(Number);
-                if (Number.isFinite(h) && Number.isFinite(m)) {
-                  save({ reminder_hour: h, reminder_minute: m });
-                }
-              }}
-            />
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">Reminder Time</h3>
+            <p className="text-xs text-muted-foreground truncate">
+              Next email: {formatInTz(nextEmail, prefs.timezone)}
+            </p>
           </div>
         </div>
-        <div className="rounded-xl border border-border/30 bg-background/60 p-3 text-sm">
-          <p className="text-muted-foreground text-xs uppercase tracking-wider mb-1">
-            Next email arrives
-          </p>
-          <p className="font-semibold">
-            {formatInTz(nextEmail, prefs.timezone)}
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            (In your local time: {nextEmail.toLocaleString()})
-          </p>
-        </div>
-        {saving && <p className="text-xs text-muted-foreground">Saving…</p>}
-      </CardContent>
+        {expanded ? (
+          <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" />
+        ) : (
+          <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
+        )}
+      </button>
+      {expanded && (
+        <CardContent className="pt-0 pb-5 px-5 space-y-4 border-t border-border/40">
+          <div className="grid sm:grid-cols-2 gap-4 pt-4">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
+                <MapPin className="w-3 h-3" /> Timezone
+              </Label>
+              <Select value={prefs.timezone} onValueChange={(v) => save({ timezone: v })}>
+                <SelectTrigger className="glass-input border-border/50 rounded-xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {timezones.map((tz) => (
+                    <SelectItem key={tz} value={tz}>
+                      {tz.replace(/_/g, " ")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => save({ timezone: getBrowserTimezone() })}
+              >
+                Use my device timezone ({getBrowserTimezone()})
+              </Button>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-muted-foreground">
+                <Clock className="w-3 h-3" /> Send at (local time)
+              </Label>
+              <Input
+                type="time"
+                value={timeValue}
+                className="glass-input border-border/50 rounded-xl"
+                onChange={(e) => {
+                  const [h, m] = e.target.value.split(":").map(Number);
+                  if (Number.isFinite(h) && Number.isFinite(m)) {
+                    save({ reminder_hour: h, reminder_minute: m });
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <div className="rounded-xl border border-border/40 bg-background/60 p-3 text-xs">
+            <p className="text-muted-foreground uppercase tracking-wider mb-0.5">Next email arrives</p>
+            <p className="font-semibold text-sm text-foreground">{formatInTz(nextEmail, prefs.timezone)}</p>
+            <p className="text-muted-foreground mt-0.5">Local time: {nextEmail.toLocaleString()}</p>
+          </div>
+          {saving && <p className="text-xs text-muted-foreground">Saving…</p>}
+        </CardContent>
+      )}
     </Card>
   );
 }

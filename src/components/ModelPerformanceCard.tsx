@@ -32,24 +32,59 @@ export function ModelPerformanceCard() {
     refetchInterval: 300000,
   });
   const models = query.data;
-  return <section aria-labelledby="model-performance-heading" className="mb-8 border-b border-border/60 pb-6">
-    <div className="mb-5 flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 text-xl font-semibold" id="model-performance-heading"><BarChart3 className="h-5 w-5 text-primary" />Model Performance</h3><Button variant="ghost" size="icon" aria-label="Refresh model performance" title="Refresh model performance" disabled={query.isFetching} onClick={() => query.refetch()}><RefreshCw className={`h-4 w-4 ${query.isFetching ? "animate-spin" : ""}`} /></Button></div>
-    {query.isPending ? <p className="text-sm text-muted-foreground">Loading model results…</p> : query.isError ? <p role="alert" className="text-sm text-destructive">Model performance unavailable. Your schedules are unchanged.</p> : !models?.length ? <p className="text-sm text-muted-foreground">No trained models registered yet.</p> : <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {models.map(m => <article key={m.modelVersionId} className="rounded-xl border border-border/60 bg-card/60 p-4 backdrop-blur-sm">
-        <div className="flex items-center justify-between gap-2">
-          <h4 className="break-words font-medium capitalize"><span className="mr-1.5 text-xs text-muted-foreground">#{m.rank}</span>{m.algorithm.replace(/_/g, " ")}</h4>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {m.isLeader && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">Leader</span>}
-            <span className="rounded-full border border-border/60 px-2 py-0.5 text-xs text-muted-foreground">{m.status}</span>
-          </div>
+  return (
+    <section aria-labelledby="model-performance-heading" className="mb-8">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground" id="model-performance-heading">
+          <BarChart3 className="h-4 w-4 text-primary" />
+          Model Performance
+        </h2>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-xl"
+          aria-label="Refresh model performance"
+          title="Refresh model performance"
+          disabled={query.isFetching}
+          onClick={() => query.refetch()}
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${query.isFetching ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
+      {query.isPending ? (
+        <div className="surface-panel p-5 text-sm text-muted-foreground">Loading model results…</div>
+      ) : query.isError ? (
+        <div role="alert" className="surface-panel p-5 text-sm text-destructive">Model performance unavailable. Your schedules are unchanged.</div>
+      ) : !models?.length ? (
+        <div className="surface-panel p-5 text-sm text-muted-foreground">No trained models registered yet.</div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+          {models.map(m => (
+            <article key={m.modelVersionId} className="surface-panel p-4 flex flex-col justify-between">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="break-words text-sm font-semibold capitalize leading-snug">
+                  <span className="mr-1.5 text-xs font-normal text-muted-foreground">#{m.rank}</span>
+                  {m.algorithm.replace(/_/g, " ")}
+                </h3>
+                <div className="flex shrink-0 items-center gap-1">
+                  {m.isLeader && (
+                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">Leader</span>
+                  )}
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{m.status}</span>
+                </div>
+              </div>
+              <dl className="mt-3 space-y-1.5 text-xs">
+                <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Win rate</dt><dd className="font-semibold text-foreground">{pct(m.winRate)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Avg return (10 sessions)</dt><dd className="font-semibold text-foreground">{ret(m.avgReturnPct)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Test ROC AUC</dt><dd className="font-semibold text-foreground">{m.testRocAuc === null ? "Not recorded" : m.testRocAuc.toFixed(3)}</dd></div>
+              </dl>
+              <p className="mt-3 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground">
+                {m.scored} scored · {m.pending} pending of {m.predictions} predictions
+              </p>
+            </article>
+          ))}
         </div>
-        <dl className="mt-3 space-y-1.5 text-sm">
-          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Win rate</dt><dd className="font-medium">{pct(m.winRate)}</dd></div>
-          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Avg return (10 sessions)</dt><dd className="font-medium">{ret(m.avgReturnPct)}</dd></div>
-          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Test ROC AUC</dt><dd className="font-medium">{m.testRocAuc === null ? "Not recorded" : m.testRocAuc.toFixed(3)}</dd></div>
-        </dl>
-        <p className="mt-3 text-xs text-muted-foreground">{m.scored} scored · {m.pending} pending of {m.predictions} shadow predictions</p>
-      </article>)}
-    </div>}
-  </section>;
+      )}
+    </section>
+  );
 }

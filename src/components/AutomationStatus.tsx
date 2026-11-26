@@ -57,15 +57,109 @@ export function AutomationStatus({ userId }: { userId: string }) {
     await status.refetch(); setSaving(false);
   };
   const d = status.data;
-  const testButton = (kind: "stock" | "english") => <Button variant="outline" size="sm" className="mt-4 gap-2" disabled={!d?.enabled || Boolean(busy) || (cooldowns[kind] ?? 0) > 0} onClick={() => testSend(kind)}>{busy === kind ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}{busy === kind ? "Sending…" : (cooldowns[kind] ?? 0) > 0 ? `Test in ${Math.ceil(cooldowns[kind] / 60)} min` : `Test ${kind === "stock" ? "stock" : "English"} email`}</Button>;
-  return <section aria-labelledby="automation-heading" className="mb-8 border-y border-border/60 py-6">
-    <div className="mb-5 flex items-center justify-between gap-3"><h3 id="automation-heading" className="flex items-center gap-2 text-xl font-semibold"><Activity className="h-5 w-5 text-primary" />Automation Status</h3><Button variant="ghost" size="icon" aria-label="Refresh automation status" title="Refresh automation status" disabled={status.isFetching} onClick={() => status.refetch()}><RefreshCw className={`h-4 w-4 ${status.isFetching ? "animate-spin" : ""}`} /></Button></div>
-    {status.isPending ? <p className="text-sm text-muted-foreground">Checking today’s activity…</p> : status.isError ? <p role="alert" className="text-sm text-destructive">Status unavailable. Your schedules are unchanged.</p> : d && <div className="grid grid-cols-1 gap-x-8 gap-y-6 sm:grid-cols-2">
-      <div className="min-w-0"><h4 className="mb-2 flex items-center gap-2 font-medium"><Mail className="h-4 w-4 text-primary" />English Hourly Emails</h4>{d.english ? <><p className="text-2xl font-semibold">{d.english.sent}<span className="text-base font-normal text-muted-foreground"> / 9 sent</span></p><p className="mt-1 text-sm text-muted-foreground">{d.english.remaining} remaining today</p><p className="mt-2 break-words text-sm">Last phrase: {d.english.lastWord ?? "None today"}</p><p className="text-sm text-muted-foreground">Audio: {d.english.audio === null ? "Not recorded yet" : d.english.audio ? "Ready" : "Unavailable"}</p></> : <p className="text-sm text-muted-foreground">Not enabled for this account</p>}{testButton("english")}</div>
-      <div className="min-w-0"><h4 className="mb-2 flex items-center gap-2 font-medium"><Mic className="h-4 w-4 text-primary" />Speaking Gym Gate</h4><div className="flex items-center justify-between gap-3"><label htmlFor="automation-speaking" className="text-sm">Require speaking for stock emails</label><Switch id="automation-speaking" aria-label="Require speaking for stock emails" checked={d.speaking.required} disabled={saving} onCheckedChange={toggle} /></div><p className="mt-3 text-sm font-medium">{d.speaking.gate === "inactive" ? "Inactive" : d.speaking.gate === "paused" ? "Paused" : d.speaking.gate === "warning" ? "Active · warning day" : "Active"}</p><p className="mt-1 text-sm text-muted-foreground">Today’s session: {d.speaking.completedToday ? "Completed" : "Not completed"}</p></div>
-      <div className="min-w-0"><h4 className="mb-2 flex items-center gap-2 font-medium"><TrendingUp className="h-4 w-4 text-primary" />Stock & Swing Watch</h4><p className="text-sm">Last sent: {timestamp(d.stock.lastSent)}</p><p className="mt-1 text-sm text-muted-foreground">Next: {timestamp(d.stock.nextRun)}</p><p className="mt-2 text-sm">Today’s rule pick: <strong>{d.stock.topPick ?? "No pick recorded"}</strong></p>{testButton("stock")}</div>
-      <div className="min-w-0"><h4 className="mb-2 flex items-center gap-2 font-medium"><Cpu className="h-4 w-4 text-primary" />ML Shadow Training</h4><p className="text-sm">Last run: {timestamp(d.ml.training?.finished_at ?? d.ml.training?.started_at)}</p><p className="text-sm text-muted-foreground">{d.ml.training?.status ?? "No run recorded"}</p><p className="mt-2 break-words text-sm">Model: {d.ml.model?.algorithm?.replace(/_/g, " ") ?? "Not registered"}</p><p className="text-xs text-muted-foreground">{d.ml.model?.status ?? "Shadow only"} · shadow-only</p><p className="mt-2 text-sm">Top model estimate: {d.ml.prediction ? `${d.ml.prediction.ticker} · ${(Number(d.ml.prediction.predicted_probability) * 100).toFixed(1)}%` : "No fresh prediction"}</p></div>
-    </div>}
-    {d?.lastTests?.length ? <p className="mt-5 text-xs text-muted-foreground">Latest test: {d.lastTests[0].kind} · {d.lastTests[0].status} · {timestamp(d.lastTests[0].sent_at)}</p> : null}
-  </section>;
+  const dot = (tone: "success" | "warning" | "muted") => (
+    <span className={`inline-block h-2 w-2 rounded-full shrink-0 ${tone === "success" ? "bg-success" : tone === "warning" ? "bg-warning" : "bg-muted-foreground/40"}`} />
+  );
+  const testButton = (kind: "stock" | "english") => (
+    <Button
+      variant="outline"
+      size="sm"
+      className="mt-3 h-8 rounded-xl border-border/60 bg-background/60 text-xs gap-1.5"
+      disabled={!d?.enabled || Boolean(busy) || (cooldowns[kind] ?? 0) > 0}
+      onClick={() => testSend(kind)}
+    >
+      {busy === kind ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+      {busy === kind ? "Sending…" : (cooldowns[kind] ?? 0) > 0 ? `Test in ${Math.ceil(cooldowns[kind] / 60)} min` : `Test ${kind === "stock" ? "stock" : "English"} email`}
+    </Button>
+  );
+  return (
+    <section aria-labelledby="automation-heading" className="mb-8">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 id="automation-heading" className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          <Activity className="h-4 w-4 text-primary" />
+          Automation Status
+        </h2>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-xl"
+          aria-label="Refresh automation status"
+          title="Refresh automation status"
+          disabled={status.isFetching}
+          onClick={() => status.refetch()}
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${status.isFetching ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
+      {status.isPending ? (
+        <div className="surface-panel p-5 text-sm text-muted-foreground">Checking today’s activity…</div>
+      ) : status.isError ? (
+        <div role="alert" className="surface-panel p-5 text-sm text-destructive">Status unavailable. Your schedules are unchanged.</div>
+      ) : d && (
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+          <div className="surface-panel p-4 min-w-0 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="flex items-center gap-2 text-sm font-semibold"><Mail className="h-4 w-4 text-primary" />English Hourly Emails</h3>
+                {dot(d.english ? (d.english.sent > 0 ? "success" : "warning") : "muted")}
+              </div>
+              {d.english ? (
+                <>
+                  <p className="text-2xl font-semibold tracking-tight">{d.english.sent}<span className="text-sm font-normal text-muted-foreground"> / 9 sent</span></p>
+                  <p className="mt-1 text-xs text-muted-foreground">{d.english.remaining} remaining · Audio: {d.english.audio === null ? "Not recorded" : d.english.audio ? "Ready" : "Unavailable"}</p>
+                  <p className="mt-1.5 break-words text-xs text-foreground/90">Last phrase: <span className="font-medium">{d.english.lastWord ?? "None today"}</span></p>
+                </>
+              ) : <p className="text-xs text-muted-foreground">Not enabled for this account</p>}
+            </div>
+            <div>{testButton("english")}</div>
+          </div>
+
+          <div className="surface-panel p-4 min-w-0 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="flex items-center gap-2 text-sm font-semibold"><Mic className="h-4 w-4 text-primary" />Speaking Gym Gate</h3>
+                {dot(d.speaking.completedToday ? "success" : d.speaking.required ? "warning" : "muted")}
+              </div>
+              <div className="flex items-center justify-between gap-3 py-1">
+                <label htmlFor="automation-speaking" className="text-xs text-foreground/90">Require speaking for stock emails</label>
+                <Switch id="automation-speaking" aria-label="Require speaking for stock emails" checked={d.speaking.required} disabled={saving} onCheckedChange={toggle} />
+              </div>
+              <p className="mt-2 text-xs font-medium text-foreground">{d.speaking.gate === "inactive" ? "Inactive" : d.speaking.gate === "paused" ? "Paused" : d.speaking.gate === "warning" ? "Active · warning day" : "Active"}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">Today’s session: {d.speaking.completedToday ? "Completed" : "Not completed"}</p>
+            </div>
+          </div>
+
+          <div className="surface-panel p-4 min-w-0 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="flex items-center gap-2 text-sm font-semibold"><TrendingUp className="h-4 w-4 text-primary" />Stock & Swing Watch</h3>
+                {dot(d.stock.topPick ? "success" : "muted")}
+              </div>
+              <p className="text-xs text-foreground/90">Last sent: <span className="font-medium">{timestamp(d.stock.lastSent)}</span></p>
+              <p className="mt-0.5 text-xs text-muted-foreground">Next: {timestamp(d.stock.nextRun)}</p>
+              <p className="mt-2 text-xs text-foreground/90">Today’s rule pick: <strong className="font-semibold">{d.stock.topPick ?? "No pick recorded"}</strong></p>
+            </div>
+            <div>{testButton("stock")}</div>
+          </div>
+
+          <div className="surface-panel p-4 min-w-0 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="flex items-center gap-2 text-sm font-semibold"><Cpu className="h-4 w-4 text-primary" />ML Shadow Training</h3>
+                {dot(d.ml.training?.status === "completed" ? "success" : d.ml.training ? "warning" : "muted")}
+              </div>
+              <p className="text-xs text-foreground/90">Last run: <span className="font-medium">{timestamp(d.ml.training?.finished_at ?? d.ml.training?.started_at)}</span> · <span className="text-muted-foreground">{d.ml.training?.status ?? "No run"}</span></p>
+              <p className="mt-1.5 break-words text-xs text-foreground/90 capitalize">Model: <span className="font-medium">{d.ml.model?.algorithm?.replace(/_/g, " ") ?? "Not registered"}</span> <span className="text-muted-foreground">({d.ml.model?.status ?? "shadow-only"})</span></p>
+              <p className="mt-1.5 text-xs text-foreground/90">Top estimate: <span className="font-semibold">{d.ml.prediction ? `${d.ml.prediction.ticker} · ${(Number(d.ml.prediction.predicted_probability) * 100).toFixed(1)}%` : "No fresh prediction"}</span></p>
+            </div>
+          </div>
+        </div>
+      )}
+      {d?.lastTests?.length ? (
+        <p className="mt-2.5 text-xs text-muted-foreground px-1">
+          Latest test: {d.lastTests[0].kind} · {d.lastTests[0].status} · {timestamp(d.lastTests[0].sent_at)}
+        </p>
+      ) : null}
+    </section>
+  );
 }

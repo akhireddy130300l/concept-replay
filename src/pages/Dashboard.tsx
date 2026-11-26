@@ -32,6 +32,9 @@ import { ReminderSettings, type UserPreferences } from "@/components/ReminderSet
 import { nextRevisionInstant, formatInTz, getBrowserTimezone } from "@/lib/reminderTime";
 import { AutomationStatus } from "@/components/AutomationStatus";
 import { ModelPerformanceCard } from "@/components/ModelPerformanceCard";
+import { AppShell } from "@/components/layouts/AppShell";
+import { PageHeader } from "@/components/layouts/PageHeader";
+import { StatTile } from "@/components/layouts/StatTile";
 
 const TruncatedText = ({ text, maxLength = 120, className }: { text: string; maxLength?: number; className?: string }) => {
   const [expanded, setExpanded] = useState(false);
@@ -418,90 +421,95 @@ const Dashboard = () => {
     return formatInTz(date, tz);
   };
 
-  return (
-    <div className="min-h-screen bg-[image:var(--gradient-hero)]">
-      <header className="glass-card sticky top-0 z-10 border-b border-border/30">
-        <div className="container mx-auto px-4 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-[var(--shadow-button)] animate-glow-pulse">
-              <Brain className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <h1 className="text-xl font-semibold tracking-tight">LearnLoop</h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={() => navigate("/start-today")} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
-              Start Today
-            </Button>
-            <Button onClick={() => navigate("/speaking-gym")} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
-              <Sparkles className="w-4 h-4 mr-2" />
-              Speaking Gym
-            </Button>
-            <Button onClick={() => navigate("/american-shadow")} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
-              <Headphones className="w-4 h-4 mr-2" />
-              American Shadow
-            </Button>
-            <Button onClick={handleSignOut} variant="outline" size="sm" className="glass-card border-border/50 hover:bg-muted/50">
-              <LogOut className="w-4 h-4 mr-2" />
-              Sign Out
-            </Button>
-          </div>
-        </div>
-      </header>
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const todayLabel = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+  const dueCount = topics.filter((t) => new Date(t.next_revision_date) <= new Date()).length;
 
-      <main className="container mx-auto px-4 py-8 max-w-4xl">
-        <div className="mb-8 animate-fade-in">
-          <h2 className="text-3xl font-semibold mb-2 tracking-tight">Welcome back!</h2>
-          <p className="text-muted-foreground">
-            Add topics you've learned today and we'll remind you to review them.
-          </p>
+  return (
+    <AppShell>
+      <main className="animate-fade-in">
+        <PageHeader
+          eyebrow={todayLabel}
+          title={greeting}
+          subtitle="Your daily learning, speaking, and market intelligence in one place."
+        />
+
+        {/* Today 3-tile strip */}
+        <div className="grid grid-cols-3 gap-3 mb-8">
+          <StatTile
+            label="Due Today"
+            value={dueCount}
+            sublabel={`${topics.length} active topics`}
+            tone={dueCount > 0 ? "warning" : "success"}
+            icon={<BookOpen className="w-4 h-4" />}
+          />
+          <StatTile
+            label="Streak"
+            value={rewards ? Math.max(rewards.current_streak, rewards.topic_streak || 0) : 0}
+            sublabel={rewards ? `Best: ${Math.max(rewards.longest_streak, rewards.longest_topic_streak || 0)}d` : "Start today"}
+            tone="primary"
+            icon={<Flame className="w-4 h-4" />}
+          />
+          <StatTile
+            label="Rank Points"
+            value={rewards ? rewards.total_points : 0}
+            sublabel={rewards ? rewards.rank : "Unranked"}
+            tone="success"
+            icon={<Trophy className="w-4 h-4" />}
+          />
         </div>
 
         {user && <AutomationStatus userId={user.id} />}
         {user && <ModelPerformanceCard />}
 
-        <Card className="mb-8 glass-card float-hover animate-fade-in" style={{ animationDelay: '0.1s' }}>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+        <Card className="mb-8 surface-panel border-0">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base font-semibold">
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
                 <Plus className="w-4 h-4 text-primary" />
               </div>
               Add New Topic
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="text-xs">
               What did you learn today?
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleAddTopic} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="topic">Topic Title</Label>
+            <form onSubmit={handleAddTopic} className="space-y-3.5">
+              <div className="space-y-1.5">
+                <Label htmlFor="topic" className="text-xs font-medium text-muted-foreground">Topic Title</Label>
                 <Input
                   id="topic"
                   placeholder="e.g., Stacks and Queues, String Builder"
                   value={newTopic}
                   onChange={(e) => setNewTopic(e.target.value)}
                   required
-                  className="glass-input border-border/50 focus:border-primary/50"
+                  className="glass-input rounded-xl border-border/50 focus:border-primary/50"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Notes (Optional)</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="description" className="text-xs font-medium text-muted-foreground">Notes (Optional)</Label>
                 <Textarea
                   id="description"
                   placeholder="Add any notes or key points you want to remember..."
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
-                  rows={3}
-                  className="glass-input border-border/50 focus:border-primary/50"
+                  rows={2}
+                  className="glass-input rounded-xl border-border/50 focus:border-primary/50"
                 />
               </div>
-              <div className="flex items-center justify-between p-4 glass-card rounded-xl border border-border/30">
+              <div className="flex items-center justify-between p-3 rounded-xl bg-background/60 border border-border/40">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-accent/20 to-primary/10 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-xl bg-accent/15 flex items-center justify-center shrink-0">
                     <RefreshCw className="w-4 h-4 text-accent" />
                   </div>
                   <div>
-                    <Label htmlFor="daily-toggle" className="cursor-pointer font-medium">Daily Reminder</Label>
+                    <Label htmlFor="daily-toggle" className="cursor-pointer text-sm font-medium">Daily Reminder</Label>
                     <p className="text-xs text-muted-foreground">Send every day instead of spaced repetition</p>
                   </div>
                 </div>
@@ -513,7 +521,7 @@ const Dashboard = () => {
               </div>
               <Button
                 type="submit"
-                className="w-full glossy-button bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-all text-primary-foreground font-medium"
+                className="w-full rounded-xl glossy-button bg-gradient-to-r from-primary to-secondary hover:opacity-90 transition-all text-primary-foreground font-medium"
                 disabled={adding}
               >
                 {adding ? "Adding..." : "Add Topic"}
@@ -524,95 +532,93 @@ const Dashboard = () => {
 
         {/* PUBG-style Rewards Widget */}
         {rewards && (
-          <Card className="glass-card animate-fade-in overflow-hidden" style={{ animationDelay: '0.15s' }}>
-            <div className="relative">
-              <div className="absolute inset-0 bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-yellow-500/10" />
-              <CardContent className="py-5 relative">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold flex items-center gap-2">
-                    <Trophy className="w-5 h-5 text-amber-500" />
-                    Your Rewards
-                  </h3>
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30">
-                    <span className="text-lg">{getRankEmoji(rewards.rank)}</span>
-                    <span className="font-bold text-sm text-amber-700 dark:text-amber-300">{rewards.rank}</span>
+          <Card className="mb-4 surface-panel border-0 overflow-hidden">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-semibold flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-warning" />
+                  Your Rewards
+                </h3>
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-warning/15 border border-warning/30">
+                  <span className="text-sm">{getRankEmoji(rewards.rank)}</span>
+                  <span className="font-semibold text-xs text-foreground">{rewards.rank}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5">
+                <div className="text-center p-2.5 rounded-xl bg-background/60 border border-border/40">
+                  <Star className="w-3.5 h-3.5 mx-auto mb-1 text-warning" />
+                  <p className="text-lg font-semibold">{rewards.total_points}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Points</p>
+                </div>
+                <div className="text-center p-2.5 rounded-xl bg-background/60 border border-border/40">
+                  <Flame className="w-3.5 h-3.5 mx-auto mb-1 text-warning" />
+                  <p className="text-lg font-semibold">{rewards.current_streak}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Quiz</p>
+                </div>
+                <div className="text-center p-2.5 rounded-xl bg-background/60 border border-border/40">
+                  <BookOpen className="w-3.5 h-3.5 mx-auto mb-1 text-primary" />
+                  <p className="text-lg font-semibold">{rewards.topic_streak || 0}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Topic</p>
+                </div>
+                <div className="text-center p-2.5 rounded-xl bg-background/60 border border-border/40">
+                  <Target className="w-3.5 h-3.5 mx-auto mb-1 text-success" />
+                  <p className="text-lg font-semibold">{rewards.correct_answers}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Correct</p>
+                </div>
+                <div className="text-center p-2.5 rounded-xl bg-background/60 border border-border/40">
+                  <Trophy className="w-3.5 h-3.5 mx-auto mb-1 text-primary" />
+                  <p className="text-lg font-semibold">{rewards.total_quizzes}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Quizzes</p>
+                </div>
+                <div className="text-center p-2.5 rounded-xl bg-background/60 border border-border/40">
+                  <Flame className="w-3.5 h-3.5 mx-auto mb-1 text-destructive" />
+                  <p className="text-lg font-semibold">{Math.max(rewards.longest_streak, rewards.longest_topic_streak || 0)}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Best</p>
+                </div>
+              </div>
+              {getNextRank(rewards.rank, rewards.total_points) && (
+                <div className="mt-4">
+                  <div className="flex justify-between text-xs text-muted-foreground mb-1.5">
+                    <span>{rewards.rank}</span>
+                    <span>{getNextRank(rewards.rank, rewards.total_points)!.name} ({getNextRank(rewards.rank, rewards.total_points)!.minPoints} pts)</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-500"
+                      style={{ width: `${getProgressToNextRank(rewards.rank, rewards.total_points)}%` }}
+                    />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
-                    <Star className="w-4 h-4 mx-auto mb-1 text-amber-500" />
-                    <p className="text-xl font-bold">{rewards.total_points}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Points</p>
-                  </div>
-                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
-                    <Flame className="w-4 h-4 mx-auto mb-1 text-orange-500" />
-                    <p className="text-xl font-bold">{rewards.current_streak}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Quiz Streak</p>
-                  </div>
-                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
-                    <BookOpen className="w-4 h-4 mx-auto mb-1 text-cyan-500" />
-                    <p className="text-xl font-bold">{rewards.topic_streak || 0}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Topic Streak</p>
-                  </div>
-                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
-                    <Target className="w-4 h-4 mx-auto mb-1 text-green-500" />
-                    <p className="text-xl font-bold">{rewards.correct_answers}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Correct</p>
-                  </div>
-                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
-                    <Trophy className="w-4 h-4 mx-auto mb-1 text-primary" />
-                    <p className="text-xl font-bold">{rewards.total_quizzes}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Quizzes</p>
-                  </div>
-                  <div className="text-center p-3 rounded-xl bg-background/60 border border-border/30">
-                    <Flame className="w-4 h-4 mx-auto mb-1 text-rose-500" />
-                    <p className="text-xl font-bold">{Math.max(rewards.longest_streak, rewards.longest_topic_streak || 0)}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Best Streak</p>
-                  </div>
-                </div>
-                {/* Progress to next rank */}
-                {getNextRank(rewards.rank, rewards.total_points) && (
-                  <div className="mt-4">
-                    <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                      <span>{rewards.rank}</span>
-                      <span>{getNextRank(rewards.rank, rewards.total_points)!.name} ({getNextRank(rewards.rank, rewards.total_points)!.minPoints} pts)</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500"
-                        style={{ width: `${getProgressToNextRank(rewards.rank, rewards.total_points)}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </div>
+              )}
+            </CardContent>
           </Card>
         )}
 
         {user && (
-          <div className="mt-4">
+          <div className="mb-4">
             <ReminderSettings userId={user.id} onChange={setPrefs} />
           </div>
         )}
 
         {/* Quiz Progress Timeline */}
         {quizHistory.length > 0 && (
-          <Card className="mt-4 mb-4 glass-card animate-fade-in" style={{ animationDelay: '0.18s' }}>
-            <CardContent className="py-4">
+          <Card className="mb-8 surface-panel border-0">
+            <CardContent className="p-0">
               <button
                 onClick={() => setShowHistory(!showHistory)}
-                className="w-full flex items-center justify-between"
+                className="w-full px-5 py-4 flex items-center justify-between text-left"
               >
-                <h3 className="text-lg font-bold flex items-center gap-2">
-                  <History className="w-5 h-5 text-primary" />
-                  Quiz Progress Timeline
+                <h3 className="text-sm font-semibold flex items-center gap-2.5">
+                  <span className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                    <History className="w-4 h-4 text-primary" />
+                  </span>
+                  <span>Quiz Progress Timeline <span className="text-xs font-normal text-muted-foreground">({quizHistory.length})</span></span>
                 </h3>
-                {showHistory ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
+                {showHistory ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
               </button>
 
               {showHistory && (
-                <div className="mt-4 space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                <div className="px-5 pb-5 border-t border-border/40 pt-4 space-y-3 max-h-[400px] overflow-y-auto">
                   {quizHistory.map((quiz, idx) => {
                     const date = new Date(quiz.answered_at);
                     const prevQuiz = quizHistory[idx + 1];
@@ -632,14 +638,14 @@ const Dashboard = () => {
                         )}
                         <div className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
                           quiz.is_correct 
-                            ? 'bg-green-500/5 border-green-500/20' 
+                            ? 'bg-success/5 border-success/20' 
                             : 'bg-destructive/5 border-destructive/20'
                         }`}>
                           <div className={`mt-0.5 rounded-full p-1 ${
-                            quiz.is_correct ? 'bg-green-500/20' : 'bg-destructive/20'
+                            quiz.is_correct ? 'bg-success/20' : 'bg-destructive/20'
                           }`}>
                             {quiz.is_correct 
-                              ? <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400" />
+                              ? <CheckCircle2 className="w-4 h-4 text-success" />
                               : <XCircle className="w-4 h-4 text-destructive" />
                             }
                           </div>
@@ -650,7 +656,7 @@ const Dashboard = () => {
                                 <p className="text-xs text-destructive">
                                   Your answer: <span className="font-medium">{quiz.selected_answer}</span>
                                 </p>
-                                <p className="text-xs text-green-600 dark:text-green-400">
+                                <p className="text-xs text-success">
                                   Correct: <span className="font-medium">{quiz.correct_answer}</span>
                                 </p>
                               </div>
@@ -661,7 +667,7 @@ const Dashboard = () => {
                               </span>
                               <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
                                 quiz.is_correct 
-                                  ? 'bg-green-500/10 text-green-600 dark:text-green-400' 
+                                  ? 'bg-success/10 text-success' 
                                   : 'bg-destructive/10 text-destructive'
                               }`}>
                                 {quiz.is_correct ? "+10 pts" : "+2 pts"}
@@ -678,53 +684,53 @@ const Dashboard = () => {
           </Card>
         )}
 
-        <div className="space-y-4">
-          <h3 className="text-xl font-semibold flex items-center gap-2 animate-fade-in" style={{ animationDelay: '0.2s' }}>
-            <BookOpen className="w-5 h-5 text-primary" />
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <BookOpen className="w-4 h-4 text-primary" />
             Your Learning Journey
-          </h3>
+          </h2>
           
           {loading ? (
-            <Card className="glass-card animate-fade-in">
+            <Card className="surface-panel border-0">
               <CardContent className="py-8 text-center text-muted-foreground">
                 <div className="inline-block w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mb-2" />
-                <p>Loading your topics...</p>
+                <p className="text-sm">Loading your topics...</p>
               </CardContent>
             </Card>
           ) : topics.length === 0 ? (
-            <Card className="glass-card animate-fade-in">
-              <CardContent className="py-8 text-center text-muted-foreground">
+            <Card className="surface-panel border-0">
+              <CardContent className="py-8 text-center text-sm text-muted-foreground">
                 No topics yet. Add your first topic above!
               </CardContent>
             </Card>
           ) : (
-            topics.map((topic, index) => (
-              <Card key={topic.id} className="glass-card float-hover animate-fade-in" style={{ animationDelay: `${0.3 + index * 0.05}s` }}>
+            topics.map((topic) => (
+              <Card key={topic.id} className="surface-panel border-0 transition-shadow hover:shadow-md">
                 <CardContent className="py-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <TruncatedText text={topic.title} maxLength={60} className="font-semibold text-lg mb-1 text-foreground" />
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex-1 min-w-0">
+                      <TruncatedText text={topic.title} maxLength={60} className="font-semibold text-base mb-1 text-foreground" />
                       {topic.description && (
                         <TruncatedText text={topic.description} maxLength={120} />
                       )}
-                       <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                        <div className="flex items-center gap-1">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-muted/70 px-2.5 py-0.5">
                           <Calendar className="w-3 h-3" />
                           Learned: {formatDate(topic.learned_date)}
-                        </div>
-                        <div className="flex items-center gap-1">
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 font-medium">
                           <Calendar className="w-3 h-3" />
-                          Next Review: {formatDateTime(topic.next_revision_date)}
-                        </div>
+                          Next: {formatDateTime(topic.next_revision_date)}
+                        </span>
                         {topic.is_daily && (
-                          <span className="glossy-badge px-3 py-1 text-primary rounded-full text-xs font-medium">
+                          <span className="rounded-full bg-accent/15 text-accent px-2.5 py-0.5 font-medium">
                             Daily
                           </span>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1 mr-2">
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1 mr-1">
                         <Switch
                           checked={topic.is_daily || false}
                           onCheckedChange={(checked) => handleToggleDaily(topic.id, checked)}
@@ -930,7 +936,7 @@ const Dashboard = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </AppShell>
   );
 };
 
