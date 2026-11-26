@@ -1,9 +1,10 @@
 """End-to-end automated training entrypoint.
 
-Trains Logistic Regression, Balanced Random Forest and LightGBM (XGBoost
-fallback), evaluates them chronologically against the always-positive baseline,
-the rule engine and the previous ML model, then registers every valid model as
-a CANDIDATE. Nothing is ever auto-promoted.
+Trains a 10-model quantitative tournament (Logistic Regression, ElasticNet,
+Balanced Random Forest, Extra Trees, LightGBM, XGBoost, CatBoost,
+HistGradientBoosting, MLP Neural Net, and Consensus Soft-Voting Ensemble),
+evaluates them chronologically against baselines, then registers every valid
+model as a CANDIDATE. Nothing is ever auto-promoted.
 """
 from __future__ import annotations
 
@@ -18,8 +19,10 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import ExtraTreesClassifier, HistGradientBoostingClassifier, VotingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -37,7 +40,7 @@ def build_preprocessor() -> ColumnTransformer:
     boo = Pipeline([("impute", SimpleImputer(strategy="most_frequent"))])
     cat = Pipeline([
         ("impute", SimpleImputer(strategy="constant", fill_value="unknown")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=10)),
+        ("onehot", OneHotEncoder(handle_unknown="ignore", min_frequency=10, sparse_output=False)),
     ])
     return ColumnTransformer([
         ("num", num, features.NUMERIC_FEATURES),
@@ -47,8 +50,35 @@ def build_preprocessor() -> ColumnTransformer:
 
 
 def candidate_estimators():
+    lr = LogisticRegression(max_iter=2000, class_weight="balanced", C=0.5)
+    enet = LogisticRegression(
+        penalty="elasticnet", solver="saga", l1_ratio=0.5, C=0.5,
+        max_iter=2000, class_weight="balanced", random_state=42,
+    )
+    et = ExtraTreesClassifier(
+        n_estimators=400, max_depth=8, min_samples_leaf=15,
+        class_weight="balanced", random_state=42, n_jobs=-1,
+    )
+    hgb = HistGradientBoostingClassifier(
+        max_iter=300, learning_rate=0.03, max_depth=5, min_samples_leaf=20,
+        class_weight="balanced", random_state=42,
+    )
+    mlp = MLPClassifier(
+        hidden_layer_sizes=(64, 32), activation="relu", alpha=1e-2,
+        max_iter=500, early_stopping=True, random_state=42,
+    )
     est = [
-        ("logistic_regression", LogisticRegression(max_iter=2000, class_weight="balanced", C=0.5)),
+        ("logistic_regression", lr),
+        ("elastic_net", enet),
+        ("extra_trees", et),
+        ("hist_gradient_boosting", hgb),
+        ("mlp_neural_net", mlp),
+    ]
+    ensemble_members = [
+        ("lr", LogisticRegression(max_iter=2000, class_weight="balanced", C=0.5)),
+        ("et", ExtraTreesClassifier(n_estimators=200, max_depth=8, min_samples_leaf=15, class_weight="balanced", random_state=42, n_jobs=-1)),
+        ("hgb", HistGradientBoostingClassifier(max_iter=200, learning_rate=0.03, max_depth=5, min_samples_leaf=20, class_weight="balanced", random_state=42)),
+        ("mlp", MLPClassifier(hidden_layer_sizes=(64, 32), activation="relu", alpha=1e-2, max_iter=400, early_stopping=True, random_state=42)),
     ]
     try:
         from imblearn.ensemble import BalancedRandomForestClassifier
@@ -64,15 +94,31 @@ def candidate_estimators():
         est.append(("lightgbm", LGBMClassifier(
             n_estimators=400, learning_rate=0.03, num_leaves=15, min_child_samples=30,
             subsample=0.8, colsample_bytree=0.8, class_weight="balanced", random_state=42, verbose=-1)))
-    except Exception:
-        try:
-            from xgboost import XGBClassifier
+        ensemble_members.append(("lgbm", LGBMClassifier(
+            n_estimators=200, learning_rate=0.03, num_leaves=15, min_child_samples=30,
+            subsample=0.8, colsample_bytree=0.8, class_weight="balanced", random_state=42, verbose=-1)))
+    except Exception as exc:  # pragma: no cover
+        print(f"[train] LightGBM unavailable: {exc}")
+    try:
+        from xgboost import XGBClassifier
 
-            est.append(("xgboost", XGBClassifier(
-                n_estimators=400, learning_rate=0.03, max_depth=4, subsample=0.8,
-                colsample_bytree=0.8, eval_metric="logloss", random_state=42)))
-        except Exception as exc:  # pragma: no cover
-            print(f"[train] neither LightGBM nor XGBoost available: {exc}")
+        est.append(("xgboost", XGBClassifier(
+            n_estimators=400, learning_rate=0.03, max_depth=4, subsample=0.8,
+            colsample_bytree=0.8, eval_metric="logloss", random_state=42)))
+        ensemble_members.append(("xgb", XGBClassifier(
+            n_estimators=200, learning_rate=0.03, max_depth=4, subsample=0.8,
+            colsample_bytree=0.8, eval_metric="logloss", random_state=42)))
+    except Exception as exc:  # pragma: no cover
+        print(f"[train] XGBoost unavailable: {exc}")
+    try:
+        from catboost import CatBoostClassifier
+
+        est.append(("catboost", CatBoostClassifier(
+            iterations=400, learning_rate=0.03, depth=5,
+            auto_class_weights="Balanced", random_seed=42, verbose=0)))
+    except Exception as exc:  # pragma: no cover
+        print(f"[train] CatBoost unavailable: {exc}")
+    est.append(("consensus_ensemble", VotingClassifier(estimators=ensemble_members, voting="soft")))
     return est
 
 
@@ -215,19 +261,22 @@ def main() -> int:
         results = []
         version_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         for name, est in candidate_estimators():
-            pipe = Pipeline([("pre", build_preprocessor()), ("model", est)])
-            pipe.fit(parts["train"][cols], y["train"])  # preprocessing fit on TRAIN only
-            metrics = {}
-            for split in ("train", "val", "test"):
-                if len(parts[split]) == 0:
-                    continue
-                proba = pipe.predict_proba(parts[split][cols])[:, 1]
-                metrics[split] = evaluate(y[split], proba, groups[split], rets[split], dds[split],
-                                          tie_break=ties[split])
-            log(f"[train] {name}: val pr_auc={metrics.get('val', {}).get('pr_auc', float('nan')):.3f} "
-                f"val p@3={metrics.get('val', {}).get('precision_at_3', float('nan')):.3f} | "
-                f"test pr_auc={metrics['test']['pr_auc']:.3f} (report only)")
-            results.append({"name": name, "pipeline": pipe, "metrics": metrics})
+            try:
+                pipe = Pipeline([("pre", build_preprocessor()), ("model", est)])
+                pipe.fit(parts["train"][cols], y["train"])  # preprocessing fit on TRAIN only
+                metrics = {}
+                for split in ("train", "val", "test"):
+                    if len(parts[split]) == 0:
+                        continue
+                    proba = pipe.predict_proba(parts[split][cols])[:, 1]
+                    metrics[split] = evaluate(y[split], proba, groups[split], rets[split], dds[split],
+                                              tie_break=ties[split])
+                log(f"[train] {name}: val pr_auc={metrics.get('val', {}).get('pr_auc', float('nan')):.3f} "
+                    f"val p@3={metrics.get('val', {}).get('precision_at_3', float('nan')):.3f} | "
+                    f"test pr_auc={metrics['test']['pr_auc']:.3f} (report only)")
+                results.append({"name": name, "pipeline": pipe, "metrics": metrics})
+            except Exception as exc:  # pragma: no cover
+                log(f"[train] {name} failed (isolated): {type(exc).__name__}: {exc}")
 
         if not results:
             raise RuntimeError("no estimators could be trained")

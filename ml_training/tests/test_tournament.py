@@ -85,3 +85,40 @@ def test_registry_log_predictions_batches_and_caps(monkeypatch):
     )
     assert sent_sizes == [4, 4, 2]
     assert res == {"inserted": 10, "batches": 3}
+
+
+def test_candidate_estimators_include_expanded_tournament_and_fit():
+    from sklearn.pipeline import Pipeline
+    from ml_training import features, train
+
+    est_list = train.candidate_estimators()
+    names = [name for name, _ in est_list]
+    for required in (
+        "logistic_regression",
+        "elastic_net",
+        "extra_trees",
+        "hist_gradient_boosting",
+        "mlp_neural_net",
+        "consensus_ensemble",
+    ):
+        assert required in names, f"missing required model {required}"
+
+    rng = np.random.default_rng(7)
+    n = 80
+    row_data: dict[str, object] = {}
+    for col in features.NUMERIC_FEATURES:
+        row_data[col] = rng.normal(size=n)
+    for col in features.BOOLEAN_FEATURES:
+        row_data[col] = rng.integers(0, 2, size=n).astype(float)
+    for col in features.CATEGORICAL_FEATURES:
+        row_data[col] = rng.choice(["a", "b", "c"], size=n)
+    X = pd.DataFrame(row_data)
+    y = (rng.random(n) > 0.5).astype(int)
+    y[0], y[1] = 0, 1
+
+    for name, est in est_list:
+        pipe = Pipeline([("pre", train.build_preprocessor()), ("model", est)])
+        pipe.fit(X, y)
+        probs = pipe.predict_proba(X[:10])[:, 1]
+        assert probs.shape == (10,), f"{name} bad shape"
+        assert np.all(np.isfinite(probs)) and np.all((probs >= 0.0) & (probs <= 1.0)), f"{name} invalid probs"
