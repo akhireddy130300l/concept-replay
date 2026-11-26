@@ -1,5 +1,5 @@
-// Daily 5:30 PM Eastern recap: today's hourly words woven into one short story/conversation.
-// One Gemini call per day. Auth: x-cron-secret. Cron fires at :30 of 21 and 22 UTC; gated to 17:xx Eastern (DST-safe).
+// Daily 10:30 PM Eastern recap: today's hourly words woven into one short story/conversation.
+// One Gemini call per day. Auth: x-cron-secret. UTC callbacks at 02:30/03:30 use the previous Eastern date.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { conversationSpeechRequest, pcmToWav } from "./recap-audio.ts";
@@ -7,15 +7,10 @@ import { distinctPhrases } from "../_shared/english-practice.ts";
 import { LEARNING_LINK_SECONDS } from "../_shared/automation-policy.ts";
 import { sendRecordedEmail } from "../_shared/recorded-email.ts";
 import { z } from "npm:zod@3";
+import { easternLearningTime, eligibleRecap, FIRST_ENGLISH_HOUR, LAST_ENGLISH_HOUR } from "../_shared/english-schedule.ts";
 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-function easternNow() {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" })
-    .formatToParts(new Date()).map((x) => [x.type, x.value]));
-  return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
-}
 
 type W = { word: string; pronunciation: string; meaning: string; sentence: string; et_hour: number };
 type Line = { speaker: string; line: string };
@@ -78,8 +73,8 @@ Deno.serve(async (req) => {
   const parsed = z.object({ force: z.boolean().optional() }).strict().safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return json({ error: "Invalid request" }, 400);
   const body = parsed.data;
-  const { date, hour } = easternNow();
-  if (!body?.force && hour !== 17) return json({ skipped: "not_530_eastern", hour });
+  const { date, hour, minute } = easternLearningTime();
+  if (!body?.force && !eligibleRecap(hour, minute)) return json({ skipped: "outside_recap_schedule", hour, minute });
 
   const lockName = `american-recap-${date}`;
   const lock = await admin.rpc("try_acquire_run_lock", { _name: lockName, _seconds: 300 });
@@ -91,7 +86,7 @@ Deno.serve(async (req) => {
   if (ex?.sent_ok) return json({ skipped: "already_sent", date });
 
   const { data: practiced, error: practiceError } = await admin.from("american_word_emails").select("word,pronunciation,meaning,sentence,et_hour")
-    .eq("sent_for", date).eq("sent_ok", true).gte("et_hour", 9).lte("et_hour", 17).order("et_hour");
+    .eq("sent_for", date).eq("sent_ok", true).gte("et_hour", FIRST_ENGLISH_HOUR).lte("et_hour", LAST_ENGLISH_HOUR).order("et_hour");
   if (practiceError) return json({ error: "practice_history_unavailable" }, 503);
   const words = distinctPhrases(practiced ?? []);
   if (!words.length) return json({ skipped: "no_words_today", date });

@@ -11,3 +11,4 @@
 - [x] Add shadow model confidence tiers and validated fresh, liquid prices
 - [x] Harden delivery idempotency and extend private learning links to seven days
 - [x] Run regression tests, deploy changed functions, and verify dashboard controls signed in; 53 frontend/helper, 47 training, and one backend test passed; both test deliveries accepted without schedule changes
+- [x] Shift all nine English emails and recap to the evening timetable, retain catch-up and deduplication, test Eastern-day rollover, deploy and verify schedules; 82 tests passed. Next scheduled inbox delivery has not yet been observed.

@@ -1,6 +1,6 @@
-// Hourly American word email: 9 AM–5 PM Eastern. One Gemini call per email.
+// Hourly American word email: 2:10 PM–10 PM Eastern. One Gemini call per email.
 // New phrases never repeat; labelled reviews use fresh situations and sentences.
-// Auth: x-cron-secret. Cron fires hourly 13–22 UTC; this function gates on Eastern hour (DST-safe).
+// Auth: x-cron-secret. UTC callbacks span midnight; Eastern calendar gates are DST-safe.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
@@ -9,6 +9,7 @@ import { PLAN, eligibleHour, pickReview, shouldIntroduce } from "./learning-plan
 import { z } from "npm:zod@3";
 import { testDeliveryKey } from "../_shared/automation-policy.ts";
 import { sendRecordedEmail } from "../_shared/recorded-email.ts";
+import { easternLearningTime, FIRST_ENGLISH_HOUR, hasLegacyLearningDay } from "../_shared/english-schedule.ts";
 
 type SavedItem = Item & { id: string; sent_for: string; et_hour: number; kind: string; review_of: string | null };
 
@@ -22,13 +23,6 @@ const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { sta
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 type Item = { word: string; pronunciation: string; meaning: string; sentence: string; situation?: string };
-
-function easternNow() {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" })
-    .formatToParts(new Date()).map((x) => [x.type, x.value]));
-  const minute = new Date().getUTCMinutes();
-  return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour), minute };
-}
 
 export const THEMES = [
   "ordering at a drive-thru or fast-casual place like Chipotle",
@@ -140,7 +134,7 @@ function render(it: Item, hourLabel: string, audioUrl: string | null, kind: stri
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;padding:24px 0;"><tr><td align="center">
 <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:16px;padding:28px;"><tr><td>
-<div style="font-size:12px;text-transform:uppercase;color:#0891b2;font-weight:700;">${kind === "new" ? "New American expression" : hour === 9 ? "Morning recall challenge" : hour >= 15 ? "Try it in a new situation" : "Spaced recall"} · ${esc(hourLabel)}</div>
+<div style="font-size:12px;text-transform:uppercase;color:#0891b2;font-weight:700;">${kind === "new" ? "New American expression" : hour === FIRST_ENGLISH_HOUR ? "Afternoon recall challenge" : hour >= 20 ? "Try it in a new situation" : "Spaced recall"} · ${esc(hourLabel)}</div>
 <div style="font-size:22px;font-weight:700;color:#0f172a;margin:18px 0 12px;">What would you say?</div>
 <div style="font-size:18px;line-height:1.6;color:#334155;">${esc(it.situation || "Think of a natural American way to express this idea: " + it.meaning)}</div>
 <p style="color:#0891b2;font-weight:700;">Say your answer out loud before scrolling down.</p>
@@ -173,7 +167,7 @@ Deno.serve(async (req) => {
   const body = parsed.data;
   const testRow = body.test_row ?? null;
   if (body.test_user_id && (!testRow || !body.test_request_id)) return json({ error: "Incomplete test request" }, 400);
-  const now = easternNow();
+  const now = easternLearningTime();
   const { minute } = now;
   let { date, hour } = now;
   if (testRow) {
@@ -188,6 +182,11 @@ Deno.serve(async (req) => {
   if (lock.error) return json({ error: "delivery_lock_unavailable" }, 503);
   if (!lock.data) return json({ skipped: "concurrent_run" });
   try {
+  if (!testRow) {
+    const { data: todayDeliveries, error: transitionError } = await admin.from("american_word_emails").select("et_hour,sent_ok").eq("sent_for", date);
+    if (transitionError) throw new Error("Cannot check daily schedule transition");
+    if (hasLegacyLearningDay(todayDeliveries ?? [])) return json({ skipped: "legacy_schedule_already_served", date });
+  }
   const { data: existing, error: existingError } = await admin.from("american_word_emails").select("id,sent_ok").eq("sent_for", date).eq("et_hour", hour).maybeSingle();
   if (existingError) throw new Error("Cannot read hourly delivery");
   if (existing?.sent_ok && !body.dry_run && !testRow) return json({ skipped: "already_sent", date, hour });
@@ -244,7 +243,7 @@ Deno.serve(async (req) => {
         if (!c?.word || !c?.sentence || !c?.pronunciation || !c?.meaning || !c?.situation || (introduce && usedKeys.has(c.word.trim().toLowerCase()))) continue;
         if (c.situation.toLowerCase().includes(c.word.toLowerCase())) continue;
         if (!introduce && !c.sentence.toLowerCase().includes(c.word.toLowerCase())) continue;
-        if (body.dry_run) return json({ ok: true, dry_run: true, date, hour, kind, review_of: parent?.id ?? null, word: c.word, situation: c.situation, sentence: c.sentence, html: render(c, `${((hour + 11) % 12) + 1}${hour === 9 ? ":10" : ":00"} ${hour < 12 ? "AM" : "PM"} ET`, null, kind, hour), delivered: false });
+        if (body.dry_run) return json({ ok: true, dry_run: true, date, hour, kind, review_of: parent?.id ?? null, word: c.word, situation: c.situation, sentence: c.sentence, html: render(c, `${((hour + 11) % 12) + 1}${hour === FIRST_ENGLISH_HOUR ? ":10" : ":00"} ${hour < 12 ? "AM" : "PM"} ET`, null, kind, hour), delivered: false });
         const { data, error } = await admin.from("american_word_emails").insert({ word: c.word.trim(), pronunciation: c.pronunciation, meaning: c.meaning, sentence: c.sentence.trim(), situation: c.situation.trim(), kind, review_of: introduce ? null : parent?.id, sent_for: date, et_hour: hour }).select("id").single();
         if (!error) { row = { id: data.id, sent_ok: false }; item = c; reviewOf = introduce ? null : parent?.id ?? null; break outer; }
         if (error.code === "23505" && error.message.includes("sent_for")) return json({ skipped: "concurrent_run" });
@@ -295,8 +294,8 @@ Deno.serve(async (req) => {
     }
   } catch (e) { console.log(JSON.stringify({ phase: "word_picture", error: String(e).slice(0, 200) })); }
 
-  const hourLabel = `${((hour + 11) % 12) + 1}${hour === 9 ? ":10" : ":00"} ${hour < 12 ? "AM" : "PM"} ET`;
-  const label = kind === "new" ? "New American expression" : hour === 9 ? "Morning recall challenge" : hour >= 15 ? "Try it in a new situation" : "Spaced recall challenge";
+  const hourLabel = `${((hour + 11) % 12) + 1}${hour === FIRST_ENGLISH_HOUR ? ":10" : ":00"} ${hour < 12 ? "AM" : "PM"} ET`;
+  const label = kind === "new" ? "New American expression" : hour === FIRST_ENGLISH_HOUR ? "Afternoon recall challenge" : hour >= 20 ? "Try it in a new situation" : "Spaced recall challenge";
   const subject = `${testRow ? "[TEST] " : ""}${label}: what would you say? (${hourLabel})`;
   const html = render(item, hourLabel, audioUrl, kind, hour, imageUrl);
   for (const recipient of recipients) {

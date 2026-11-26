@@ -1,19 +1,20 @@
-// Daily learning plan for the nine hourly English emails (Eastern hours 9–17).
+// Daily learning plan for the nine hourly English emails (Eastern hours 14–22).
 // Only 3 hours introduce a new phrase; every other hour reviews an older one.
+import { FIRST_ENGLISH_HOUR, FIRST_ENGLISH_MINUTE, LAST_ENGLISH_HOUR } from "../_shared/english-schedule.ts";
 export type Slot =
   | { kind: "new" }
   | { kind: "review"; source: "yesterday" | "days_ago" | "today"; minDaysAgo?: number; todayHour?: number };
 
 export const PLAN: Record<number, Slot> = {
-  9: { kind: "review", source: "yesterday" },            // 9:10 AM morning recall challenge
-  10: { kind: "review", source: "days_ago", minDaysAgo: 3 },
-  11: { kind: "review", source: "days_ago", minDaysAgo: 7 },
-  12: { kind: "new" },
-  13: { kind: "new" },
-  14: { kind: "new" },
-  15: { kind: "review", source: "today", todayHour: 12 },
-  16: { kind: "review", source: "today", todayHour: 13 },
-  17: { kind: "review", source: "today", todayHour: 14 },
+  14: { kind: "review", source: "yesterday" },            // 2:10 PM recall challenge
+  15: { kind: "review", source: "days_ago", minDaysAgo: 3 },
+  16: { kind: "review", source: "days_ago", minDaysAgo: 7 },
+  17: { kind: "new" },
+  18: { kind: "new" },
+  19: { kind: "new" },
+  20: { kind: "review", source: "today", todayHour: 17 },
+  21: { kind: "review", source: "today", todayHour: 18 },
+  22: { kind: "review", source: "today", todayHour: 19 },
 };
 
 export const NEW_PER_DAY = Object.values(PLAN).filter((s) => s.kind === "new").length;
@@ -21,7 +22,9 @@ export const NEW_PER_DAY = Object.values(PLAN).filter((s) => s.kind === "new").l
 export type Phrase = { id: string; sent_for: string; et_hour: number };
 
 export function eligibleHour(hour: number, minute: number): boolean {
-  return Number.isInteger(hour) && hour >= 9 && hour <= 17 && (hour !== 9 || minute >= 10);
+  return Number.isInteger(hour) && Number.isInteger(minute) && minute >= 0 && minute < 60
+    && hour >= FIRST_ENGLISH_HOUR && hour <= LAST_ENGLISH_HOUR
+    && (hour !== FIRST_ENGLISH_HOUR || minute >= FIRST_ENGLISH_MINUTE);
 }
 
 export function shouldIntroduce(slot: Slot, newToday: number, hasReview: boolean): boolean {
