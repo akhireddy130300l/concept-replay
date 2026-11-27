@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import types
 import numpy as np
 import pandas as pd
@@ -85,6 +86,39 @@ def test_registry_log_predictions_batches_and_caps(monkeypatch):
     )
     assert sent_sizes == [4, 4, 2]
     assert res == {"inserted": 10, "batches": 3}
+
+
+def test_registry_converts_non_finite_numbers_to_strict_json_null(monkeypatch):
+    captured = {}
+
+    class _Response:
+        ok = True
+
+        def json(self):
+            return {"ok": True}
+
+    def _fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return _Response()
+
+    monkeypatch.setattr(registry.requests, "post", _fake_post)
+    registry._post(
+        Settings(functions_url="http://x", ml_training_key="k"),
+        "register_model",
+        {
+            "hyperparameters": {
+                "missing": float("nan"),
+                "nested": [float("inf"), float("-inf"), 1.25],
+                "numpy_value": np.float64(float("nan")),
+            }
+        },
+    )
+
+    payload = captured["json"]
+    assert payload["hyperparameters"]["missing"] is None
+    assert payload["hyperparameters"]["nested"] == [None, None, 1.25]
+    assert payload["hyperparameters"]["numpy_value"] is None
+    json.dumps(payload, allow_nan=False)
 
 
 def test_candidate_estimators_include_expanded_tournament_and_fit():

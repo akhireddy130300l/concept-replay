@@ -1,6 +1,7 @@
 """Registry client — all writes go through the ml-model-registry edge function."""
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import requests
@@ -8,12 +9,29 @@ import requests
 from .config import Settings
 
 
+def _json_safe(value: Any) -> Any:
+    """Convert non-finite numbers to null so every estimator payload is strict JSON."""
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    # NumPy scalar parameters are common in estimator settings and metrics.
+    item = getattr(value, "item", None)
+    if callable(item):
+        scalar = item()
+        if scalar is not value:
+            return _json_safe(scalar)
+    return value
+
+
 def _post(settings: Settings, action: str, payload: dict) -> dict:
     resp = requests.post(
         f"{settings.functions_url}/ml-model-registry",
         params={"action": action},
         headers={"x-ml-key": settings.ml_training_key, "content-type": "application/json"},
-        json=payload,
+        json=_json_safe(payload),
         timeout=120,
     )
     if not resp.ok:
