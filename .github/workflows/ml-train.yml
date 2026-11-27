@@ -24,7 +24,9 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r ml_training/requirements.txt
+        run: |
+          pip install -r ml_training/requirements.txt
+          pip check
 
       - name: Unit tests (splits, leakage guard, metrics)
         run: python -m pytest ml_training/tests -q

@@ -115,7 +115,8 @@ def candidate_estimators():
 
         est.append(("catboost", CatBoostClassifier(
             iterations=400, learning_rate=0.03, depth=5,
-            auto_class_weights="Balanced", random_seed=42, verbose=0)))
+            auto_class_weights="Balanced", allow_writing_files=False,
+            random_seed=42, verbose=0)))
     except Exception as exc:  # pragma: no cover
         print(f"[train] CatBoost unavailable: {exc}")
     est.append(("consensus_ensemble", VotingClassifier(estimators=ensemble_members, voting="soft")))
