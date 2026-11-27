@@ -160,7 +160,7 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[image:var(--gradient-hero)] p-4">
-      <Card className="w-full max-w-md glass-card animate-scale-in">
+      <Card className="w-full max-w-md surface-panel animate-scale-in">
         <CardHeader className="space-y-1 text-center">
           <div className="flex justify-center mb-4">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-[var(--shadow-button)] animate-glow-pulse">

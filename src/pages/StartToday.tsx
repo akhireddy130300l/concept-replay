@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { AppShell } from "@/components/layouts/AppShell";
+import { PageHeader } from "@/components/layouts/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -240,27 +242,21 @@ const StartToday = () => {
   });
 
   return (
-    <div className="min-h-screen bg-background text-foreground px-4 py-6 sm:px-6">
+    <AppShell>
       <div className="max-w-4xl mx-auto space-y-6">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" onClick={() => navigate("/dashboard")} className="glass-card border-border/50">
-              <ArrowLeft className="w-4 h-4 mr-1.5" /> Dashboard
+        <PageHeader
+          eyebrow="Future Regret Radar"
+          title="Start Today"
+          subtitle="Anyone can learn or start anything."
+          actions={
+            <Button variant="outline" size="sm" onClick={handleSendDailyEmail} disabled={sendingEmail} className="surface-panel">
+              {sendingEmail ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Mail className="w-4 h-4 mr-1.5" />}
+              Send Today&apos;s Email
             </Button>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-semibold tracking-tight flex items-center gap-2">
-                <Compass className="w-5 h-5 text-primary" /> Start Today
-              </h1>
-              <p className="text-xs sm:text-sm text-muted-foreground">Future Regret Radar · Anyone can learn or start anything</p>
-            </div>
-          </div>
-          <Button variant="outline" size="sm" onClick={handleSendDailyEmail} disabled={sendingEmail} className="glass-card border-border/50">
-            {sendingEmail ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Mail className="w-4 h-4 mr-1.5" />}
-            Send Today&apos;s Email
-          </Button>
-        </header>
+          }
+        />
 
-        <form onSubmit={handleAsk} className="glass-card rounded-2xl p-4 sm:p-5 space-y-3">
+        <form onSubmit={handleAsk} className="surface-panel p-4 sm:p-5 space-y-3">
           <label className="text-sm font-medium block">Ask anything — what do you want to get into?</label>
           <div className="flex flex-col sm:flex-row gap-2">
             <Input
@@ -433,7 +429,7 @@ const StartToday = () => {
           </div>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 };
 

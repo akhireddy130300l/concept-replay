@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { FunctionsHttpError } from "@supabase/supabase-js";
+import { AppShell } from "@/components/layouts/AppShell";
+import { PageHeader } from "@/components/layouts/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -137,16 +139,15 @@ export default function AmericanShadow() {
   if (!ready) return null;
 
   return (
-    <div className="shadow-theme min-h-screen text-foreground bg-[image:var(--shadow-gradient)] bg-background">
-      <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-        <div className="mx-auto max-w-3xl px-4 py-3 flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")} aria-label="Back"><ArrowLeft className="h-5 w-5" /></Button>
-          <Headphones className="h-6 w-6 text-primary" />
-          <h1 className="text-lg font-semibold tracking-tight">American Shadow</h1>
-        </div>
-      </header>
+    <AppShell themeClass="shadow-theme">
+      <div className="mx-auto max-w-3xl">
+        <PageHeader
+          eyebrow="Continuous Shadowing"
+          title="American Shadow"
+          subtitle="Speak along about one second behind a natural American speaker for 10 minutes."
+        />
 
-      <main className="mx-auto max-w-3xl px-4 py-6 pb-24">
+        <main>
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="grid grid-cols-3 w-full h-12 mb-6">
             <TabsTrigger value="practice" className="h-10">Practice</TabsTrigger>
@@ -266,6 +267,7 @@ export default function AmericanShadow() {
           </TabsContent>
         </Tabs>
       </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }

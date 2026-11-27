@@ -2,6 +2,8 @@ import { useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { AppShell } from "@/components/layouts/AppShell";
+import { PageHeader } from "@/components/layouts/PageHeader";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -130,23 +132,35 @@ export default function MLTraining() {
   const statsUnavailable = !!loadError && stats.total === 0;
 
 
-  if (examples === null) return <div className="p-8">Loading ML training data…</div>;
+  if (examples === null) {
+    return (
+      <AppShell>
+        <div className="min-h-[60vh] flex items-center justify-center text-muted-foreground">
+          Loading ML training data…
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-background p-6 space-y-6 max-w-6xl mx-auto">
-      <header>
-        <h1 className="text-2xl font-semibold">ML Training Data</h1>
-        <p className="text-sm text-muted-foreground">Foundation dashboard — collecting labeled examples. No model deployed yet.</p>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Button size="sm" variant="outline" onClick={refreshAll}>Refresh</Button>
-          <span className="text-xs text-muted-foreground">
-            {lastLoadedAt ? `Updated ${lastLoadedAt.toLocaleTimeString()}` : "Not loaded yet"} ·{" "}
-            {tabVisible
-              ? `auto-refresh every ${Math.round(COST_LIMITS.minPollIntervalMs / 1000)}s`
-              : "auto-refresh paused (tab hidden)"}
-          </span>
-        </div>
-      </header>
+    <AppShell>
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="ML Lab"
+          title="ML Training Data"
+          subtitle="Foundation dashboard — collecting labeled examples. No model deployed yet."
+          actions={
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs text-muted-foreground">
+                {lastLoadedAt ? `Updated ${lastLoadedAt.toLocaleTimeString()}` : "Not loaded yet"} ·{" "}
+                {tabVisible
+                  ? `auto-refresh every ${Math.round(COST_LIMITS.minPollIntervalMs / 1000)}s`
+                  : "auto-refresh paused (tab hidden)"}
+              </span>
+              <Button size="sm" variant="outline" onClick={refreshAll}>Refresh</Button>
+            </div>
+          }
+        />
 
       {loadError && (
         <Card className="border-destructive">
@@ -299,6 +313,7 @@ export default function MLTraining() {
       </Card>
 
       <p className="text-xs text-muted-foreground">Not financial advice. This dashboard tracks data collection only.</p>
-    </div>
+      </div>
+    </AppShell>
   );
 }

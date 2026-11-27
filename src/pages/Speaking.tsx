@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { AppShell } from "@/components/layouts/AppShell";
+import { PageHeader } from "@/components/layouts/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -899,9 +901,11 @@ const Speaking = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[image:var(--gradient-hero)]">
-        <p className="text-muted-foreground">Loading your speaking gym…</p>
-      </div>
+      <AppShell>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <p className="text-muted-foreground">Loading your speaking gym…</p>
+        </div>
+      </AppShell>
     );
   }
 
@@ -943,34 +947,29 @@ const Speaking = () => {
                                 "bg-muted border-border text-muted-foreground";
 
   return (
-    <div className="min-h-screen bg-[image:var(--gradient-hero)] pb-20">
-      <header className="glass-card sticky top-0 z-10 border-b border-border/30">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")} aria-label="Back">
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <div>
-              <div className="text-xs uppercase tracking-wider text-muted-foreground">Influence Speaking Gym</div>
-              <div className="text-lg font-semibold">Daily 10-minute session</div>
+    <AppShell>
+      <div className="max-w-3xl mx-auto">
+        <PageHeader
+          eyebrow="Influence Speaking Gym"
+          title="Daily 10-minute session"
+          actions={
+            <div className="flex items-center gap-3 text-sm surface-panel px-3.5 py-2">
+              <div className="flex items-center gap-1.5">
+                <Flame className="w-4 h-4 text-warning" />
+                <span className="font-semibold">{state?.current_streak ?? 0}</span>
+                <span className="text-muted-foreground">streak</span>
+              </div>
+              <span className="text-border">·</span>
+              <div className="flex items-center gap-1.5">
+                <Trophy className="w-4 h-4 text-warning" />
+                <span className="font-semibold">{state?.longest_streak ?? 0}</span>
+                <span className="text-muted-foreground">best</span>
+              </div>
             </div>
-          </div>
-          <div className="flex items-center gap-4 text-sm">
-            <div className="flex items-center gap-1.5">
-              <Flame className="w-4 h-4 text-orange-500" />
-              <span className="font-semibold">{state?.current_streak ?? 0}</span>
-              <span className="text-muted-foreground">streak</span>
-            </div>
-            <div className="hidden sm:flex items-center gap-1.5">
-              <Trophy className="w-4 h-4 text-amber-500" />
-              <span className="font-semibold">{state?.longest_streak ?? 0}</span>
-              <span className="text-muted-foreground">best</span>
-            </div>
-          </div>
-        </div>
-      </header>
+          }
+        />
 
-      <main className="container mx-auto px-4 py-6 max-w-3xl">
+        <main>
         {/* Email gate status & toggle */}
         <div className={`border rounded-md px-3 py-2.5 text-sm mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 ${gateToneClass}`}>
           <span>{gateInfo.text}</span>
@@ -1249,7 +1248,8 @@ const Speaking = () => {
           </>
         )}
       </main>
-    </div>
+      </div>
+    </AppShell>
   );
 };
 
