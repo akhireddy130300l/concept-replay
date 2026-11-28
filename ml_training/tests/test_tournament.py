@@ -121,6 +121,36 @@ def test_registry_converts_non_finite_numbers_to_strict_json_null(monkeypatch):
     json.dumps(payload, allow_nan=False)
 
 
+def test_xgboost_missing_parameter_is_strict_json_after_sanitizing():
+    from xgboost import XGBClassifier
+
+    params = XGBClassifier(eval_metric="logloss").get_params()
+    assert np.isnan(params["missing"])
+    safe = registry._json_safe(params)
+    assert safe["missing"] is None
+    json.dumps(safe, allow_nan=False)
+
+
+def test_model_registration_failure_does_not_abort_other_models(monkeypatch):
+    def _fake_register(settings, payload):
+        if payload["algorithm"] == "broken":
+            raise RuntimeError("simulated registration failure")
+        return {"model_version_id": f"mv-{payload['algorithm']}"}
+
+    monkeypatch.setattr(registry, "register_model", _fake_register)
+    candidates = [
+        {"name": name, "payload": {"algorithm": name}}
+        for name in ("first", "broken", "last")
+    ]
+    logs: list[str] = []
+    out = registry.register_models_isolated(
+        Settings(functions_url="http://x", ml_training_key="k"), candidates, logs.append
+    )
+
+    assert [item["model_version_id"] for item in out] == ["mv-first", "mv-last"]
+    assert sum("isolated" in line for line in logs) == 1
+
+
 def test_candidate_estimators_include_expanded_tournament_and_fit():
     from sklearn.pipeline import Pipeline
     from ml_training import features, train

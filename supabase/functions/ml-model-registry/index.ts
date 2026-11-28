@@ -27,7 +27,14 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url);
   const action = url.searchParams.get("action") ?? "";
-  const body = req.method === "POST" ? await req.json().catch(() => ({} as any)) : {};
+  let body: any = {};
+  if (req.method === "POST") {
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: "invalid JSON body" }, 400);
+    }
+  }
 
   try {
     if (action === "start_job") {
@@ -87,13 +94,6 @@ Deno.serve(async (req) => {
         modelId = created.id;
       }
 
-      // Retire older candidate versions for this algorithm so only the latest candidate stays active.
-      await admin
-        .from("model_versions")
-        .update({ status: "retired" })
-        .eq("algorithm", algorithm)
-        .eq("status", "candidate");
-
       const { data: version, error: vErr } = await admin.from("model_versions").insert({
         model_id: modelId,
         version: body.version ?? new Date().toISOString(),
@@ -115,6 +115,15 @@ Deno.serve(async (req) => {
         notes: body.notes ?? null,
       }).select("id").single();
       if (vErr) throw vErr;
+
+      // Retire older candidates only after the replacement is safely stored.
+      const { error: retireError } = await admin
+        .from("model_versions")
+        .update({ status: "retired" })
+        .eq("algorithm", algorithm)
+        .eq("status", "candidate")
+        .neq("id", version.id);
+      if (retireError) throw retireError;
 
       const metricRows: any[] = [];
       for (const split of ["train", "val", "test"]) {

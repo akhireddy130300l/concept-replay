@@ -14,6 +14,7 @@ import io
 import json
 import sys
 from datetime import datetime, timezone
+from typing import Any
 
 import joblib
 import numpy as np
@@ -366,6 +367,7 @@ def main() -> int:
 
         registered = []
         registered_for_shadow: list[dict[str, Any]] = []
+        pending_registrations: list[dict[str, Any]] = []
         for r in results:
             if settings.dry_run:
                 continue
@@ -399,15 +401,21 @@ def main() -> int:
                          f"(ties broken by ticker); survivorship bias present (current universe); "
                          f"candidate only",
             }
-            res = registry.register_model(settings, payload)
-            registered.append({"algorithm": r["name"], "model_version_id": res["model_version_id"]})
-            registered_for_shadow.append({
+            pending_registrations.append({
                 "name": r["name"],
                 "pipeline": r["pipeline"],
-                "model_version_id": res["model_version_id"],
                 "version": payload["version"],
+                "payload": payload,
             })
-            log(f"[train] registered candidate {r['name']} -> {res['model_version_id']}")
+
+        registered_for_shadow = registry.register_models_isolated(settings, pending_registrations, log)
+        registered = [
+            {"algorithm": r["name"], "model_version_id": r["model_version_id"]}
+            for r in registered_for_shadow
+        ]
+
+        if results and not settings.dry_run and not registered_for_shadow:
+            raise RuntimeError("no trained estimators could be registered")
 
         if registered_for_shadow:
             shadow = data.load_unmatured(settings)

@@ -59,6 +59,25 @@ def register_model(settings: Settings, payload: dict) -> dict:
     return _post(settings, "register_model", payload)
 
 
+def register_models_isolated(
+    settings: Settings,
+    candidates: list[dict[str, Any]],
+    log_fn: Any,
+) -> list[dict[str, Any]]:
+    """Register every candidate independently so one failure cannot abort the run."""
+    registered: list[dict[str, Any]] = []
+    for candidate in candidates:
+        name = candidate["name"]
+        try:
+            res = register_model(settings, candidate["payload"])
+            model_version_id = res["model_version_id"]
+            registered.append({**candidate, "model_version_id": model_version_id})
+            log_fn(f"[train] registered candidate {name} -> {model_version_id}")
+        except Exception as exc:
+            log_fn(f"[train] registration failed for {name} (isolated): {type(exc).__name__}: {exc}")
+    return registered
+
+
 def previous_model(settings: Settings) -> dict | None:
     return _post(settings, "previous_model", {}).get("previous_model")
 
