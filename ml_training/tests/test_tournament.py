@@ -160,7 +160,11 @@ def test_candidate_estimators_include_expanded_tournament_and_fit():
     for required in (
         "logistic_regression",
         "elastic_net",
+        "balanced_random_forest",
         "extra_trees",
+        "lightgbm",
+        "xgboost",
+        "catboost",
         "hist_gradient_boosting",
         "mlp_neural_net",
         "consensus_ensemble",
@@ -186,3 +190,18 @@ def test_candidate_estimators_include_expanded_tournament_and_fit():
         probs = pipe.predict_proba(X[:10])[:, 1]
         assert probs.shape == (10,), f"{name} bad shape"
         assert np.all(np.isfinite(probs)) and np.all((probs >= 0.0) & (probs <= 1.0)), f"{name} invalid probs"
+        params = {
+            key: value if isinstance(value, (int, float, str, bool, type(None))) else str(value)
+            for key, value in pipe.named_steps["model"].get_params().items()
+        }
+        json.dumps(registry._json_safe({"hyperparameters": params}), allow_nan=False)
+
+        import base64
+        import gzip
+        import io
+        import joblib
+
+        artifact = train.encode_artifact(pipe)
+        assert artifact["stored"], f"{name} synthetic artifact was not stored"
+        restored = joblib.load(io.BytesIO(gzip.decompress(base64.b64decode(artifact["sklearn_pickle_b64"]))))
+        np.testing.assert_allclose(restored.predict_proba(X[:10])[:, 1], probs, err_msg=f"{name} reload changed predictions")
